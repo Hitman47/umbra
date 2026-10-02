@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder icon: an eclipse crescent (umbra). Safe zone = central 66dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/umbra_violet"
+        android:pathData="M54,32a22,22 0,1 0,0.01 0z" />
+    <path
+        android:fillColor="@color/umbra_black"
+        android:pathData="M61,27a20,20 0,1 0,0.01 0z" />
+</vector>
