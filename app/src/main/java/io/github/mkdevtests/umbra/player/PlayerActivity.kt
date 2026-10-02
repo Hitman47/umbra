@@ -66,7 +66,7 @@ class PlayerActivity : ComponentActivity() {
 
         val url = intent.getStringExtra(EXTRA_URL) ?: return finish()
         player = MpvPlayer(this)
-        player.play(toMpvPath(url))
+        player.play(toMpvPath(url), intent.getStringArrayListExtra(EXTRA_SUBTITLES).orEmpty())
 
         setContent {
             UmbraTheme {
@@ -96,11 +96,13 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
+        private const val EXTRA_SUBTITLES = "subtitles"
 
-        fun intent(context: Context, url: String, title: String? = null): Intent =
+        fun intent(context: Context, url: String, title: String? = null, subtitles: List<String> = emptyList()): Intent =
             Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_URL, url)
                 .putExtra(EXTRA_TITLE, title)
+                .putStringArrayListExtra(EXTRA_SUBTITLES, ArrayList(subtitles))
     }
 }
 

@@ -24,6 +24,7 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
     private val mpv = MPVLib.create(context.applicationContext)
         ?: error("libmpv could not be created")
     private var pendingFile: String? = null
+    private var externalSubtitles: List<String> = emptyList()
 
     private val _position = MutableStateFlow(0.0)
     val position: StateFlow<Double> = _position.asStateFlow()
@@ -93,9 +94,10 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
         mpv.observeProperty("sid", MpvFormat.MPV_FORMAT_STRING)
     }
 
-    /** Plays [url] as soon as a Surface is available. */
-    fun play(url: String) {
+    /** Plays [url] as soon as a Surface is available, with extra subtitle files. */
+    fun play(url: String, subtitles: List<String> = emptyList()) {
         pendingFile = url
+        externalSubtitles = subtitles
     }
 
     fun togglePause() = mpv.command(arrayOf("cycle", "pause"))
@@ -180,7 +182,12 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
     }
 
     override fun event(eventId: Int) {
-        if (eventId == MPVLib.MpvEvent.MPV_EVENT_END_FILE) Log.i(TAG, "end of file")
+        when (eventId) {
+            // mpv only finds subtitles next to local files: add the NAS ones by hand.
+            MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED ->
+                externalSubtitles.forEach { mpv.command(arrayOf("sub-add", it, "auto")) }
+            MPVLib.MpvEvent.MPV_EVENT_END_FILE -> Log.i(TAG, "end of file")
+        }
     }
 
     private fun trackLabel(type: String, id: String, off: String): String {
