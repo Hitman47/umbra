@@ -50,12 +50,16 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
         mpv.setOptionString("icc-cache-dir", cacheDir)
 
         // Render through the GPU so mpv applies its shaders: HDR / Dolby Vision
-        // tone mapping and ASS subtitles. "mediacodec-copy" keeps hardware
-        // decoding while handing frames back to the GPU renderer.
+        // tone mapping and ASS subtitles. "mediacodec" hands decoded frames to
+        // the GPU without a copy (AImageReader); "mediacodec-copy" is the
+        // fallback. At 4K the copy alone made playback stutter.
         mpv.setOptionString("vo", VO)
         mpv.setOptionString("gpu-context", "android")
         mpv.setOptionString("opengl-es", "yes")
-        mpv.setOptionString("hwdec", "mediacodec-copy")
+        mpv.setOptionString("hwdec", "mediacodec,mediacodec-copy")
+        // Cheap scalers, no dithering, no per-frame HDR peak detection:
+        // the default quality settings drop frames on 4K HDR with a tablet GPU.
+        mpv.setOptionString("profile", "fast")
         mpv.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
 
         // TrueHD / DTS are decoded in software and downmixed for the device.
