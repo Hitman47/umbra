@@ -11,10 +11,10 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** An SMB share on the NAS. [host] may carry a port ("nas.local:4450"). */
+/** SMB shares of one NAS. [host] may carry a port ("nas.local:4450"). */
 data class SmbSource(
     val host: String,
-    val share: String,
+    val shares: List<String>,
     val username: String = "",
     val password: String = "",
     val domain: String = "",
@@ -32,7 +32,8 @@ class SourceStore(context: Context) {
         val host = prefs.getString(KEY_HOST, null) ?: return null
         return SmbSource(
             host = host,
-            share = prefs.getString(KEY_SHARE, "").orEmpty(),
+            shares = prefs.getString(KEY_SHARES, null)?.split('\n')
+                ?: listOfNotNull(prefs.getString(KEY_SHARE, null)), // single-share format of v0.1
             username = prefs.getString(KEY_USER, "").orEmpty(),
             password = prefs.getString(KEY_PASSWORD, null)?.let(::decrypt).orEmpty(),
             domain = prefs.getString(KEY_DOMAIN, "").orEmpty(),
@@ -41,7 +42,8 @@ class SourceStore(context: Context) {
 
     fun save(source: SmbSource) = prefs.edit {
         putString(KEY_HOST, source.host)
-        putString(KEY_SHARE, source.share)
+        putString(KEY_SHARES, source.shares.joinToString("\n"))
+        remove(KEY_SHARE)
         putString(KEY_USER, source.username)
         putString(KEY_PASSWORD, encrypt(source.password))
         putString(KEY_DOMAIN, source.domain)
@@ -81,6 +83,7 @@ class SourceStore(context: Context) {
         const val IV_SIZE = 12
         const val KEY_HOST = "host"
         const val KEY_SHARE = "share"
+        const val KEY_SHARES = "shares"
         const val KEY_USER = "user"
         const val KEY_PASSWORD = "password"
         const val KEY_DOMAIN = "domain"

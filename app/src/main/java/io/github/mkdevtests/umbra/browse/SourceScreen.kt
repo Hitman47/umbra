@@ -43,7 +43,7 @@ fun SourceScreen(
     onCancel: (() -> Unit)?,
 ) {
     var host by rememberSaveable { mutableStateOf(initial?.host.orEmpty()) }
-    var share by rememberSaveable { mutableStateOf(initial?.share.orEmpty()) }
+    var shares by rememberSaveable { mutableStateOf(initial?.shares.orEmpty().joinToString(", ")) }
     var username by rememberSaveable { mutableStateOf(initial?.username.orEmpty()) }
     var password by remember { mutableStateOf(initial?.password.orEmpty()) }
     var connecting by remember { mutableStateOf(false) }
@@ -54,7 +54,8 @@ fun SourceScreen(
         connecting = true
         error = null
         scope.launch {
-            error = onConnect(SmbSource(host.trim(), share.trim(), username.trim(), password))
+            val names = shares.split(',', ';').map { it.trim().trim('/', '\\') }.filter { it.isNotEmpty() }.distinct()
+            error = onConnect(SmbSource(host.trim(), names, username.trim(), password))
             connecting = false
         }
     }
@@ -83,10 +84,10 @@ fun SourceScreen(
             modifier = fieldModifier,
         )
         OutlinedTextField(
-            value = share,
-            onValueChange = { share = it },
-            label = { Text("Partage") },
-            placeholder = { Text("Media") },
+            value = shares,
+            onValueChange = { shares = it },
+            label = { Text("Partages (séparés par des virgules)") },
+            placeholder = { Text("Films, Séries, Anime") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             modifier = fieldModifier,
@@ -113,7 +114,7 @@ fun SourceScreen(
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (onCancel != null) TextButton(onClick = onCancel, enabled = !connecting) { Text("Annuler") }
-            Button(onClick = ::connect, enabled = !connecting && host.isNotBlank() && share.isNotBlank()) {
+            Button(onClick = ::connect, enabled = !connecting && host.isNotBlank() && shares.isNotBlank()) {
                 if (connecting) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {

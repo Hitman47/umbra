@@ -11,7 +11,7 @@ import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.common.SMBRuntimeException
-import com.hierynomus.smbj.connection.Connection
+import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.share.File
 import java.io.Closeable
@@ -22,16 +22,18 @@ import java.net.UnknownHostException
 import java.util.EnumSet
 import java.util.concurrent.TimeUnit
 
-/** A file or folder inside the share. [path] uses "\" and is relative to the share root. */
+/** A file or folder on the NAS. [path] starts with the share name and uses "\" ("Films\Dune (2021)"). */
 data class NasEntry(val name: String, val path: String, val isDirectory: Boolean, val size: Long)
 
 /**
- * One authenticated connection to an SMB share, reopened on demand when the
- * NAS dropped it (sleep, Wi-Fi change, Tailscale reconnect).
+ * One authenticated SMB session to the NAS, with the configured shares
+ * mounted on demand. The path root ("") lists the shares themselves.
+ * Reconnects when the NAS dropped the session (sleep, Wi-Fi change,
+ * Tailscale reconnect).
  *
  * Blocking API: call from a background thread.
  */
-class SmbShare(val source: SmbSource) : Closeable {
+class SmbNas(val source: SmbSource) : Closeable {
 
     private val client = SMBClient(
         SmbConfig.builder()
@@ -41,33 +43,40 @@ class SmbShare(val source: SmbSource) : Closeable {
             .withSoTimeout(30, TimeUnit.SECONDS)
             .build(),
     )
-    private var connection: Connection? = null
-    private var share: DiskShare? = null
+    private var session: Session? = null
+    private val shares = HashMap<String, DiskShare>()
 
-    fun list(path: String): List<NasEntry> = withShare { share ->
-        share.list(path)
-            .filter { it.fileName != "." && it.fileName != ".." }
-            .filterNot { it.fileAttributes and FileAttributes.FILE_ATTRIBUTE_HIDDEN.value != 0L }
-            .map {
-                NasEntry(
-                    name = it.fileName,
-                    path = if (path.isEmpty()) it.fileName else "$path\\${it.fileName}",
-                    isDirectory = it.fileAttributes and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value != 0L,
-                    size = it.endOfFile,
-                )
-            }
+    fun list(path: String): List<NasEntry> {
+        if (path.isEmpty()) return source.shares.map { NasEntry(it, it, isDirectory = true, size = 0) }
+        val (shareName, inner) = split(path)
+        return withShare(shareName) { share ->
+            share.list(inner)
+                .filter { it.fileName != "." && it.fileName != ".." }
+                .filterNot { it.fileAttributes and FileAttributes.FILE_ATTRIBUTE_HIDDEN.value != 0L }
+                .map {
+                    NasEntry(
+                        name = it.fileName,
+                        path = "$path\\${it.fileName}",
+                        isDirectory = it.fileAttributes and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value != 0L,
+                        size = it.endOfFile,
+                    )
+                }
+        }
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */
-    fun open(path: String): File = withShare { share ->
-        share.openFile(
-            path,
-            EnumSet.of(AccessMask.GENERIC_READ),
-            null,
-            SMB2ShareAccess.ALL,
-            SMB2CreateDisposition.FILE_OPEN,
-            null,
-        )
+    fun open(path: String): File {
+        val (shareName, inner) = split(path)
+        return withShare(shareName) { share ->
+            share.openFile(
+                inner,
+                EnumSet.of(AccessMask.GENERIC_READ),
+                null,
+                SMB2ShareAccess.ALL,
+                SMB2CreateDisposition.FILE_OPEN,
+                null,
+            )
+        }
     }
 
     override fun close() {
@@ -75,9 +84,11 @@ class SmbShare(val source: SmbSource) : Closeable {
         client.close()
     }
 
-    /** Runs [block] on the live share; if a cached connection turns out dead, reconnects once. */
-    private fun <T> withShare(block: (DiskShare) -> T): T {
-        val cached = synchronized(this) { share?.takeIf { it.isConnected } }
+    private fun split(path: String) = path.substringBefore('\\') to path.substringAfter('\\', "")
+
+    /** Runs [block] on the live share; if a cached session turns out dead, reconnects once. */
+    private fun <T> withShare(name: String, block: (DiskShare) -> T): T {
+        val cached = synchronized(this) { shares[name]?.takeIf { it.isConnected } }
         if (cached != null) {
             try {
                 return block(cached)
@@ -88,12 +99,20 @@ class SmbShare(val source: SmbSource) : Closeable {
                 invalidate()
             }
         }
-        return block(connect())
+        return block(connect(name))
     }
 
     @Synchronized
-    private fun connect(): DiskShare {
-        share?.takeIf { it.isConnected }?.let { return it }
+    private fun connect(name: String): DiskShare {
+        shares[name]?.takeIf { it.isConnected }?.let { return it }
+        val session = session?.takeIf { it.connection.isConnected } ?: openSession()
+        val share = session.connectShare(name) as? DiskShare
+            ?: throw IOException("« $name » n'est pas un partage de fichiers")
+        shares[name] = share
+        return share
+    }
+
+    private fun openSession(): Session {
         val host = source.host.substringBefore(':').trim()
         val port = source.host.substringAfter(':', "").toIntOrNull() ?: SMBClient.DEFAULT_PORT
         val auth = if (source.username.isBlank()) {
@@ -101,19 +120,14 @@ class SmbShare(val source: SmbSource) : Closeable {
         } else {
             AuthenticationContext(source.username.trim(), source.password.toCharArray(), source.domain.ifBlank { null })
         }
-        val conn = client.connect(host, port).also { connection = it }
-        val session = conn.authenticate(auth)
-        val disk = session.connectShare(source.share.trim().trim('/', '\\')) as? DiskShare
-            ?: throw IOException("« ${source.share} » n'est pas un partage de fichiers")
-        share = disk
-        return disk
+        return client.connect(host, port).authenticate(auth).also { session = it }
     }
 
     @Synchronized
     private fun invalidate() {
-        runCatching { connection?.close(true) }
-        connection = null
-        share = null
+        runCatching { session?.connection?.close(true) }
+        session = null
+        shares.clear()
     }
 }
 

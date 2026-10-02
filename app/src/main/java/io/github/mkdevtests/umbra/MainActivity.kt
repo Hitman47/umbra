@@ -2,6 +2,7 @@ package io.github.mkdevtests.umbra
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,16 +12,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
-import io.github.mkdevtests.umbra.browse.BrowserScreen
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
 import io.github.mkdevtests.umbra.browse.SourceScreen
 import io.github.mkdevtests.umbra.player.PlayerActivity
+import io.github.mkdevtests.umbra.ui.library.HomeScreen
+import io.github.mkdevtests.umbra.ui.library.HomeTab
+import io.github.mkdevtests.umbra.ui.library.LibraryViewModel
+import io.github.mkdevtests.umbra.ui.library.MovieDetailScreen
+import io.github.mkdevtests.umbra.ui.library.ShowDetailScreen
 import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
 
 class MainActivity : ComponentActivity() {
@@ -37,28 +44,56 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** NAS setup until a source works, then the folder browser. */
+/** Screens stacked above the home screen. */
+private sealed interface Detail {
+    data class MovieDetail(val folder: String) : Detail
+    data class ShowDetail(val folder: String) : Detail
+}
+
+/** NAS setup until a source works, then the library. */
 @Composable
-private fun UmbraRoot(viewModel: BrowserViewModel = viewModel()) {
+private fun UmbraRoot(
+    browserViewModel: BrowserViewModel = viewModel(),
+    libraryViewModel: LibraryViewModel = viewModel(),
+) {
     val context = LocalContext.current
-    var editingSource by rememberSaveable { mutableStateOf(!viewModel.hasSource) }
+    var editingSource by rememberSaveable { mutableStateOf(!browserViewModel.hasSource) }
+    var tab by rememberSaveable { mutableStateOf(HomeTab.Movies) }
+    val stack = remember { mutableStateListOf<Detail>() }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) context.startActivity(PlayerActivity.intent(context, uri.toString(), uri.lastPathSegment))
     }
 
     if (editingSource) {
         SourceScreen(
-            initial = viewModel.source,
+            initial = browserViewModel.source,
             onConnect = { source ->
-                viewModel.connect(source).also { error -> if (error == null) editingSource = false }
+                browserViewModel.connect(source).also { error ->
+                    if (error == null) {
+                        editingSource = false
+                        libraryViewModel.onSourceChanged()
+                    }
+                }
             },
-            onCancel = if (viewModel.hasSource) ({ editingSource = false }) else null,
+            onCancel = if (browserViewModel.hasSource) ({ editingSource = false }) else null,
         )
-    } else {
-        BrowserScreen(
-            viewModel = viewModel,
-            onEditSource = { editingSource = true },
+        return
+    }
+
+    BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
+    val back = { stack.removeAt(stack.lastIndex); Unit }
+    when (val detail = stack.lastOrNull()) {
+        null -> HomeScreen(
+            libraryViewModel = libraryViewModel,
+            browserViewModel = browserViewModel,
+            tab = tab,
+            onTabChange = { tab = it },
+            onOpenMovie = { stack.add(Detail.MovieDetail(it)) },
+            onOpenShow = { stack.add(Detail.ShowDetail(it)) },
             onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
+            onEditSource = { editingSource = true },
         )
+        is Detail.MovieDetail -> libraryViewModel.movie(detail.folder)?.let { MovieDetailScreen(it, libraryViewModel, back) } ?: back()
+        is Detail.ShowDetail -> libraryViewModel.show(detail.folder)?.let { ShowDetailScreen(it, libraryViewModel, back) } ?: back()
     }
 }

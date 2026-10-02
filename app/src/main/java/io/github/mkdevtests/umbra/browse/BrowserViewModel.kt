@@ -6,7 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.mkdevtests.umbra.UmbraApp
 import io.github.mkdevtests.umbra.nas.NasEntry
-import io.github.mkdevtests.umbra.nas.SmbShare
+import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.toUserMessage
 import io.github.mkdevtests.umbra.player.PlayerActivity
@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 
 data class BrowserState(
     /** Folder shown, relative to the share root ("" = root). */
@@ -89,9 +90,18 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
      * Returns an error message, or null on success.
      */
     suspend fun connect(source: SmbSource): String? {
-        val connection = SmbShare(source)
+        val connection = SmbNas(source)
         return try {
-            withContext(Dispatchers.IO) { connection.list("") }
+            // Every share must open: catches a typo in one of the names.
+            withContext(Dispatchers.IO) {
+                source.shares.forEach { share ->
+                    try {
+                        connection.list(share)
+                    } catch (e: Exception) {
+                        throw IOException("Partage « $share » : ${e.toUserMessage()}", e)
+                    }
+                }
+            }
             umbra.useSource(source, connection)
             open("")
             null

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,33 +31,31 @@ import java.util.Locale
 
 /** Folder browser for the NAS share. */
 @Composable
-fun BrowserScreen(viewModel: BrowserViewModel, onEditSource: () -> Unit, onPickLocalFile: () -> Unit) {
+fun BrowserScreen(viewModel: BrowserViewModel) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
-    val shareName = viewModel.source?.share.orEmpty()
+    val nasName = viewModel.source?.host.orEmpty()
 
     BackHandler(enabled = state.path.isNotEmpty()) { viewModel.up() }
 
-    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (state.path.isNotEmpty()) TextButton(onClick = { viewModel.up() }) { Text("←") }
             Column(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
                 Text(
-                    text = state.path.substringAfterLast('\\').ifEmpty { shareName },
+                    text = state.path.substringAfterLast('\\').ifEmpty { nasName },
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = listOf(shareName).plus(state.path.split('\\').filter { it.isNotEmpty() }).joinToString(" › "),
+                    text = listOf(nasName).plus(state.path.split('\\').filter { it.isNotEmpty() }).joinToString(" › "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            TextButton(onClick = onPickLocalFile) { Text("Fichier local") }
-            TextButton(onClick = onEditSource) { Text("NAS") }
         }
         HorizontalDivider()
 

@@ -13,11 +13,11 @@ import java.util.concurrent.ConcurrentHashMap
  * HTTP server on 127.0.0.1 that streams NAS files to mpv.
  *
  * mpv cannot read SMB itself, but it handles HTTP with byte ranges well:
- * each seek becomes a new ranged request, served here from the SMB share.
+ * each seek becomes a new ranged request, served here from the NAS over SMB.
  * Files are exposed under random tokens, so nothing else on the device can
  * guess a URL and browse the NAS through this server.
  */
-class LocalStreamServer(private val share: () -> SmbShare?) : NanoHTTPD(HOST, 0) {
+class LocalStreamServer(private val nas: () -> SmbNas?) : NanoHTTPD(HOST, 0) {
 
     private val files = ConcurrentHashMap<String, String>()
 
@@ -34,7 +34,7 @@ class LocalStreamServer(private val share: () -> SmbShare?) : NanoHTTPD(HOST, 0)
     override fun serve(session: IHTTPSession): Response {
         val token = session.uri.trimStart('/').substringBefore('/')
         val path = files[token] ?: return text(Response.Status.NOT_FOUND, "Unknown file")
-        val smb = share() ?: return text(Response.Status.SERVICE_UNAVAILABLE, "No NAS configured")
+        val smb = nas() ?: return text(Response.Status.SERVICE_UNAVAILABLE, "No NAS configured")
 
         val file = try {
             smb.open(path)

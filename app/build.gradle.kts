@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
+
+// API tokens live in local.properties (gitignored), never in the repo.
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 base {
     // APK names: umbra-debug.apk, umbra-release-unsigned.apk
@@ -19,6 +28,9 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
+
+        buildConfigField("String", "TMDB_TOKEN", localProperty("tmdb.token"))
+        buildConfigField("String", "THETVDB_TOKEN", localProperty("thetvdb.token"))
 
         // libmpv ships 4 ABIs (~100 MB); the target tablet is arm64.
         ndk { abiFilters += "arm64-v8a" }
@@ -72,4 +84,10 @@ dependencies {
     // NAS access: SMB2/3 client + localhost HTTP server feeding mpv.
     implementation(libs.smbj)
     implementation(libs.nanohttpd)
+
+    // Metadata (TMDB) and artwork.
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 }
