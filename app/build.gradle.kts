@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val nyxaraVersion = "0.8.0"
+val nyxaraVersion = "0.8.1"
 
 base {
     // APK names: nyxara-debug.apk, nyxara-release-unsigned.apk
@@ -72,6 +72,11 @@ android {
     packaging {
         // Netty 3 (NFS client) ships these in every jar.
         resources.excludes += listOf("META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties", "META-INF/DEPENDENCIES")
+    }
+
+    testOptions {
+        // android.util.Log and the like answer nothing instead of failing the JVM tests.
+        unitTests.isReturnDefaultValues = true
     }
 
     buildFeatures {

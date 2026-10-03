@@ -82,6 +82,9 @@ class LibraryScanner(
     var offline: Set<String> = emptySet()
         private set
 
+    /** How each group of episodes got its show in the last [scan]: what Réglages › Corrections shows. */
+    val decisions = java.util.concurrent.ConcurrentLinkedQueue<MatchDecision>()
+
     /** The images found next to the videos by the last [scan]. */
     var localArt = LocalArt()
         private set
@@ -362,13 +365,14 @@ class LibraryScanner(
             val known = group.firstNotNullOfOrNull { knownShowOf[it.video.entry.path]?.takeIf { show -> show.tmdbId != null } }
                 ?.takeIf { group.first().group !in rematch }
             val name = group.groupingBy { it.show }.eachCount().maxBy { it.value }.key
-            val show = when {
-                fix != null -> fixedShow(fix, name, previousByKey)
-                known == null -> matchShow(name)
+            val (show, how) = when {
+                fix != null -> fixedShow(fix, name, previousByKey) to "correction"
+                known == null -> matchShow(name) to "recherche TMDB « ${name.title} »"
                 // Matched by an older version, without the season sizes or the credits: refresh it.
-                known.seasonEpisodes.isEmpty() || !known.hasCredits -> lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known
-                else -> known
+                known.seasonEpisodes.isEmpty() || !known.hasCredits -> (lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known) to "reconnue avant"
+                else -> known to "reconnue avant"
             }
+            decisions += MatchDecision(group.first().group, group.size, how, show.key, show.title, show.year, show.tmdbId)
             show.copy(seasons = emptyList(), folders = emptyList()) to group
         }
         // "Show" and "Show (2019)", or two folders of one show, may be the same TMDB show.

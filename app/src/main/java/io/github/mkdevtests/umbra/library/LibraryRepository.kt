@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.io.File
@@ -45,6 +46,13 @@ class LibraryRepository(private val app: NyxaraApp) {
     private val artFile = File(app.filesDir, "local-art.json")
     private val _localArt = MutableStateFlow(runCatching { Json.decodeFromString(LocalArt.serializer(), artFile.readText()) }.getOrDefault(LocalArt()))
     val localArt: StateFlow<LocalArt> = _localArt.asStateFlow()
+
+    /** How the last scan matched each group of episodes, kept for Réglages › Corrections. */
+    private val journalFile = File(app.filesDir, "match-journal.json")
+    private val _decisions = MutableStateFlow(
+        runCatching { Json.decodeFromString(ListSerializer(MatchDecision.serializer()), journalFile.readText()) }.getOrDefault(emptyList()),
+    )
+    val decisions: StateFlow<List<MatchDecision>> = _decisions.asStateFlow()
 
     /** The library as shown: NAS images in place of TMDB's where the NAS has some. */
     val library: StateFlow<Library> = combine(_library, _localArt) { library, art -> library.withLocalArt(art) }
@@ -192,6 +200,9 @@ class LibraryRepository(private val app: NyxaraApp) {
                     return@launch
                 }
                 numberings.save()
+                val journal = scanner.decisions.sortedBy { it.group.lowercase() }
+                _decisions.value = journal
+                runCatching { journalFile.writeText(Json.encodeToString(ListSerializer(MatchDecision.serializer()), journal)) }
                 // A share that didn't answer keeps its images as they were.
                 val art = scanner.localArt + _localArt.value.under(scanner.offline)
                 _localArt.value = art

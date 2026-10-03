@@ -77,6 +77,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     val matchFixes = nyxara.matchFixes.fixes
 
+    /** How the last scan matched each group of episodes. */
+    val decisions = repository.decisions
+
     /** When the library on the device was written last. */
     val savedAt = repository.savedAt
 

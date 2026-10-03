@@ -67,6 +67,7 @@ import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.Tmdb
 import io.github.mkdevtests.umbra.library.Version
 import io.github.mkdevtests.umbra.library.describeVersion
+import io.github.mkdevtests.umbra.library.groupLabel
 import io.github.mkdevtests.umbra.library.versions
 import io.github.mkdevtests.umbra.library.versionsOf
 import io.github.mkdevtests.umbra.media.MediaInfo
@@ -207,6 +208,11 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
             Column(modifier = Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 show.overview?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                 if (extras == null) Credits("Création", show.directors, show.cast)
+                // Where its files are, and which TMDB entry it is: two shows may share a title.
+                CreditLine(
+                    "Sur le NAS",
+                    (show.groups.map(::groupLabel).map { it.replace("\\", " › ") } + listOfNotNull(show.tmdbId?.let { "TMDB $it" })).joinToString(" · "),
+                )
             }
         }
         item {
