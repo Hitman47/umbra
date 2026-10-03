@@ -48,11 +48,12 @@ class LibraryRepository(private val app: UmbraApp) {
         _library.value = if (stored.version == Library.VERSION) stored.sorted() else stored.copy(scannedAt = 0)
     }
 
-    /** Titles matching what the user typed: films, shows and episodes. */
-    suspend fun search(text: String, limit: Int = 200): List<SearchHit> {
+    /** Films, shows and episodes whose title matches what the user typed, then films and shows by actor or director. */
+    suspend fun search(text: String, limit: Int = 300): SearchHits {
         loadJob.join()
-        val query = ftsQuery(text) ?: return emptyList()
-        return dao.search(query, limit)
+        val titles = ftsQuery(text, "text")?.let { dao.search(it, limit) }.orEmpty()
+        val people = ftsQuery(text, "people")?.let { dao.search(it, limit) }.orEmpty()
+        return SearchHits(titles, people)
     }
 
     /** Scans at launch if the user wants it, or when no scan of the current shares exists. */

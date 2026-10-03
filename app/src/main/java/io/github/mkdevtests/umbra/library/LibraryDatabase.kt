@@ -36,6 +36,9 @@ data class ShowRow(
     val folders: List<String>,
     @ColumnInfo(defaultValue = "[]") val duplicates: List<String>,
     @ColumnInfo(defaultValue = "[]") val groups: List<String>,
+    @ColumnInfo(defaultValue = "[]") val cast: List<String>,
+    @ColumnInfo(defaultValue = "[]") val directors: List<String>,
+    @ColumnInfo(defaultValue = "0") val hasCredits: Boolean,
 )
 
 @Entity(tableName = "seasons", primaryKeys = ["showKey", "number"])
@@ -46,9 +49,9 @@ data class SeasonRow(val showKey: String, val number: Int, val name: String?, va
 data class MetaRow(@PrimaryKey val id: Int = 0, val version: Int, val source: String, val scannedAt: Long)
 
 /**
- * Full-text index of titles, accents ignored ("age de glace" finds "L'Âge de
- * glace"). [kind] is "movie", "show" or "episode"; [ref] is the film or episode
- * file, or the show key.
+ * Full-text index, accents ignored ("age de glace" finds "L'Âge de glace"):
+ * titles in [text], actors and directors in [people]. [kind] is "movie",
+ * "show" or "episode"; [ref] is the film or episode file, or the show key.
  */
 @Fts4(tokenizer = FtsOptions.TOKENIZER_UNICODE61, notIndexed = ["kind", "ref"])
 @Entity(tableName = "search")
@@ -57,6 +60,7 @@ data class SearchRow(
     val kind: String,
     val ref: String,
     val text: String,
+    @ColumnInfo(defaultValue = "") val people: String = "",
 )
 
 data class SearchHit(val kind: String, val ref: String)
@@ -100,7 +104,7 @@ abstract class LibraryDao {
     @Query("SELECT * FROM episodes")
     abstract suspend fun episodes(): List<Episode>
 
-    /** Titles matching an FTS query ("dune*"). */
+    /** Rows matching an FTS query ("text:dune*", "people:villeneuve*"). */
     @Query("SELECT kind, ref FROM search WHERE search MATCH :query LIMIT :limit")
     abstract suspend fun search(query: String, limit: Int): List<SearchHit>
 
@@ -170,8 +174,13 @@ abstract class LibraryDao {
 
     private fun searchRows(library: Library): List<SearchRow> = buildList {
         fun text(vararg titles: String?) = titles.filterNotNull().distinct().joinToString(" ")
-        library.movies.forEach { add(SearchRow(kind = "movie", ref = it.file, text = text(it.title, it.originalTitle))) }
-        library.shows.forEach { add(SearchRow(kind = "show", ref = it.key, text = text(it.title, it.originalTitle))) }
+        fun people(directors: List<String>, cast: List<String>) = (directors + cast).distinct().joinToString(" ")
+        library.movies.forEach {
+            add(SearchRow(kind = "movie", ref = it.file, text = text(it.title, it.originalTitle), people = people(it.directors, it.cast)))
+        }
+        library.shows.forEach {
+            add(SearchRow(kind = "show", ref = it.key, text = text(it.title, it.originalTitle), people = people(it.directors, it.cast)))
+        }
         library.shows.forEach { show ->
             show.seasons.flatMap { it.episodes }.forEach { episode ->
                 episode.title?.let { add(SearchRow(kind = "episode", ref = episode.file, text = it)) }
@@ -181,17 +190,19 @@ abstract class LibraryDao {
 
     private fun Show.toRow() = ShowRow(
         key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups,
+        cast, directors, hasCredits,
     )
 
     private fun ShowRow.toShow(seasons: List<Season>) = Show(
-        key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups, seasons,
+        key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups,
+        cast, directors, hasCredits, seasons,
     )
 }
 
 @Database(
     entities = [Movie::class, ShowRow::class, SeasonRow::class, Episode::class, MetaRow::class, SearchRow::class],
-    version = 3,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    version = 4,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
 )
 @TypeConverters(Converters::class)
 abstract class LibraryDatabase : RoomDatabase() {
@@ -206,6 +217,12 @@ abstract class LibraryDatabase : RoomDatabase() {
     }
 }
 
-/** FTS query for what the user typed: every word, as a prefix ("dune par" → "dune* par*"). */
-fun ftsQuery(text: String): String? =
-    text.split(Regex("""[^\p{L}\p{N}]+""")).filter { it.isNotBlank() }.joinToString(" ") { "$it*" }.ifEmpty { null }
+/**
+ * FTS query for what the user typed: every word, as a prefix, in [column] if
+ * given ("dune par" → "dune* par*", or "text:dune* text:par*").
+ */
+fun ftsQuery(text: String, column: String? = null): String? =
+    searchWords(text).joinToString(" ") { word -> column?.let { "$it:$word*" } ?: "$word*" }.ifEmpty { null }
+
+/** The words of a search, as the index splits them. */
+fun searchWords(text: String): List<String> = text.split(Regex("""[^\p{L}\p{N}]+""")).filter { it.isNotBlank() }

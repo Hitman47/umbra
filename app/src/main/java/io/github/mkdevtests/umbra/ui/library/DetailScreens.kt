@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.github.mkdevtests.umbra.history.Progress
+import io.github.mkdevtests.umbra.history.hideKey
 import io.github.mkdevtests.umbra.home.nextUp
 import io.github.mkdevtests.umbra.home.regularEpisodes
 import io.github.mkdevtests.umbra.library.Episode
@@ -55,6 +56,8 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> U
     val context = LocalContext.current
     val history by viewModel.history.collectAsState()
     val progress = history[movie.file]
+    val hidden by viewModel.hidden.collectAsState()
+    val isHidden = movie.hideKey in hidden
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(movie.backdrop, onBack) }
         item {
@@ -77,12 +80,14 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> U
                         Text(if (progress?.watched == true) "▶  Revoir" else "▶  Lecture")
                     }
                 }
+                HideButton(isHidden) { viewModel.setHidden(movie, !isHidden) }
             }
         }
         item {
             Column(modifier = Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 movie.tagline?.let { Text(it, style = MaterialTheme.typography.titleMedium, fontStyle = FontStyle.Italic) }
                 movie.overview?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                Credits("Réalisation", movie.directors, movie.cast)
                 FileInfo(movie.file, movie.fileSize)
             }
         }
@@ -95,6 +100,8 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
     var selected by rememberSaveable(show.key) { mutableIntStateOf(show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1) }
     val season = show.seasons.firstOrNull { it.number == selected }
     val history by viewModel.history.collectAsState()
+    val hidden by viewModel.hidden.collectAsState()
+    val isHidden = show.hideKey in hidden
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(show.backdrop, onBack) }
@@ -118,11 +125,13 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
                     }
                     OutlinedButton(onClick = onFixMatch) { Text("Corriger le matching") }
                 }
+                HideButton(isHidden) { viewModel.setHidden(show, !isHidden) }
             }
         }
         item {
-            show.overview?.let {
-                Text(it, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(horizontal = 24.dp))
+            Column(modifier = Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                show.overview?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                Credits("Création", show.directors, show.cast)
             }
         }
         item {
@@ -144,6 +153,32 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
             EpisodeRow(episode, history[episode.file]) { context.startActivity(viewModel.playIntent(show, episode)) }
         }
     }
+}
+
+/** Hides the title from the lists, or shows it again. */
+@Composable
+private fun HideButton(hidden: Boolean, onClick: () -> Unit) {
+    TextButton(onClick = onClick) { Text(if (hidden) "Ne plus masquer" else "Masquer ce titre") }
+}
+
+/** "Réalisation : Denis Villeneuve", "Avec : Timothée Chalamet, Zendaya…". */
+@Composable
+private fun Credits(directorsLabel: String, directors: List<String>, cast: List<String>) {
+    if (directors.isNotEmpty()) CreditLine(directorsLabel, directors.joinToString(", "))
+    if (cast.isNotEmpty()) CreditLine("Avec", cast.take(6).joinToString(", "))
+}
+
+@Composable
+private fun CreditLine(label: String, names: String) {
+    Text(
+        androidx.compose.ui.text.buildAnnotatedString {
+            pushStyle(androidx.compose.ui.text.SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant))
+            append("$label : ")
+            pop()
+            append(names)
+        },
+        style = MaterialTheme.typography.bodyMedium,
+    )
 }
 
 /** TMDB status in French; null when TMDB doesn't say. */

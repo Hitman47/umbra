@@ -21,16 +21,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.browse.BrowserScreen
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
+import io.github.mkdevtests.umbra.history.without
 import io.github.mkdevtests.umbra.update.UpdateBanner
 import io.github.mkdevtests.umbra.update.Updater
 
-enum class HomeTab(val label: String) { Home("Accueil"), Movies("Films"), Shows("Séries"), Folders("Partages") }
+enum class HomeTab(val label: String) { Home("Accueil"), Movies("Films"), Shows("Séries"), Folders("Partages"), Search("Recherche") }
 
 @Composable
 fun HomeScreen(
@@ -44,7 +46,10 @@ fun HomeScreen(
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val library by libraryViewModel.library.collectAsState()
+    val fullLibrary by libraryViewModel.library.collectAsState()
+    val hidden by libraryViewModel.hidden.collectAsState()
+    // Hidden titles stay out of every list; the search finds them with its "Masqués" filter.
+    val library = remember(fullLibrary, hidden) { fullLibrary.without(hidden) }
     val scan by libraryViewModel.scan.collectAsState()
     val history by libraryViewModel.history.collectAsState()
 
@@ -98,7 +103,8 @@ fun HomeScreen(
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucune série trouvée.",
                 onClick = onOpenShow,
             )
-            HomeTab.Folders -> BrowserScreen(browserViewModel, library, onOpenMovie, onOpenShow)
+            HomeTab.Folders -> BrowserScreen(browserViewModel, fullLibrary, onOpenMovie, onOpenShow)
+            HomeTab.Search -> SearchScreen(fullLibrary, libraryViewModel, onOpenMovie, onOpenShow)
         }
     }
 }
@@ -113,10 +119,10 @@ private fun StatusText(text: String, isError: Boolean = false) {
     )
 }
 
-private data class PosterItem(val key: String, val title: String, val year: Int?, val poster: String?, val subtitle: String? = null)
+internal data class PosterItem(val key: String, val title: String, val year: Int?, val poster: String?, val subtitle: String? = null)
 
 @Composable
-private fun PosterGrid(items: List<PosterItem>, emptyText: String, onClick: (String) -> Unit) {
+internal fun PosterGrid(items: List<PosterItem>, emptyText: String, onClick: (String) -> Unit) {
     if (items.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)

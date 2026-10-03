@@ -11,6 +11,7 @@ import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.SourceStore
 import io.github.mkdevtests.umbra.settings.SettingsStore
+import io.github.mkdevtests.umbra.history.HiddenTitles
 import io.github.mkdevtests.umbra.history.HistoryDatabase
 import io.github.mkdevtests.umbra.history.MatchFixes
 import io.github.mkdevtests.umbra.history.WatchHistory
@@ -42,6 +43,7 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
     val history by lazy { WatchHistory(userData.dao()) }
 
     val matchFixes by lazy { MatchFixes(userData.matchFixes()) }
+    val hidden by lazy { HiddenTitles(userData.hidden()) }
 
     override fun onCreate() {
         super.onCreate()

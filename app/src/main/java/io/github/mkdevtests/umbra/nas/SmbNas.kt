@@ -194,6 +194,9 @@ class SmbNas(val source: SmbSource) : Closeable {
 }
 
 /** Short French message for errors shown to the user. */
+/** The NAS answered with an error (rights, missing folder), as opposed to not answering. */
+fun Throwable.isRefusedByNas(): Boolean = generateSequence(this) { it.cause }.any { it is com.hierynomus.mssmb2.SMBApiException }
+
 fun Throwable.toUserMessage(): String {
     val text = generateSequence(this) { it.cause }.joinToString(" ") { "${it.javaClass.simpleName} ${it.message}" }
     return when {

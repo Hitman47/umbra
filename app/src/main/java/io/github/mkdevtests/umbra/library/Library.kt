@@ -24,8 +24,9 @@ data class Library(
         /**
          * 2: films found by file name anywhere in the shares, shows keyed by [Show.key].
          * 3: episodes from "Show\Saison N" folders, show and film folders for the share browser.
+         * 4: actors and directors, for the search.
          */
-        const val VERSION = 3
+        const val VERSION = 4
     }
 }
 
@@ -53,6 +54,11 @@ data class Movie(
     val folder: String? = null,
     /** Smaller copies of the film (another quality, another folder): hidden, but known to the next scan. */
     @ColumnInfo(defaultValue = "[]") val copies: List<FileCopy> = emptyList(),
+    /** Leads, in billing order. */
+    @ColumnInfo(defaultValue = "[]") val cast: List<String> = emptyList(),
+    @ColumnInfo(defaultValue = "[]") val directors: List<String> = emptyList(),
+    /** False for a film matched before credits were fetched: the next scan looks it up again. */
+    @ColumnInfo(defaultValue = "0") val hasCredits: Boolean = false,
 )
 
 @Serializable
@@ -81,6 +87,10 @@ data class Show(
     val duplicates: List<String> = emptyList(),
     /** The scanner's groups of episode files ("folder:…", "title:…"): what a match correction applies to. */
     val groups: List<String> = emptyList(),
+    val cast: List<String> = emptyList(),
+    /** The show's creators. */
+    val directors: List<String> = emptyList(),
+    val hasCredits: Boolean = false,
     val seasons: List<Season> = emptyList(),
 )
 

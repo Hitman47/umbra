@@ -13,6 +13,11 @@ import io.github.mkdevtests.umbra.library.ScanState
 import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.player.PlayItem
 import io.github.mkdevtests.umbra.player.PlayerActivity
+import io.github.mkdevtests.umbra.history.hideKey
+import io.github.mkdevtests.umbra.library.Found
+import io.github.mkdevtests.umbra.library.SearchFilters
+import io.github.mkdevtests.umbra.library.searchResults
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
@@ -23,6 +28,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     val library: StateFlow<Library> = repository.library
     val scan: StateFlow<ScanState> = repository.scan
     val history: StateFlow<Map<String, Progress>> = umbra.history.progress
+    val hidden: StateFlow<Set<String>> = umbra.hidden.keys
+
+    /** The search tab's state, kept while a title opened from it is on screen. */
+    val searchQuery = MutableStateFlow("")
+    val searchFilters = MutableStateFlow(SearchFilters())
 
     init {
         repository.scanIfNeeded()
@@ -43,6 +53,15 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Called once a new NAS source is connected. */
     fun onSourceChanged() = repository.startScan()
+
+    suspend fun search(query: String, filters: SearchFilters): List<Found> {
+        val hits = if (query.isBlank()) null else repository.search(query)
+        return searchResults(library.value, hidden.value, query, hits, filters)
+    }
+
+    fun setHidden(movie: Movie, hidden: Boolean) = umbra.hidden.setHidden(movie.hideKey, hidden)
+
+    fun setHidden(show: Show, hidden: Boolean) = umbra.hidden.setHidden(show.hideKey, hidden)
 
     fun movie(file: String): Movie? = library.value.movies.firstOrNull { it.file == file }
 

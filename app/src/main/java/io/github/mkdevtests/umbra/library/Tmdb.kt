@@ -62,14 +62,14 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
     }
 
     suspend fun movie(id: Int): TmdbMovie {
-        val movie = get("movie/$id", TmdbMovie.serializer())
+        val movie = get("movie/$id", TmdbMovie.serializer(), "append_to_response" to "credits")
         if (!movie.overview.isNullOrBlank()) return movie
         // Many films have no French synopsis: fall back to English.
         return movie.copy(overview = get("movie/$id", TmdbMovie.serializer(), "language" to "en-US").overview)
     }
 
     suspend fun show(id: Int): TmdbShow {
-        val show = get("tv/$id", TmdbShow.serializer())
+        val show = get("tv/$id", TmdbShow.serializer(), "append_to_response" to "credits")
         if (!show.overview.isNullOrBlank()) return show
         return show.copy(overview = get("tv/$id", TmdbShow.serializer(), "language" to "en-US").overview)
     }
@@ -174,7 +174,17 @@ data class TmdbMovie(
     val runtime: Int? = null,
     val genres: List<TmdbGenre> = emptyList(),
     @SerialName("vote_average") val voteAverage: Double? = null,
+    val credits: TmdbCredits? = null,
 )
+
+@Serializable
+data class TmdbCredits(val cast: List<TmdbPerson> = emptyList(), val crew: List<TmdbPerson> = emptyList()) {
+    /** Billing order: the leads first. */
+    fun actors(count: Int = 10) = cast.map { it.name }.distinct().take(count)
+}
+
+@Serializable
+data class TmdbPerson(val name: String, val job: String? = null)
 
 @Serializable
 data class TmdbShow(
@@ -189,6 +199,8 @@ data class TmdbShow(
     @SerialName("vote_average") val voteAverage: Double? = null,
     val status: String? = null,
     val seasons: List<TmdbSeasonSummary> = emptyList(),
+    @SerialName("created_by") val createdBy: List<TmdbPerson> = emptyList(),
+    val credits: TmdbCredits? = null,
 )
 
 @Serializable

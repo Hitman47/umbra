@@ -55,14 +55,16 @@ interface ProgressDao {
  * Never migrated destructively.
  */
 @Database(
-    entities = [Progress::class, MatchFix::class],
-    version = 2,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    entities = [Progress::class, MatchFix::class, HiddenTitle::class],
+    version = 3,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class HistoryDatabase : RoomDatabase() {
     abstract fun dao(): ProgressDao
 
     abstract fun matchFixes(): MatchFixDao
+
+    abstract fun hidden(): HiddenTitleDao
 
     companion object {
         fun open(context: Context): HistoryDatabase =

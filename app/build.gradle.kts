@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val umbraVersion = "0.2.3"
+val umbraVersion = "0.2.4"
 
 base {
     // APK names: umbra-debug.apk, umbra-release-unsigned.apk

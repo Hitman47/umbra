@@ -7,11 +7,13 @@ import io.github.mkdevtests.umbra.browse.subtitlesFor
 import io.github.mkdevtests.umbra.history.MatchFix
 import io.github.mkdevtests.umbra.nas.NasEntry
 import io.github.mkdevtests.umbra.nas.SmbNas
+import io.github.mkdevtests.umbra.nas.isRefusedByNas
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -40,6 +42,9 @@ private val EXTRA_FILE = Regex("""(?i)sample|trailer|(?<![a-z])bonus(?![a-z])"""
 
 /** Deep enough for "Share\Séries\Drame\Show\Saison 1", shallow enough to stop on loops. */
 private const val MAX_DEPTH = 8
+
+/** Tries before a listing that times out fails the scan. */
+private const val LIST_ATTEMPTS = 3
 
 /**
  * Builds the library like Infuse: walks every selected share, whatever the
@@ -120,16 +125,7 @@ class LibraryScanner(
 
         fun visit(path: String, names: List<String>) {
             launch(Dispatchers.IO) {
-                val entries = listings.withPermit {
-                    try {
-                        list(path)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.w(TAG, "cannot list $path", e)
-                        emptyList()
-                    }
-                }
+                val entries = listings.withPermit { listOrSkip(path) }
                 entries.filter { it.isVideo && !it.isExtra() }.forEach { video ->
                     found += VideoFile(video, names, subtitlesFor(video, entries).map { it.path })
                 }
@@ -143,6 +139,30 @@ class LibraryScanner(
         list("").forEach { share -> visit(share.path, emptyList()) }
         found
     }.toList()
+
+    /**
+     * [path]'s entries, or none for a folder the NAS refuses (rights). A NAS
+     * that stops answering fails the scan instead, after a few tries: a scan
+     * missing whole folders would drop their titles from the library.
+     */
+    private suspend fun listOrSkip(path: String): List<NasEntry> {
+        repeat(LIST_ATTEMPTS) { attempt ->
+            try {
+                return list(path)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (e.isRefusedByNas()) {
+                    Log.w(TAG, "cannot list $path", e)
+                    return emptyList()
+                }
+                Log.w(TAG, "cannot list $path, attempt ${attempt + 1}", e)
+                if (attempt == LIST_ATTEMPTS - 1) throw IOException("Le NAS ne répond plus (${path.substringAfterLast('\\')}) : bibliothèque inchangée.", e)
+                delay(2_000L * (attempt + 1))
+            }
+        }
+        error("unreachable")
+    }
 
     /** Number of videos under each folder, at any depth ("Films\Drame" → 212). Share roots are left out. */
     private fun videoCounts(videos: List<VideoFile>): Map<String, Int> {
@@ -213,6 +233,8 @@ class LibraryScanner(
         val movies = forEachParallel(groups, "Films") { group ->
             val name = names.getValue(group.first())
             val template = group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> movie.tmdbId != null } }
+                // Matched before credits were fetched: refresh it.
+                ?.let { movie -> if (movie.hasCredits) movie else lookup("film ${movie.title}") { tmdb.movie(movie.tmdbId!!).toMovie(name) } ?: movie }
                 // Unchanged since TMDB found nothing for it: don't ask again.
                 ?: group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> unchanged(movie.fileSize, movie.modified, it.entry) } }
                 ?: lookup("film ${group.first().entry.name}") {
@@ -272,6 +294,9 @@ class LibraryScanner(
         runtime = runtime?.takeIf { it > 0 },
         genres = genres.map { it.name },
         rating = voteAverage?.takeIf { it > 0 },
+        cast = credits?.actors().orEmpty(),
+        directors = credits?.crew.orEmpty().filter { it.job == "Director" }.map { it.name }.distinct(),
+        hasCredits = credits != null,
     )
 
     // --- Shows ---
@@ -292,8 +317,8 @@ class LibraryScanner(
             val show = when {
                 fix != null -> fixedShow(fix, name, previousByKey)
                 known == null -> matchShow(name)
-                // Matched by an older version, without the season sizes: refresh it.
-                known.seasonEpisodes.isEmpty() -> lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known
+                // Matched by an older version, without the season sizes or the credits: refresh it.
+                known.seasonEpisodes.isEmpty() || !known.hasCredits -> lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known
                 else -> known
             }
             show.copy(seasons = emptyList(), folders = emptyList()) to group
@@ -389,7 +414,7 @@ class LibraryScanner(
     /** The show the user chose; reuses the last scan's details when it had them. */
     private suspend fun fixedShow(fix: MatchFix, name: ParsedName, previous: Map<String, Show>): Show {
         val id = fix.tmdbId ?: return Show(key = "title:${normalizeTitle(name.title)}", title = name.title, year = name.year)
-        previous["tmdb:$id"]?.takeIf { it.seasonEpisodes.isNotEmpty() }?.let { return it }
+        previous["tmdb:$id"]?.takeIf { it.seasonEpisodes.isNotEmpty() && it.hasCredits }?.let { return it }
         return lookup("série $id") { tmdb.show(id).toShow(name) }
             ?: Show(key = "tmdb:$id", tmdbId = id, title = name.title, year = name.year) // retried by the next scan
     }
@@ -414,6 +439,9 @@ class LibraryScanner(
         rating = voteAverage?.takeIf { it > 0 },
         status = status,
         seasonEpisodes = seasons.associate { it.number to it.episodeCount },
+        cast = credits?.actors().orEmpty(),
+        directors = createdBy.map { it.name }.distinct(),
+        hasCredits = credits != null,
     )
 
     private suspend fun withSeasonDetails(showId: Int, season: Season): Season {
