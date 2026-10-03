@@ -69,6 +69,7 @@ import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -165,18 +166,31 @@ class PlayerActivity : ComponentActivity() {
 
         fun start() {
             if (state == "playing") return
+            // A pause shorter than the delay never reaches Trakt.
+            if (pendingPause?.isActive == true) {
+                pendingPause?.cancel()
+                state = "playing"
+                return
+            }
             state = "playing"
             send(TraktEndpoint.ScrobbleStart)
         }
 
+        /** Leaving the player pauses it just before it stops: only the stop is sent then. */
+        private var pendingPause: Job? = null
+
         fun pause() {
             if (state != "playing") return
             state = "paused"
-            send(TraktEndpoint.ScrobblePause)
+            pendingPause = lifecycleScope.launch {
+                delay(1_500)
+                send(TraktEndpoint.ScrobblePause)
+            }
         }
 
         fun stop() {
             if (state != "playing" && state != "paused") return
+            pendingPause?.cancel()
             send(TraktEndpoint.ScrobbleStop)
             state = "idle"
         }

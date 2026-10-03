@@ -112,7 +112,21 @@ class Trakt(private val context: Context, private val api: TraktApi) {
             runCatching { if (cacheFile.exists()) _data.value = json.decodeFromString(TraktData.serializer(), cacheFile.readText()) }
                 .onFailure { Log.w(TAG, "trakt cache unreadable", it) }
         }
-        scope.launch { for (send in scrobbles) runCatching { send() }.onFailure { Log.w(TAG, "scrobble failed: ${it.message}") } }
+        scope.launch {
+            for (send in scrobbles) {
+                // The network can drop for a few seconds (VPN DNS): retry, in order, before giving up.
+                for (attempt in 1..SCROBBLE_ATTEMPTS) {
+                    val result = runCatching { send() }
+                    val error = result.exceptionOrNull() ?: break
+                    val offline = error is java.io.IOException && error !is TraktHttpException
+                    if (!offline || attempt == SCROBBLE_ATTEMPTS) {
+                        Log.w(TAG, "scrobble failed: ${error.message}")
+                        break
+                    }
+                    delay(5_000L * attempt)
+                }
+            }
+        }
     }
 
     /** Starts the device code flow: the code to enter shows in [status] until the user approves it. */
@@ -279,8 +293,10 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                 else -> return@trySend
             }
             try {
-                api.scrobble(endpoint, token, body)
-                Log.i(TAG, "${endpoint.name} ${target.label} at ${percent.toInt()} %")
+                val answer = api.scrobble(endpoint, token, body)
+                // What Trakt understood: action, progress and the episode or film it matched.
+                val what = listOf("action", "progress", "movie", "show", "episode").mapNotNull { key -> answer[key]?.let { "$key=$it" } }
+                Log.i(TAG, "${endpoint.name} ${target.label} at ${percent.toInt()} % → ${what.joinToString(" ").take(600)}")
             } catch (e: TraktHttpException) {
                 if (e.code != 409) throw e // 409: just scrobbled, Trakt keeps the first one
             }
@@ -341,6 +357,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
 
     private companion object {
         const val TAG = "Trakt"
+        const val SCROBBLE_ATTEMPTS = 4
         const val KEY_ACCESS = "access_token"
         const val KEY_REFRESH = "refresh_token"
         const val KEY_EXPIRES = "expires_at"

@@ -8,6 +8,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import android.util.Log
 import okhttp3.Headers
 import okhttp3.MediaType.Companion.toMediaType
@@ -129,9 +130,9 @@ class TraktApi(
     )
 
     /** [endpoint] is one of the scrobbles; [body] says what is played and how far. */
-    suspend fun scrobble(endpoint: TraktEndpoint, token: String, body: TraktScrobble) {
+    suspend fun scrobble(endpoint: TraktEndpoint, token: String, body: TraktScrobble): JsonObject {
         require(endpoint in SCROBBLES)
-        call<Unit>(endpoint, token = token, body = json.encodeToString(TraktScrobble.serializer(), body), result = null)
+        return call(endpoint, token = token, body = json.encodeToString(TraktScrobble.serializer(), body), result = JsonObject.serializer())
     }
 
     private suspend fun <T> call(
