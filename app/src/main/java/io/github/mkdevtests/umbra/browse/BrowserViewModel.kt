@@ -110,7 +110,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
     private fun list(nas: NasRouter, path: String): List<NasEntry> = when {
         path.isEmpty() && nas.sources.size > 1 -> nas.sources.map { NasEntry(it.label, SOURCE_FOLDER + it.id, isDirectory = true, size = 0) }
         path.startsWith(SOURCE_FOLDER) -> nas.sources.firstOrNull { SOURCE_FOLDER + it.id == path }
-            ?.let { source -> nas.rootsOf(source).map { NasEntry(it, it, isDirectory = true, size = 0) } }
+            ?.let { source -> nas.libraryRootsOf(source).map { NasEntry(it, it, isDirectory = true, size = 0) } }
             .orEmpty()
         else -> nas.list(path)
     }
@@ -190,7 +190,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
             .sortedWith { a, b -> naturalCompare(a.name, b.name) }
     }
 
-    fun rootsOf(source: NasSource): List<String> = nyxara.nas?.rootsOf(source).orEmpty()
+    fun rootsOf(source: NasSource): List<String> = nyxara.nas?.libraryRootsOf(source).orEmpty()
 
     /** Takes [folder] back into [source]. */
     fun include(source: NasSource, folder: String) {

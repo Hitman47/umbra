@@ -54,6 +54,14 @@ class PersoViewModel(app: Application) : AndroidViewModel(app) {
         .map { sources -> sources.flatMap { it.personal }.sortedWith { a, b -> naturalCompare(a.substringAfterLast('\\'), b.substringAfterLast('\\')) } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    private val _sort = MutableStateFlow(PersoSort.entries.firstOrNull { it.name.lowercase() == store.sort } ?: PersoSort.Name)
+    val sort: StateFlow<PersoSort> = _sort.asStateFlow()
+
+    fun sortBy(sort: PersoSort) {
+        _sort.value = sort
+        store.sort = sort.name.lowercase()
+    }
+
     private val _state = MutableStateFlow(PersoState())
     val state: StateFlow<PersoState> = _state.asStateFlow()
 
@@ -104,22 +112,71 @@ class PersoViewModel(app: Application) : AndroidViewModel(app) {
     fun playDownloaded(path: String): Intent =
         PlayerActivity.persoIntent(getApplication(), path.substringBeforeLast('\\'), shuffle = false, start = path, only = true)
 
-    fun add(path: String) = nyxara.addPersonal(path)
-
     fun remove(path: String, exclude: Boolean) {
         nyxara.removePersonal(path, exclude)
         if (_state.value.path.within(path)) open("")
     }
 
-    /** The folders below [path] for the folder picker ("" lists the shares), excluded and Perso ones included. */
-    suspend fun pickerFolders(path: String): List<NasEntry> = withContext(Dispatchers.IO) {
+    /** The NAS of the picker. */
+    val pickerSources get() = nyxara.nas?.sources.orEmpty()
+
+    /**
+     * What the folder picker shows at [place]: the NAS, then all the shares
+     * the NAS offers (those the library doesn't read too), then their folders.
+     */
+    suspend fun pick(place: PickPlace): List<PickItem> = withContext(Dispatchers.IO) {
         val nas = nyxara.nas ?: return@withContext emptyList()
-        runCatching { nas.list(path, withExcluded = true, withPersonal = true) }.getOrDefault(emptyList())
-            .filter { it.isDirectory }
-            .let(::sortForDisplay)
+        val source = place.source ?: nas.sources.singleOrNull()
+            ?: return@withContext nas.sources.map { PickItem(it.label, PickPlace(it), null) }
+        val client = nas.connections.firstOrNull { it.source.id == source.id } ?: return@withContext emptyList()
+        if (place.share == null) {
+            val offered = runCatching { client.availableShares() }.getOrNull().orEmpty()
+            val shares = (offered + source.shares).distinctBy { it.lowercase() }.sortedWith { a, b -> naturalCompare(a, b) }
+            return@withContext shares.map { share ->
+                val followed = source.shares.firstOrNull { it.equals(share, ignoreCase = true) }
+                val tag = when {
+                    followed == null -> null
+                    source.isPersonal(source.rootOf(followed)) -> "Perso"
+                    else -> "Bibliothèque"
+                }
+                PickItem(share, PickPlace(source, share), tag)
+            }
+        }
+        val share = place.share
+        val listing = runCatching { client.list(if (place.sub.isEmpty()) share else "$share\\${place.sub}") }.getOrDefault(emptyList())
+        val root = source.shares.firstOrNull { it.equals(share, ignoreCase = true) }?.let(source::rootOf)
+        sortForDisplay(listing).filter { it.isDirectory }.map { entry ->
+            val sub = if (place.sub.isEmpty()) entry.name else "${place.sub}\\${entry.name}"
+            val path = root?.let { "$it\\$sub" }
+            val tag = when {
+                path == null -> null
+                source.isPersonal(path) -> "Perso"
+                source.isExcluded(path) -> "Exclu"
+                else -> null
+            }
+            PickItem(entry.name, PickPlace(source, share, sub), tag)
+        }
     }
 
-    fun isPersonal(path: String) = nyxara.nas?.isPersonal(path) == true
+    /** [place] is in Perso already. */
+    fun isPersonal(place: PickPlace): Boolean {
+        val source = place.source ?: return false
+        val share = source.shares.firstOrNull { it.equals(place.share, ignoreCase = true) } ?: return false
+        val root = source.rootOf(share)
+        return source.isPersonal(if (place.sub.isEmpty()) root else "$root\\${place.sub}")
+    }
+
+    fun add(place: PickPlace) {
+        val source = place.source ?: return
+        nyxara.addPersonal(source.id, place.share ?: return, place.sub)
+    }
+
+    /** "Zima salon · Partage Clips" for a whole share, its parent folders for a folder. */
+    fun folderDetail(path: String): String {
+        val source = nyxara.nas?.sourceOf(path)
+        return if ('\\' in path) path.substringBeforeLast('\\').replace("\\", " › ")
+        else listOfNotNull(source?.label?.takeIf { pickerSources.size > 1 }, "Partage entier").joinToString(" · ")
+    }
 
     fun download(entry: NasEntry) {
         val subtitles = subtitlesFor(entry, listing).map { it.path }
@@ -129,4 +186,23 @@ class PersoViewModel(app: Application) : AndroidViewModel(app) {
     fun removeDownload(path: String) = nyxara.downloads.remove(persoDownloadKey(path))
 
     fun forget(path: String) = store.forget(listOf(path))
+}
+
+/** A place of the Perso folder picker: a NAS, one of its shares, a folder of it ([sub], "" for the share). */
+data class PickPlace(val source: io.github.mkdevtests.umbra.nas.NasSource? = null, val share: String? = null, val sub: String = "")
+
+/** A line of the picker; [tag]: "Bibliothèque", "Perso", "Exclu", or none (not used yet). */
+data class PickItem(val label: String, val place: PickPlace, val tag: String?)
+
+/** How the Perso videos are listed; folders stay first, by name. */
+enum class PersoSort(val label: String) { Name("Nom"), Date("Récents"), Size("Taille") }
+
+/** [entries] in [sort]'s order: folders first, then the videos. */
+fun sortedFor(entries: List<NasEntry>, sort: PersoSort): List<NasEntry> {
+    val (folders, videos) = entries.partition { it.isDirectory }
+    return folders + when (sort) {
+        PersoSort.Name -> videos
+        PersoSort.Date -> videos.sortedByDescending { it.modified }
+        PersoSort.Size -> videos.sortedByDescending { it.size }
+    }
 }

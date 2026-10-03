@@ -106,11 +106,33 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     /** Played in order, after the screen that sent them is gone. */
     private val scrobbles = Channel<Scrobble>(Channel.UNLIMITED)
 
-    /** A write to Trakt; [keep]: worth sending again later if the network fails (a film or episode watched). */
-    private class Scrobble(val keep: Boolean, val run: suspend () -> Unit)
+    /** A write to Trakt; [mark]: kept on the device if the network fails (a film or episode watched). */
+    private class Scrobble(val mark: PendingMark?, val run: suspend () -> Unit)
 
-    /** Watched marks Trakt couldn't get: sent again after the next sync that reaches it. */
-    private val later = mutableListOf<Scrobble>()
+    /**
+     * Watched marks Trakt couldn't get, kept on the device (the app may be
+     * closed meanwhile): sent after the next sync that reaches Trakt, each
+     * dropped once Trakt has it, so none is sent twice.
+     */
+    private val pending = MutableStateFlow(
+        runCatching { json.decodeFromString<List<PendingMark>>(prefs.getString(KEY_PENDING, null) ?: "[]") }.getOrDefault(emptyList()),
+    )
+
+    private fun keepPending(marks: List<PendingMark>) = savePending { (it + marks).distinctBy(PendingMark::target) }
+
+    private fun savePending(change: (List<PendingMark>) -> List<PendingMark>) {
+        pending.update(change)
+        prefs.edit { putString(KEY_PENDING, json.encodeToString(pending.value)) }
+    }
+
+    private suspend fun sendPending() {
+        val token = accessToken() ?: return
+        for (mark in pending.value) {
+            send(TraktEndpoint.ScrobbleStop, token, mark.target, mark.percent)
+            savePending { list -> list.filter { it != mark } }
+            delay(1_100) // Trakt's limit: one write a second
+        }
+    }
     private val showIds = HashMap<Int, Int?>()
     private val episodeIds = HashMap<String, Int?>()
     /** False while Android blocks Nyxara's network: no network, or battery saver with Nyxara in the background. */
@@ -145,7 +167,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                     if (!offline || attempt == SCROBBLE_ATTEMPTS) {
                         Log.w(TAG, "scrobble failed: ${error.message}")
                         // Still no network (Nyxara in the background, battery saver): a watched mark waits for the next sync.
-                        if (offline && send.keep) synchronized(later) { later += send }
+                        if (offline) send.mark?.let { keepPending(listOf(it)) }
                         break
                     }
                     delay(3_000L * attempt)
@@ -222,7 +244,8 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     /** Forgets the account on this tablet. Nothing changes on Trakt. */
     fun disconnect() {
         connectJob?.cancel()
-        prefs.edit { remove(KEY_ACCESS); remove(KEY_REFRESH); remove(KEY_EXPIRES); remove(KEY_LAST_SYNC) }
+        prefs.edit { remove(KEY_ACCESS); remove(KEY_REFRESH); remove(KEY_EXPIRES); remove(KEY_LAST_SYNC); remove(KEY_PENDING) }
+        pending.value = emptyList()
         _data.value = TraktData()
         cacheFile.delete()
         _status.update { TraktStatus(configured = it.configured, scrobble = it.scrobble) }
@@ -270,7 +293,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                 }
             }
             // Through: the watched marks that couldn't go before.
-            synchronized(later) { later.toList().also { later.clear() } }.forEach { scrobbles.trySend(it) }
+            if (pending.value.isNotEmpty()) scrobbles.trySend(Scrobble(null, ::sendPending))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -361,7 +384,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
         if (endpoint == TraktEndpoint.ScrobbleStop && percent < 1) return
         // A stop past 80 % marks it watched on Trakt: kept for later when the network fails.
         scrobbles.trySend(
-            Scrobble(keep = endpoint == TraktEndpoint.ScrobbleStop && percent >= 80) {
+            Scrobble(PendingMark(target, percent).takeIf { endpoint == TraktEndpoint.ScrobbleStop && percent >= 80 }) {
                 val token = accessToken() ?: return@Scrobble
                 send(endpoint, token, target, percent)
                 if (endpoint == TraktEndpoint.ScrobbleStop) {
@@ -381,7 +404,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
         val status = _status.value
         if (!status.connected || !status.scrobble || targets.isEmpty()) return
         scrobbles.trySend(
-            Scrobble(keep = false) {
+            Scrobble(null) {
                 val token = accessToken() ?: return@Scrobble
                 val missed = targets.filter { target ->
                     val failure = runCatching { send(TraktEndpoint.ScrobbleStop, token, target, 100.0) }.exceptionOrNull()
@@ -390,18 +413,10 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                     failure?.isNetwork() == true
                 }
                 // No network: marked once Trakt answers again.
-                if (missed.isNotEmpty()) synchronized(later) { later += Scrobble(keep = true) { markAgain(missed) } }
+                if (missed.isNotEmpty()) keepPending(missed.map { PendingMark(it, 100.0) })
                 syncNow(force = false)
             },
         )
-    }
-
-    private suspend fun markAgain(targets: List<TraktTarget>) {
-        val token = accessToken() ?: return
-        targets.forEach { target ->
-            send(TraktEndpoint.ScrobbleStop, token, target, 100.0)
-            delay(1_100)
-        }
     }
 
     private suspend fun send(endpoint: TraktEndpoint, token: String, target: TraktTarget, percent: Double) {
@@ -485,8 +500,13 @@ class Trakt(private val context: Context, private val api: TraktApi) {
         const val KEY_EXPIRES = "expires_at"
         const val KEY_SCROBBLE = "scrobble"
         const val KEY_LAST_SYNC = "last_sync"
+        const val KEY_PENDING = "pending_marks"
     }
 }
+
+/** A watched mark waiting for the network: a scrobble stop at [percent]. */
+@Serializable
+data class PendingMark(val target: TraktTarget, val percent: Double)
 
 /** What a played file is on Trakt: a film by its TMDB id, or an episode by its show's TMDB id and TMDB numbers. */
 @Serializable

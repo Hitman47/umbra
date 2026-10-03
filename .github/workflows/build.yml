@@ -11,14 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Gradle settings for Linux
         # gradle.properties trusts the Windows certificate store (needed on the PC behind an antivirus): not here.
@@ -31,13 +31,13 @@ jobs:
 
       - name: Test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports
           path: app/build/reports/tests/
 
       - name: Debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nyxara-debug
           path: app/build/outputs/apk/debug/*.apk

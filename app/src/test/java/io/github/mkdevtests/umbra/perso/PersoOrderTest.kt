@@ -1,6 +1,8 @@
 package io.github.mkdevtests.umbra.perso
 
+import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.NasSource
+import io.github.mkdevtests.umbra.nas.SmbNas
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -79,5 +81,15 @@ class PersoOrderTest {
         // Excluded around it, readable in it.
         assertTrue(source.isExcluded("Media\\Divers\\autre.mkv"))
         assertFalse(source.isExcluded("Media\\Divers\\Clips\\a.mp4"))
+    }
+
+    @Test
+    fun a_share_given_whole_to_perso_leaves_the_library_roots() {
+        val source = NasSource("nas", listOf("Films", "Clips"), id = "a", personal = listOf("Clips"))
+        val router = NasRouter(listOf(SmbNas(source)))
+        assertEquals(listOf("Films"), router.list("").map { it.path })
+        assertEquals(listOf("Clips", "Films"), router.list("", withPersonal = true).map { it.path })
+        assertEquals(listOf("Films"), router.libraryRootsOf(source))
+        assertTrue(router.isPersonal("Clips\\2024\\a.mp4"))
     }
 }

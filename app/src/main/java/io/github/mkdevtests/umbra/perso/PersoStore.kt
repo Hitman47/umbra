@@ -134,6 +134,11 @@ class PersoStore(context: Context, private val scope: CoroutineScope) {
 
     val isOpen get() = !lock.value.enabled || _unlocked.value
 
+    /** The order of the tab's videos, kept from one launch to the next. */
+    var sort: String
+        get() = prefs.getString(SORT, null) ?: "name"
+        set(value) = prefs.edit { putString(SORT, value) }
+
     private fun hash(salt: String, pin: String) =
         MessageDigest.getInstance("SHA-256").digest("$salt:$pin".toByteArray()).joinToString("") { "%02x".format(it) }
 
@@ -142,5 +147,6 @@ class PersoStore(context: Context, private val scope: CoroutineScope) {
         const val PIN = "pin"
         const val SALT = "salt"
         const val FINGERPRINT = "fingerprint"
+        const val SORT = "sort"
     }
 }

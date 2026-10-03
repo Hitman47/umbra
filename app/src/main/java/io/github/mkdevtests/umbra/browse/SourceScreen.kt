@@ -95,13 +95,16 @@ fun SourceScreen(
         }
     }
 
+    val persoShares = initial?.let { source -> source.shares.filter { source.isPersonal(source.rootOf(it)) } }.orEmpty()
+
     fun connect() {
         busy = true
         error = null
         scope.launch {
             // The id, root names and excluded folders of an edited source are kept: its titles and history stay its own.
+            // Shares given whole to Perso stay, chosen there, not here.
             val source = NasSource(
-                host.trim(), shares.filter { it in selected }, username.trim(), password, initial?.domain.orEmpty(),
+                host.trim(), (shares.filter { it in selected } + persoShares).distinct(), username.trim(), password, initial?.domain.orEmpty(),
                 id = initial?.id.orEmpty(), name = name.trim(), roots = initial?.roots.orEmpty(), excluded = initial?.excluded.orEmpty(),
                 personal = initial?.personal.orEmpty(),
                 protocol = protocol,
@@ -226,7 +229,7 @@ fun SourceScreen(
                     modifier = width,
                 )
                 Column(modifier = width) {
-                    shares.forEach { share ->
+                    shares.filterNot { it in persoShares }.forEach { share ->
                         val checked = share in selected
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

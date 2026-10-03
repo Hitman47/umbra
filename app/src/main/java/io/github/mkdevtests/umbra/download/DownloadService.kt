@@ -119,7 +119,9 @@ class DownloadService : Service() {
     }
 
     private fun notify(download: Download) {
-        getSystemService(NotificationManager::class.java)?.notify(ID, notification(download.title, download))
+        // A Perso video stays behind the tab's lock: no name on the notification.
+        val title = if (download.key.startsWith("perso:")) "vidéo Perso" else download.title
+        getSystemService(NotificationManager::class.java)?.notify(ID, notification(title, download))
     }
 
     private fun notification(title: String, download: Download?): Notification {

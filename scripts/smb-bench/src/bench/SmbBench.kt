@@ -45,8 +45,25 @@ private fun settingsFile(): Array<String>? {
     return listOf("host", "share", "path", "user", "password", "megabytes").map { values[it].orEmpty() }.toTypedArray()
 }
 
+/**
+ * The output: UTF-8, but on Windows, where Gradle hands it to a console in
+ * another code page ("Ã©" for "é"), without accents.
+ */
+private fun console(): java.io.PrintStream {
+    val out = java.io.FileOutputStream(java.io.FileDescriptor.out)
+    if (!System.getProperty("os.name").orEmpty().startsWith("Windows")) return java.io.PrintStream(out, true, "UTF-8")
+    return object : java.io.PrintStream(out, true, "UTF-8") {
+        override fun print(text: String?) = super.print(text?.let(::plain))
+    }
+}
+
+/** "Réglage · 4 Mo" → "Reglage - 4 Mo". */
+private fun plain(text: String) = java.text.Normalizer.normalize(text.replace("·", "-").replace("’", "'"), java.text.Normalizer.Form.NFD)
+    .replace(Regex("\\p{M}+"), "")
+    .replace(Regex("[^\\x00-\\x7F]"), "?")
+
 fun main(cli: Array<String>) {
-    System.setOut(java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8"))
+    System.setOut(console())
     val args = cli.takeIf { it.size >= 5 } ?: settingsFile()
     if (args == null || args.take(5).any { it.isEmpty() }) {
         println("Écris les réglages dans scripts/smb-bench/$SETTINGS (une ligne chacun), puis relance : ./gradlew -p scripts/smb-bench run")

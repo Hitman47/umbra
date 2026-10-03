@@ -199,22 +199,45 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         switchTo(existing + added.map { it.withRoots(existing.map { c -> c.source }) }.map(NasClient::of))
     }
 
-    /** Moves [path] to the Perso tab: out of the library, played as plain videos. */
+    /** Moves [path] (a folder of the library's shares) to the Perso tab: out of the library, played as plain videos. */
     fun addPersonal(path: String) {
         val source = nas?.sourceOf(path) ?: return
+        addPersonal(source.id, source.shares.first { source.rootOf(it).equals(path.substringBefore('\\'), ignoreCase = true) }, path.substringAfter('\\', ""))
+    }
+
+    /**
+     * Gives [sub] (a folder, "" for the whole share) of [share] on the NAS of
+     * [sourceId] to the Perso tab; a share the library doesn't read is added to
+     * the source for Perso alone.
+     */
+    @Synchronized
+    fun addPersonal(sourceId: String, share: String, sub: String) {
+        var source = nas?.sources?.firstOrNull { it.id == sourceId } ?: return
+        if (source.shares.none { it.equals(share, ignoreCase = true) }) {
+            source = source.copy(shares = source.shares + share).withRoots(nas?.sources.orEmpty().filter { it.id != sourceId })
+        }
+        val root = source.rootOf(source.shares.first { it.equals(share, ignoreCase = true) })
+        val path = if (sub.isEmpty()) root else "$root\\$sub"
         if (source.isPersonal(path)) return
         val updated = source.copy(personal = source.personal.filterNot { it.within(path) } + path)
         saveSource(updated, NasClient.of(updated))
         library.onFolderExcluded()
     }
 
-    /** Takes [path] out of the Perso tab: back to the library, or left out of it ([exclude]). */
+    /**
+     * Takes [path] out of the Perso tab: back to the library, or not ([exclude]):
+     * left out of it, or, a whole share, no longer read at all.
+     */
+    @Synchronized
     fun removePersonal(path: String, exclude: Boolean) {
         val source = nas?.sourceOf(path) ?: return
-        val updated = source.copy(
-            personal = source.personal.filterNot { it.equals(path, ignoreCase = true) },
-            excluded = if (exclude) source.excluded.filterNot { it.within(path) } + path else source.excluded,
-        )
+        val kept = source.personal.filterNot { it.equals(path, ignoreCase = true) }
+        val updated = when {
+            !exclude -> source.copy(personal = kept)
+            '\\' !in path -> source.copy(personal = kept, shares = source.shares.filterNot { source.rootOf(it).equals(path, ignoreCase = true) })
+            else -> source.copy(personal = kept, excluded = source.excluded.filterNot { it.within(path) } + path)
+        }
+        if (updated.shares.isEmpty()) return // the source's last share: removed from Réglages › Sources instead
         saveSource(updated, NasClient.of(updated))
         if (!exclude) library.onSourcesChanged()
     }

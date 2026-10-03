@@ -23,6 +23,9 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
     /** The roots of [source], in name order. */
     fun rootsOf(source: NasSource): List<String> = source.shares.map(source::rootOf).sortedWith(::naturalCompare)
 
+    /** The roots of [source] the library sees: a share given whole to Perso left out. */
+    fun libraryRootsOf(source: NasSource): List<String> = rootsOf(source).filterNot(source::isPersonal)
+
     /** The source holding [path]. */
     fun sourceOf(path: String): NasSource? = byRoot[path.substringBefore('\\').lowercase()]?.first?.source
 
@@ -42,7 +45,8 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
      */
     fun list(path: String, withExcluded: Boolean = false, withPersonal: Boolean = false): List<NasEntry> {
         if (path.isEmpty()) {
-            return sources.flatMap(::rootsOf).sortedWith(::naturalCompare).map { NasEntry(it, it, isDirectory = true, size = 0) }
+            val roots = sources.flatMap { if (withPersonal) rootsOf(it) else libraryRootsOf(it) }
+            return roots.sortedWith(::naturalCompare).map { NasEntry(it, it, isDirectory = true, size = 0) }
         }
         val root = path.substringBefore('\\')
         val (nas, share) = route(root)

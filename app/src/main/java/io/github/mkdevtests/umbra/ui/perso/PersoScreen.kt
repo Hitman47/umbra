@@ -70,6 +70,7 @@ fun PersoScreen(viewModel: PersoViewModel) {
     val progress by viewModel.progress.collectAsState()
     val infos by viewModel.infos.collectAsState()
     val downloads by viewModel.downloads.collectAsState()
+    val sort by viewModel.sort.collectAsState()
     var picking by remember { mutableStateOf(false) }
     var folderMenu by remember { mutableStateOf<String?>(null) }
     var videoMenu by remember { mutableStateOf<NasEntry?>(null) }
@@ -85,7 +86,7 @@ fun PersoScreen(viewModel: PersoViewModel) {
             MenuItem("Lecture dans l'ordre") { folderMenu = null; context.startActivity(viewModel.playIntent(path, shuffle = false)) }
             if (root) {
                 MenuItem("Remettre dans la bibliothèque") { folderMenu = null; viewModel.remove(path, exclude = false) }
-                MenuItem("Retirer de Perso et exclure", danger = true) { folderMenu = null; viewModel.remove(path, exclude = true) }
+                MenuItem(if ('\\' in path) "Retirer de Perso et exclure" else "Retirer de Perso", danger = true) { folderMenu = null; viewModel.remove(path, exclude = true) }
             }
         }
     }
@@ -130,7 +131,7 @@ fun PersoScreen(viewModel: PersoViewModel) {
                     }
                 }
                 items(folders, key = { it }) { path ->
-                    FolderRow(path.substringAfterLast('\\'), path.substringBeforeLast('\\').replace("\\", " › "), onClick = { viewModel.open(path) }, onLongClick = { folderMenu = path })
+                    FolderRow(path.substringAfterLast('\\'), viewModel.folderDetail(path), onClick = { viewModel.open(path) }, onLongClick = { folderMenu = path })
                 }
                 if (local.isNotEmpty()) {
                     item { SectionHeader("Sur l'appareil", modifier = Modifier.padding(top = 20.dp, bottom = 4.dp)) }
@@ -174,6 +175,11 @@ fun PersoScreen(viewModel: PersoViewModel) {
             GlowButton("Aléatoire", onClick = { context.startActivity(viewModel.playIntent(state.path, shuffle = true)) }, icon = NyxaraIcons.Shuffle)
             GlassButton("Dans l'ordre", onClick = { context.startActivity(viewModel.playIntent(state.path, shuffle = false)) }, icon = NyxaraIcons.Play)
         }
+        Row(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PersoSort.entries.forEach { entry ->
+                androidx.compose.material3.FilterChip(selected = sort == entry, onClick = { viewModel.sortBy(entry) }, label = { Text(entry.label) })
+            }
+        }
         HorizontalDivider()
         Box(modifier = Modifier.fillMaxSize()) {
             when {
@@ -188,7 +194,7 @@ fun PersoScreen(viewModel: PersoViewModel) {
                 }
                 state.entries.isEmpty() -> Text("Aucune vidéo dans ce dossier.", modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp), modifier = Modifier.fillMaxSize()) {
-                    items(state.entries, key = { it.path }) { entry ->
+                    items(sortedFor(state.entries, sort), key = { it.path }) { entry ->
                         if (entry.isDirectory) {
                             FolderRow(entry.name, null, onClick = { viewModel.open(entry.path) }, onLongClick = { folderMenu = entry.path })
                         } else {
@@ -278,41 +284,60 @@ private fun MenuItem(label: String, danger: Boolean = false, onClick: () -> Unit
     }
 }
 
-/** Chooses a NAS folder for the Perso tab, from the shares down. */
+/** Chooses a folder for the Perso tab: every share of the NAS (those the library doesn't read too), then their folders. */
 @Composable
-private fun FolderPicker(viewModel: PersoViewModel, onPick: (String) -> Unit, onDismiss: () -> Unit) {
-    var path by remember { mutableStateOf("") }
-    var folders by remember { mutableStateOf<List<NasEntry>?>(null) }
-    LaunchedEffect(path) {
-        folders = null
-        folders = viewModel.pickerFolders(path)
+private fun FolderPicker(viewModel: PersoViewModel, onPick: (PickPlace) -> Unit, onDismiss: () -> Unit) {
+    var place by remember { mutableStateOf(PickPlace()) }
+    var items by remember { mutableStateOf<List<PickItem>?>(null) }
+    LaunchedEffect(place) {
+        items = null
+        items = viewModel.pick(place)
     }
+    val several = viewModel.pickerSources.size > 1
+    val share = place.share
+    val title = when {
+        share == null -> "Ajouter à Perso"
+        place.sub.isEmpty() -> share
+        else -> place.sub.substringAfterLast('\\')
+    }
+    val already = share != null && viewModel.isPersonal(place)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (path.isEmpty()) "Ajouter à Perso" else path.substringAfterLast('\\'), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    if (path.isEmpty()) "Choisissez un dossier : il quitte la bibliothèque et se lit ici, sans fiches." else path.replace("\\", " › "),
+                    when {
+                        share == null -> "Les partages du NAS : ceux que la bibliothèque n'utilise pas sont libres. Ce que vous choisissez quitte la bibliothèque et se lit ici, sans fiches."
+                        already -> "Déjà dans Perso."
+                        else -> listOfNotNull(place.source?.label?.takeIf { several }, share, place.sub.ifEmpty { null }?.replace("\\", " › ")).joinToString(" › ")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 360.dp)) {
-                    val list = folders
+                    val list = items
                     when {
                         list == null -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                        list.isEmpty() -> Text("Aucun sous-dossier.", modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        list.isEmpty() -> Text(
+                            if (share == null) "Aucun partage trouvé." else "Aucun sous-dossier.",
+                            modifier = Modifier.align(Alignment.Center),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         else -> LazyColumn {
-                            items(list, key = { it.path }) { entry ->
-                                val already = viewModel.isPersonal(entry.path)
+                            items(list, key = { it.label + it.place.sub }) { item ->
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { path = entry.path }.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { place = item.place }.padding(vertical = 10.dp, horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
                                     Icon(NyxaraIcons.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                                    Text(entry.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (already) Text("Perso", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                    Text(item.label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        item.tag ?: if (item.place.sub.isEmpty() && item.place.share != null) "Libre" else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (item.tag == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                         }
@@ -320,13 +345,20 @@ private fun FolderPicker(viewModel: PersoViewModel, onPick: (String) -> Unit, on
                 }
             }
         },
-        // A share itself stays the library's: only the folders inside one.
         confirmButton = {
-            TextButton(onClick = { onPick(path) }, enabled = '\\' in path && !viewModel.isPersonal(path)) { Text("Choisir ce dossier") }
+            TextButton(onClick = { onPick(place) }, enabled = share != null && !already) {
+                Text(if (place.sub.isEmpty()) "Choisir ce partage" else "Choisir ce dossier")
+            }
         },
         dismissButton = {
             Row {
-                if (path.isNotEmpty()) TextButton(onClick = { path = if ('\\' in path) path.substringBeforeLast('\\') else "" }) { Text("Remonter") }
+                val up = when {
+                    place.sub.isNotEmpty() -> place.copy(sub = place.sub.substringBeforeLast('\\', ""))
+                    share != null -> PickPlace(place.source.takeIf { several })
+                    place.source != null -> PickPlace()
+                    else -> null
+                }
+                if (up != null) TextButton(onClick = { place = up }) { Text("Remonter") }
                 TextButton(onClick = onDismiss) { Text("Annuler") }
             }
         },
