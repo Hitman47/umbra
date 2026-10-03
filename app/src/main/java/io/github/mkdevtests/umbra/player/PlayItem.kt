@@ -61,4 +61,13 @@ data class PlayerFigures(
 
 /** A Perso folder to play: its whole tree, shuffled or in order, from [start] if given; [only]: [start] alone (downloaded). */
 @Serializable
-data class PersoRequest(val folder: String, val shuffle: Boolean, val start: String? = null, val only: Boolean = false)
+data class PersoRequest(
+    val folder: String,
+    val shuffle: Boolean,
+    val start: String? = null,
+    val only: Boolean = false,
+    /** A profile of the external catalogue ("" for its groups): its videos, from the copy on the device, no walk. */
+    val profile: String? = null,
+    /** The videos chosen on the profile's page, instead of all of them. */
+    val selection: List<String>? = null,
+)

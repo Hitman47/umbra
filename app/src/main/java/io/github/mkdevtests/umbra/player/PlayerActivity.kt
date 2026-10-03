@@ -291,6 +291,16 @@ class PlayerActivity : ComponentActivity() {
                 else preparing = if (request.only) "Vidéo introuvable sur l'appareil." else "NAS injoignable."
                 return@launch
             }
+            // A catalogue profile: its videos are known, nothing to walk.
+            if (request.profile != null) {
+                val index = app.catalog.index.value
+                val keys = request.selection ?: index?.let { catalog ->
+                    val videos = if (request.profile.isEmpty()) catalog.ungrouped else catalog.videosOf(request.profile)
+                    videos.mapNotNull(catalog::nasPath)
+                }.orEmpty()
+                if (keys.isEmpty()) preparing = "Aucune vidéo." else beginPerso(request, keys, complete = true)
+                return@launch
+            }
             val state = app.perso.folder(request.folder)
             val resume = state.last?.takeIf { app.perso.progress.value[it]?.inProgress == true && it.within(request.folder) }
             val cached = withContext(Dispatchers.IO) { app.persoTrees.load(request.folder) }
@@ -683,8 +693,10 @@ class PlayerActivity : ComponentActivity() {
 
         /** Plays the Perso [folder] and its subfolders, shuffled or in order, from [start] if given; [only]: [start] alone. */
         fun persoIntent(context: Context, folder: String, shuffle: Boolean, start: String? = null, only: Boolean = false): Intent =
-            Intent(context, PlayerActivity::class.java)
-                .putExtra(EXTRA_PERSO, Json.encodeToString(PersoRequest.serializer(), PersoRequest(folder, shuffle, start, only)))
+            persoIntent(context, PersoRequest(folder, shuffle, start, only))
+
+        fun persoIntent(context: Context, request: PersoRequest): Intent =
+            Intent(context, PlayerActivity::class.java).putExtra(EXTRA_PERSO, Json.encodeToString(PersoRequest.serializer(), request))
 
         fun intent(context: Context, url: String, title: String, subtitles: List<String> = emptyList(), file: String? = null): Intent =
             intent(context, listOf(PlayItem(url, title, subtitles = subtitles, file = file)))
