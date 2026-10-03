@@ -4,6 +4,7 @@ import com.emc.ecs.nfsclient.nfs.io.Nfs3File
 import com.emc.ecs.nfsclient.nfs.nfs3.Nfs3
 import com.emc.ecs.nfsclient.rpc.CredentialUnix
 import java.io.FileNotFoundException
+import java.io.IOException
 
 /**
  * Read access to an NFSv3 export, for the protocol test. Like [SmbNas], it
@@ -19,11 +20,29 @@ class NfsNas(val server: String, val export: String) {
     private val nfs: Nfs3 by lazy { Nfs3(server, export, CredentialUnix(0, 0, null), RETRIES) }
 
     /** [relative] to the export, with "\" or "/" between folders. */
-    fun open(relative: String): RemoteFile {
+    fun open(relative: String): RemoteFile = explained {
         val path = "/" + relative.replace('\\', '/').trimStart('/')
         val file = Nfs3File(nfs, path)
         if (!file.exists()) throw FileNotFoundException("NFS : $path introuvable dans $export")
-        return NfsFile(file)
+        NfsFile(file)
+    }
+
+    /** The NAS's refusals in words: the client library only gives the protocol's status number. */
+    private fun <T> explained(block: () -> T): T = try {
+        block()
+    } catch (e: FileNotFoundException) {
+        throw e
+    } catch (e: Exception) {
+        val status = Regex("""state (\d+)""").find(e.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+        throw IOException(
+            when (status) {
+                13 -> "NFS : le NAS refuse le montage de $export (code 13, accès refusé). Dans l'export, ajoute l'option " +
+                    "« insecure » et autorise l'adresse du téléphone (ou 192.168.1.0/24)."
+                2 -> "NFS : $export n'est pas exporté par $server (code 2)."
+                else -> "NFS : ${e.message ?: e}"
+            },
+            e,
+        )
     }
 
     private class NfsFile(private val file: Nfs3File) : RemoteFile {
