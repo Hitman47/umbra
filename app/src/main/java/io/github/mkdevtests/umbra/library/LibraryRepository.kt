@@ -5,6 +5,7 @@ import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.UmbraApp
 import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.history.MatchFix
+import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.toUserMessage
 import kotlinx.coroutines.CancellationException
@@ -61,8 +62,8 @@ class LibraryRepository(private val app: UmbraApp) {
     fun scanIfNeeded() {
         scope.launch {
             loadJob.join()
-            val source = app.smb?.source ?: return@launch
-            val stale = _library.value.source != keyOf(source) || _library.value.scannedAt == 0L
+            val nas = app.nas ?: return@launch
+            val stale = _library.value.source != keyOf(nas.sources) || _library.value.scannedAt == 0L
             if (stale || app.settings.settings.value.rescanAtLaunch) startScan()
         }
     }
@@ -97,21 +98,30 @@ class LibraryRepository(private val app: UmbraApp) {
         startScan()
     }
 
+    /** A source was added, edited or removed: its titles go at once, the scan finds the new ones. */
+    fun onSourcesChanged() {
+        scope.launch {
+            loadJob.join()
+            _library.value = _library.value.within(app.nas)
+            restartScan()
+        }
+    }
+
     @Synchronized
     fun startScan() {
         if (scanJob?.isActive == true) return
-        val smb = app.smb ?: return
+        val nas = app.nas ?: return
         scanJob = scope.launch {
             loadJob.join()
             _scan.value = ScanState(running = true, progress = "Lecture du NAS…")
             try {
-                val key = keyOf(smb.source)
-                val previous = _library.value.takeIf { it.source == key }
-                    ?: Library().also { _library.value = it } // another share: don't show its titles
+                val key = keyOf(nas.sources)
+                // Titles of a share no longer chosen are dropped; the others' matches are reused.
+                val previous = _library.value.within(nas).also { _library.value = it }
                 val fixes = app.matchFixes.load()
                 val again = synchronized(rematch) { rematch.toSet() }
                 val numberings = NumberingCache(File(app.filesDir, "tvdb-numbering.json"))
-                val scanner = LibraryScanner(smb, tmdb, fixes, again, tvdb, numberings) { _scan.value = ScanState(running = true, progress = it) }
+                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings) { _scan.value = ScanState(running = true, progress = it) }
                 val started = System.currentTimeMillis()
                 val requests = tmdb.requests.get()
                 val tvdbRequests = tvdb?.requests?.get() ?: 0
@@ -125,7 +135,7 @@ class LibraryRepository(private val app: UmbraApp) {
                     "scan done in ${(System.currentTimeMillis() - started) / 1000} s, ${tmdb.requests.get() - requests} TMDB requests, " +
                         "${(tvdb?.requests?.get() ?: 0) - tvdbRequests} TheTVDB requests",
                 )
-                _scan.value = ScanState()
+                _scan.value = ScanState(error = offlineMessage(nas, scanner.offline))
             } catch (e: CancellationException) {
                 _scan.value = ScanState()
                 throw e
@@ -137,6 +147,29 @@ class LibraryRepository(private val app: UmbraApp) {
     }
 
     private suspend fun save(library: Library) = dao.replace(library)
+
+    /** "Zima 2 injoignable : ses titres sont gardés tels quels.", or null when every NAS answered. */
+    private fun offlineMessage(nas: NasRouter, offline: Set<String>): String? {
+        val names = offline.mapNotNull { nas.sourceOf(it)?.label }.distinct().sorted().ifEmpty { return null }
+        return if (names.size == 1) {
+            "${names.single()} injoignable : ses titres sont gardés tels quels."
+        } else {
+            "${names.joinToString(", ")} injoignables : leurs titres sont gardés tels quels."
+        }
+    }
+
+    /** Only the titles stored on the shares of [nas]. */
+    private fun Library.within(nas: NasRouter?): Library {
+        val roots = nas?.let { router -> router.sources.flatMap(router::rootsOf) }.orEmpty().mapTo(HashSet()) { it.lowercase() }
+        fun kept(file: String) = file.substringBefore('\\').lowercase() in roots
+        return copy(
+            movies = movies.filter { kept(it.file) },
+            shows = shows.mapNotNull { show ->
+                val seasons = show.seasons.map { season -> season.copy(episodes = season.episodes.filter { kept(it.file) }) }.filter { it.episodes.isNotEmpty() }
+                if (seasons.isEmpty()) null else show.copy(seasons = seasons)
+            },
+        )
+    }
 
     private suspend fun importLegacyFile(): Library? {
         if (!legacyFile.exists()) return null
@@ -156,6 +189,8 @@ class LibraryRepository(private val app: UmbraApp) {
     companion object {
         private const val TAG = "LibraryRepository"
 
-        fun keyOf(source: SmbSource) = "${source.host.trim()}/${source.shares.sorted().joinToString(",")}".lowercase()
+        /** The shares scanned, to tell a library of other shares: rescanned. */
+        fun keyOf(sources: List<SmbSource>) =
+            sources.map { "${it.host.trim()}/${it.shares.sorted().joinToString(",")}".lowercase() }.sorted().joinToString(";")
     }
 }

@@ -6,9 +6,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.mkdevtests.umbra.UmbraApp
 import io.github.mkdevtests.umbra.nas.NasEntry
+import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.nas.newSourceId
 import io.github.mkdevtests.umbra.nas.toUserMessage
+import io.github.mkdevtests.umbra.nas.withRoots
 import io.github.mkdevtests.umbra.player.PlayerActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,9 +24,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
+/** Path of a NAS in the browser, above its shares: ":<source id>". */
+private const val SOURCE_FOLDER = ":"
+
 data class BrowserState(
-    /** Folder shown, relative to the share root ("" = root). */
+    /** Folder shown: "" lists the NAS (their shares with a single NAS), ":<id>" the shares of one, else a NAS path. */
     val path: String = "",
+    /** Where [path] is, for the title: "Zima salon › Films › Drame". */
+    val crumbs: List<String> = emptyList(),
     val entries: List<NasEntry> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
@@ -50,8 +58,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(BrowserState())
     val state: StateFlow<BrowserState> = _state.asStateFlow()
 
-    val hasSource get() = umbra.smb != null
-    val source get() = umbra.smb?.source
+    val hasSource get() = umbra.nas != null
+    val sources: List<SmbSource> get() = umbra.nas?.sources.orEmpty()
 
     init {
         if (hasSource) open("")
@@ -59,11 +67,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     fun open(path: String) {
         loadJob?.cancel()
-        _state.value = BrowserState(path = path, loading = true)
+        val nas = umbra.nas ?: return
+        _state.value = BrowserState(path = path, crumbs = crumbs(nas, path), loading = true)
         listing = emptyList()
         loadJob = viewModelScope.launch {
             val result = runCatching {
-                withContext(Dispatchers.IO) { umbra.smb!!.list(path) }
+                withContext(Dispatchers.IO) { list(nas, path) }
             }
             ensureActive() // runCatching swallowed a cancellation: a newer folder is loading
             _state.update { state ->
@@ -80,12 +89,37 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refresh() = open(_state.value.path)
 
-    /** Goes to the parent folder; false when already at the share root. */
+    /** Goes to the parent folder; false when already at the top. */
     fun up(): Boolean {
         val path = _state.value.path
         if (path.isEmpty()) return false
-        open(path.substringBeforeLast('\\', ""))
+        val nas = umbra.nas
+        open(
+            when {
+                '\\' in path -> path.substringBeforeLast('\\')
+                path.startsWith(SOURCE_FOLDER) || nas == null || nas.sources.size < 2 -> ""
+                else -> nas.sourceOf(path)?.let { SOURCE_FOLDER + it.id }.orEmpty()
+            },
+        )
         return true
+    }
+
+    /** With several NAS, the top lists them, then each its shares. */
+    private fun list(nas: NasRouter, path: String): List<NasEntry> = when {
+        path.isEmpty() && nas.sources.size > 1 -> nas.sources.map { NasEntry(it.label, SOURCE_FOLDER + it.id, isDirectory = true, size = 0) }
+        path.startsWith(SOURCE_FOLDER) -> nas.sources.firstOrNull { SOURCE_FOLDER + it.id == path }
+            ?.let { source -> nas.rootsOf(source).map { NasEntry(it, it, isDirectory = true, size = 0) } }
+            .orEmpty()
+        else -> nas.list(path)
+    }
+
+    private fun crumbs(nas: NasRouter, path: String): List<String> {
+        val single = nas.sources.singleOrNull()
+        return when {
+            path.isEmpty() -> listOf(single?.label ?: "NAS")
+            path.startsWith(SOURCE_FOLDER) -> listOfNotNull(nas.sources.firstOrNull { SOURCE_FOLDER + it.id == path }?.label)
+            else -> listOfNotNull(nas.sourceOf(path)?.label) + path.split('\\')
+        }
     }
 
     /** Intent playing [video] with the subtitle files sitting next to it. */
@@ -110,15 +144,17 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
         }
 
     /**
-     * Connects to [source] and, if it works, makes it the app's source.
-     * Returns an error message, or null on success.
+     * Connects to [source] and, if it works, adds it to the app's sources (or
+     * replaces the one it edits). Returns an error message, or null on success.
      */
     suspend fun connect(source: SmbSource): String? {
-        val connection = SmbNas(source)
+        val others = sources.filter { it.id != source.id }
+        val named = source.copy(id = source.id.ifEmpty { newSourceId() }).withRoots(others)
+        val connection = SmbNas(named)
         return try {
             // Every share must open: catches a typo in one of the names.
             withContext(Dispatchers.IO) {
-                source.shares.forEach { share ->
+                named.shares.forEach { share ->
                     try {
                         connection.list(share)
                     } catch (e: Exception) {
@@ -126,12 +162,17 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
-            umbra.useSource(source, connection)
+            umbra.saveSource(named, connection)
             open("")
             null
         } catch (e: Exception) {
             withContext(Dispatchers.IO) { connection.close() }
             e.toUserMessage()
         }
+    }
+
+    fun remove(source: SmbSource) {
+        umbra.removeSource(source.id)
+        if (hasSource) open("") else _state.value = BrowserState()
     }
 }

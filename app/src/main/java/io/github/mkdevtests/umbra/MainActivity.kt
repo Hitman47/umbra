@@ -13,6 +13,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,27 +70,30 @@ private fun UmbraRoot(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as UmbraApp
-    var editingSource by rememberSaveable { mutableStateOf(!browserViewModel.hasSource) }
+    // The source being set up: its id, "" for a new one, null for none.
+    var editingSource by rememberSaveable { mutableStateOf(if (browserViewModel.hasSource) null else "") }
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     val stack = remember { mutableStateListOf<Detail>() }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) context.startActivity(PlayerActivity.intent(context, uri.toString(), uri.lastPathSegment ?: "Vidéo"))
     }
 
-    if (editingSource) {
-        SourceScreen(
-            initial = browserViewModel.source,
-            onDiscover = browserViewModel::discoverShares,
-            onConnect = { source ->
-                browserViewModel.connect(source).also { error ->
-                    if (error == null) {
-                        editingSource = false
-                        libraryViewModel.onSourceChanged()
+    editingSource?.let { id ->
+        key(id) {
+            SourceScreen(
+                initial = browserViewModel.sources.firstOrNull { it.id == id },
+                onDiscover = browserViewModel::discoverShares,
+                onConnect = { source ->
+                    browserViewModel.connect(source).also { error ->
+                        if (error == null) {
+                            editingSource = null
+                            libraryViewModel.onSourcesChanged()
+                        }
                     }
-                }
-            },
-            onCancel = if (browserViewModel.hasSource) ({ editingSource = false }) else null,
-        )
+                },
+                onCancel = if (browserViewModel.hasSource) ({ editingSource = null }) else null,
+            )
+        }
         return
     }
 
@@ -118,9 +122,15 @@ private fun UmbraRoot(
             store = app.settings,
             trakt = app.trakt,
             updater = app.updater,
-            source = browserViewModel.source,
+            sources = browserViewModel.sources,
             imageCache = context.cacheDir.resolve("image_cache"),
-            onEditSource = { editingSource = true },
+            onAddSource = { editingSource = "" },
+            onEditSource = { editingSource = it.id },
+            onRemoveSource = { source ->
+                browserViewModel.remove(source)
+                libraryViewModel.onSourcesChanged()
+                if (!browserViewModel.hasSource) editingSource = ""
+            },
             onBack = back,
         )
     }

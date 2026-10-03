@@ -7,6 +7,7 @@ import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import io.github.mkdevtests.umbra.library.LibraryRepository
 import io.github.mkdevtests.umbra.nas.LocalStreamServer
+import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.SourceStore
@@ -22,18 +23,19 @@ import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import kotlin.concurrent.thread
 
-/** Process-wide objects: the NAS source, its connection, the stream server and the updater. */
+/** Process-wide objects: the NAS sources, their connections, the stream server and the updater. */
 class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     val sources by lazy { SourceStore(this) }
 
     val settings by lazy { SettingsStore(this) }
 
+    /** Every NAS source behind one tree; null until one is set up. */
     @Volatile
-    var smb: SmbNas? = null
+    var nas: NasRouter? = null
         private set
 
-    val streamServer by lazy { LocalStreamServer { smb } }
+    val streamServer by lazy { LocalStreamServer { nas } }
 
     val library by lazy { LibraryRepository(this) }
 
@@ -52,7 +54,7 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
-        smb = sources.load()?.let(::SmbNas)
+        nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(::SmbNas)) }
         updater.check()
     }
 
@@ -66,12 +68,23 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
         }
         .build()
 
-    /** Saves [source] and switches to [connection], an already verified connection to it. */
-    fun useSource(source: SmbSource, connection: SmbNas) {
-        sources.save(source)
-        val previous = smb
-        smb = connection
+    /** Adds [source], or replaces the one with its id, using [connection], an already verified connection to it. */
+    @Synchronized
+    fun saveSource(source: SmbSource, connection: SmbNas) {
+        val kept = nas?.connections.orEmpty().filter { it.source.id != source.id }
+        val index = nas?.connections?.indexOfFirst { it.source.id == source.id } ?: -1
+        val connections = kept.toMutableList().apply { add(if (index >= 0) index else size, connection) }
+        switchTo(connections)
+    }
+
+    @Synchronized
+    fun removeSource(id: String) = switchTo(nas?.connections.orEmpty().filter { it.source.id != id })
+
+    private fun switchTo(connections: List<SmbNas>) {
+        sources.save(connections.map { it.source })
+        val dropped = nas?.connections.orEmpty().filter { it !in connections }
+        nas = connections.takeIf { it.isNotEmpty() }?.let(::NasRouter)
         // Closing logs off the NAS: network I/O, not allowed on the main thread.
-        if (previous != null) thread { previous.close() }
+        if (dropped.isNotEmpty()) thread { dropped.forEach { it.close() } }
     }
 }

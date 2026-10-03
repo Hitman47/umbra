@@ -4,31 +4,55 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import androidx.core.content.edit
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** SMB shares of one NAS. [host] may carry a port ("nas.local:4450"). */
-data class SmbSource(
+/** What is saved of a source: the password encrypted. */
+@Serializable
+private data class StoredSource(
+    val id: String,
+    val name: String = "",
     val host: String,
     val shares: List<String>,
     val username: String = "",
     val password: String = "",
     val domain: String = "",
+    val roots: Map<String, String> = emptyMap(),
 )
 
 /**
- * Persists the NAS source. The password is encrypted with an AES key that
+ * Persists the NAS sources. Passwords are encrypted with an AES key that
  * lives in the Android Keystore and never leaves it.
  */
 class SourceStore(context: Context) {
 
     private val prefs = context.getSharedPreferences("sources", Context.MODE_PRIVATE)
+    private val json = Json { ignoreUnknownKeys = true }
 
-    fun load(): SmbSource? {
+    fun load(): List<SmbSource> {
+        val stored = prefs.getString(KEY_LIST, null)
+            ?: return listOfNotNull(loadSingle()).also { if (it.isNotEmpty()) save(it) } // keeps its new id
+        return runCatching { json.decodeFromString<List<StoredSource>>(stored) }
+            .onFailure { Log.w(TAG, "sources unreadable", it) }
+            .getOrDefault(emptyList())
+            .map { SmbSource(it.host, it.shares, it.username, it.password.let(::decrypt).orEmpty(), it.domain, it.id, it.name, it.roots) }
+    }
+
+    fun save(sources: List<SmbSource>) = prefs.edit {
+        val stored = sources.map { StoredSource(it.id, it.name, it.host, it.shares, it.username, encrypt(it.password), it.domain, it.roots) }
+        putString(KEY_LIST, json.encodeToString(stored))
+        listOf(KEY_HOST, KEY_SHARE, KEY_SHARES, KEY_USER, KEY_PASSWORD, KEY_DOMAIN).forEach(::remove)
+    }
+
+    /** The single source of earlier versions. */
+    private fun loadSingle(): SmbSource? {
         val host = prefs.getString(KEY_HOST, null) ?: return null
         return SmbSource(
             host = host,
@@ -37,16 +61,8 @@ class SourceStore(context: Context) {
             username = prefs.getString(KEY_USER, "").orEmpty(),
             password = prefs.getString(KEY_PASSWORD, null)?.let(::decrypt).orEmpty(),
             domain = prefs.getString(KEY_DOMAIN, "").orEmpty(),
+            id = newSourceId(),
         )
-    }
-
-    fun save(source: SmbSource) = prefs.edit {
-        putString(KEY_HOST, source.host)
-        putString(KEY_SHARES, source.shares.joinToString("\n"))
-        remove(KEY_SHARE)
-        putString(KEY_USER, source.username)
-        putString(KEY_PASSWORD, encrypt(source.password))
-        putString(KEY_DOMAIN, source.domain)
     }
 
     private fun key(): SecretKey {
@@ -77,6 +93,8 @@ class SourceStore(context: Context) {
     }.getOrNull()
 
     private companion object {
+        const val TAG = "SourceStore"
+        const val KEY_LIST = "list"
         const val KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "umbra_sources"
         const val TRANSFORMATION = "AES/GCM/NoPadding"

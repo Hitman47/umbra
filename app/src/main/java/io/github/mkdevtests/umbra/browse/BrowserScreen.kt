@@ -68,7 +68,6 @@ fun BrowserScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
-    val nasName = viewModel.source?.host.orEmpty()
     val index = remember(library) { PathIndex(library) }
 
     BackHandler(enabled = state.path.isNotEmpty()) { viewModel.up() }
@@ -78,13 +77,13 @@ fun BrowserScreen(
             if (state.path.isNotEmpty()) TextButton(onClick = { viewModel.up() }) { Text("←") }
             Column(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
                 Text(
-                    text = state.path.substringAfterLast('\\').ifEmpty { nasName },
+                    text = state.crumbs.lastOrNull().orEmpty(),
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = listOf(nasName).plus(state.path.split('\\').filter { it.isNotEmpty() }).joinToString(" › "),
+                    text = state.crumbs.joinToString(" › "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

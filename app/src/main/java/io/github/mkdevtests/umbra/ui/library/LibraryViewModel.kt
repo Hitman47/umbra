@@ -68,8 +68,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     val matchFixes = umbra.matchFixes.fixes
 
-    /** Called once a new NAS source is connected. */
-    fun onSourceChanged() = repository.startScan()
+    /** Called once a NAS source is added, edited or removed. */
+    fun onSourcesChanged() = repository.onSourcesChanged()
 
     suspend fun search(query: String, filters: SearchFilters): List<Found> {
         val hits = if (query.isBlank()) null else repository.search(query)

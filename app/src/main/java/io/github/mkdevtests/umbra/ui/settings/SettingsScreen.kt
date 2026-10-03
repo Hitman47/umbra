@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -56,9 +57,11 @@ fun SettingsScreen(
     store: SettingsStore,
     trakt: Trakt,
     updater: Updater,
-    source: SmbSource?,
+    sources: List<SmbSource>,
     imageCache: File,
-    onEditSource: () -> Unit,
+    onAddSource: () -> Unit,
+    onEditSource: (SmbSource) -> Unit,
+    onRemoveSource: (SmbSource) -> Unit,
     onBack: () -> Unit,
 ) {
     val settings by store.settings.collectAsState()
@@ -112,12 +115,25 @@ fun SettingsScreen(
                 Item("Si une langue manque", "La piste la plus proche est choisie : la lecture n'est jamais bloquée. Les choix s'appliquent à la prochaine vidéo ouverte.")
             }
 
-            Section("Source") {
-                Item(
-                    "NAS",
-                    source?.let { "SMB · ${it.host} · ${it.shares.size} partage${if (it.shares.size > 1) "s" else ""}" } ?: "Aucun",
-                ) {
-                    TextButton(onClick = onEditSource) { Text("Modifier ›") }
+            Section("Sources") {
+                var removing by remember { mutableStateOf<SmbSource?>(null) }
+                sources.forEach { source ->
+                    Item(source.label, "SMB · ${source.host} · ${source.shares.size} partage${if (source.shares.size > 1) "s" else ""}") {
+                        TextButton(onClick = { removing = source }) { Text("Retirer") }
+                        TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
+                    }
+                }
+                Item("Ajouter un NAS", "Les vues Films et Séries regroupent toutes les sources.") {
+                    TextButton(onClick = onAddSource) { Text("Ajouter ›") }
+                }
+                removing?.let { source ->
+                    AlertDialog(
+                        onDismissRequest = { removing = null },
+                        title = { Text("Retirer ${source.label} ?") },
+                        text = { Text("Ses titres quittent la bibliothèque. L'historique de lecture est gardé : il revient si le NAS est ajouté à nouveau.") },
+                        confirmButton = { TextButton(onClick = { removing = null; onRemoveSource(source) }) { Text("Retirer") } },
+                        dismissButton = { TextButton(onClick = { removing = null }) { Text("Annuler") } },
+                    )
                 }
             }
 

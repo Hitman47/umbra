@@ -54,6 +54,7 @@ fun SourceScreen(
     onCancel: (() -> Unit)?,
 ) {
     var step by rememberSaveable { mutableStateOf(SetupStep.Login) }
+    var name by rememberSaveable { mutableStateOf(initial?.name.orEmpty()) }
     var host by rememberSaveable { mutableStateOf(initial?.host.orEmpty()) }
     var username by rememberSaveable { mutableStateOf(initial?.username.orEmpty()) }
     var password by remember { mutableStateOf(initial?.password.orEmpty()) }
@@ -93,7 +94,12 @@ fun SourceScreen(
         busy = true
         error = null
         scope.launch {
-            error = onConnect(SmbSource(host.trim(), shares.filter { it in selected }, username.trim(), password))
+            // The id and the root names of an edited source are kept: its titles and history stay its own.
+            val source = SmbSource(
+                host.trim(), shares.filter { it in selected }, username.trim(), password, initial?.domain.orEmpty(),
+                id = initial?.id.orEmpty(), name = name.trim(), roots = initial?.roots.orEmpty(),
+            )
+            error = onConnect(source)
             busy = false
         }
     }
@@ -114,6 +120,15 @@ fun SourceScreen(
         when (step) {
             SetupStep.Login -> {
                 Text("Connexion au NAS (SMB)", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Nom (facultatif)") },
+                    placeholder = { Text(host.ifBlank { "Zima salon" }) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = width,
+                )
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },

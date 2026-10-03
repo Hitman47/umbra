@@ -6,7 +6,7 @@ import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.browse.subtitlesFor
 import io.github.mkdevtests.umbra.history.MatchFix
 import io.github.mkdevtests.umbra.nas.NasEntry
-import io.github.mkdevtests.umbra.nas.SmbNas
+import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.isRefusedByNas
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +58,7 @@ private const val LIST_ATTEMPTS = 3
  * their metadata, so a rescan only costs listings plus lookups for new files.
  */
 class LibraryScanner(
-    private val smb: SmbNas,
+    private val nas: NasRouter,
     private val tmdb: Tmdb,
     /** The user's corrections, by group: they win over the TMDB search and the last scan. */
     private val fixes: Map<String, MatchFix> = emptyMap(),
@@ -77,6 +77,10 @@ class LibraryScanner(
 
     /** TMDB seasons fetched by this scan: a TheTVDB numbering needs them all, the episode details again. */
     private val tmdbSeasons = ConcurrentHashMap<Pair<Int, Int>, TmdbSeason>()
+
+    /** Shares of the last scan whose NAS didn't answer: their titles were kept from the previous library. */
+    var offline: Set<String> = emptySet()
+        private set
 
     /** A video found on the NAS; [folders] are the folder names between the share and the file. */
     private class VideoFile(val entry: NasEntry, val folders: List<String>, val subtitles: List<String>)
@@ -100,8 +104,12 @@ class LibraryScanner(
     )
 
     suspend fun scan(previous: Library, source: String): Library {
-        val videos = walk()
-        if (videos.isEmpty()) throw IOException("Aucune vidéo trouvée dans les partages choisis.")
+        val offline = ConcurrentHashMap.newKeySet<String>()
+        val videos = walk(offline)
+        this.offline = offline.toSet()
+        if (videos.isEmpty()) {
+            throw IOException(if (offline.isEmpty()) "Aucune vidéo trouvée dans les partages choisis." else "Le NAS ne répond plus : bibliothèque inchangée.")
+        }
 
         val found = mutableListOf<EpisodeFile>()
         val movieFiles = mutableListOf<VideoFile>()
@@ -119,24 +127,35 @@ class LibraryScanner(
         }.toMap()
         val movies = scanMovies(movieFiles, knownFiles, counts)
         val shows = scanShows(episodes, previous.shows, counts)
+        val scanned = keepOffline(Library(movies = movies, shows = shows), previous, this.offline)
         return Library(
             version = Library.VERSION,
             source = source,
-            movies = movies.sortedWith { a, b -> naturalCompare(a.title, b.title) },
-            shows = shows.sortedWith { a, b -> naturalCompare(a.title, b.title) },
+            movies = scanned.movies.sortedWith { a, b -> naturalCompare(a.title, b.title) },
+            shows = scanned.shows.sortedWith { a, b -> naturalCompare(a.title, b.title) },
             scannedAt = System.currentTimeMillis(),
         )
     }
 
     // --- Walking the shares ---
 
-    private suspend fun walk(): List<VideoFile> = coroutineScope {
+    /** The videos of every share; a share whose NAS doesn't answer is added to [offline] instead. */
+    private suspend fun walk(offline: MutableSet<String>): List<VideoFile> = coroutineScope {
         val found = ConcurrentLinkedQueue<VideoFile>()
         val folders = AtomicInteger()
 
         fun visit(path: String, names: List<String>) {
             launch(Dispatchers.IO) {
-                val entries = listings.withPermit { listOrSkip(path) }
+                val entries = listings.withPermit {
+                    if (names.isNotEmpty()) return@withPermit listOrSkip(path)
+                    // A share's root: its NAS may be off or out of reach, the other NAS are scanned all the same.
+                    try {
+                        listOrSkip(path)
+                    } catch (e: IOException) {
+                        offline += path
+                        emptyList()
+                    }
+                }
                 entries.filter { it.isVideo && !it.isExtra() }.forEach { video ->
                     found += VideoFile(video, names, subtitlesFor(video, entries).map { it.path })
                 }
@@ -538,7 +557,7 @@ class LibraryScanner(
         if (" - " in name.title) addAll(name.title.split(" - ").map { it.trim() }.filter { part -> part.count { it.isLetter() } >= 2 })
     }
 
-    private fun list(path: String) = smb.list(path)
+    private fun list(path: String) = nas.list(path)
 
     private suspend fun <T, R : Any> forEachParallel(items: List<T>, label: String, block: suspend (T) -> R?): List<R> {
         val done = AtomicInteger()
@@ -590,4 +609,38 @@ class LibraryScanner(
     private companion object {
         const val TAG = "LibraryScanner"
     }
+}
+
+/**
+ * [scanned] completed with what [previous] had on the [offline] shares (a NAS
+ * that didn't answer), kept as it was until that NAS answers again. A film
+ * found elsewhere too is shown from there.
+ */
+fun keepOffline(scanned: Library, previous: Library, offline: Set<String>): Library {
+    if (offline.isEmpty()) return scanned
+    fun isOffline(file: String) = file.substringBefore('\\') in offline
+    val ids = scanned.movies.mapNotNullTo(HashSet()) { it.tmdbId }
+    val movies = scanned.movies + previous.movies.filter { isOffline(it.file) && (it.tmdbId == null || it.tmdbId !in ids) }
+
+    val kept = previous.shows.mapNotNull { show ->
+        val seasons = show.seasons.map { season -> season.copy(episodes = season.episodes.filter { isOffline(it.file) }) }.filter { it.episodes.isNotEmpty() }
+        if (seasons.isEmpty()) null else show.copy(seasons = seasons)
+    }.associateBy { it.key }
+    val shows = scanned.shows.map { show -> kept[show.key]?.let { show.mergedWith(it) } ?: show } +
+        kept.values.filter { show -> scanned.shows.none { it.key == show.key } }
+    return scanned.copy(movies = movies, shows = shows)
+}
+
+/** [this] show with the episodes of [other] it doesn't have. */
+private fun Show.mergedWith(other: Show): Show {
+    val numbers = (seasons.map { it.number } + other.seasons.map { it.number }).distinct().sorted()
+    return copy(
+        seasons = numbers.map { number ->
+            val mine = seasons.firstOrNull { it.number == number }
+            val theirs = other.seasons.firstOrNull { it.number == number }
+            val episodes = mine?.episodes.orEmpty() +
+                theirs?.episodes.orEmpty().filter { episode -> mine?.episodes.orEmpty().none { it.number == episode.number } }
+            (mine ?: theirs!!).copy(episodes = episodes.sortedBy { it.number })
+        },
+    )
 }
