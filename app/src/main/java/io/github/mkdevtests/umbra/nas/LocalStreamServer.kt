@@ -1,9 +1,9 @@
 package io.github.mkdevtests.umbra.nas
 
-import android.net.Uri
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.InputStream
+import java.net.URLEncoder
 import java.util.UUID
 import kotlin.concurrent.thread
 import java.util.concurrent.ArrayBlockingQueue
@@ -51,7 +51,7 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
         val token = UUID.randomUUID().toString().replace("-", "")
         files[token] = Target(key, name, pools.getOrPut(key) { HandlePool(open) })
         // The file name keeps its extension visible to mpv (format probing, window title).
-        return "http://$HOST:$listeningPort/$token/${Uri.encode(name)}"
+        return "http://$HOST:$listeningPort/$token/${URLEncoder.encode(name, "UTF-8").replace("+", "%20")}"
     }
 
     /** Closes the handles kept open, when the player goes away. */
