@@ -87,6 +87,7 @@ private fun UmbraRoot(
         null -> HomeScreen(
             libraryViewModel = libraryViewModel,
             browserViewModel = browserViewModel,
+            updater = (context.applicationContext as UmbraApp).updater,
             tab = tab,
             onTabChange = { tab = it },
             onOpenMovie = { stack.add(Detail.MovieDetail(it)) },

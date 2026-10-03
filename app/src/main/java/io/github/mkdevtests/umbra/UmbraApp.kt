@@ -10,10 +10,12 @@ import io.github.mkdevtests.umbra.nas.LocalStreamServer
 import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.SourceStore
+import io.github.mkdevtests.umbra.update.Updater
+import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import kotlin.concurrent.thread
 
-/** Process-wide objects: the NAS source, its connection and the stream server. */
+/** Process-wide objects: the NAS source, its connection, the stream server and the updater. */
 class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     val sources by lazy { SourceStore(this) }
@@ -26,9 +28,12 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     val library by lazy { LibraryRepository(this) }
 
+    val updater by lazy { Updater(this, OkHttpClient()) }
+
     override fun onCreate() {
         super.onCreate()
         smb = sources.load()?.let(::SmbNas)
+        updater.check()
     }
 
     /** Posters and backdrops are fetched from TMDB once, then kept on disk up to 1 GB. */

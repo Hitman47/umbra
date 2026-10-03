@@ -25,6 +25,20 @@ import java.net.UnknownHostException
 import java.util.EnumSet
 import java.util.concurrent.TimeUnit
 
+/**
+ * A NAS file opened for reading. It wraps smbj's handle so that nothing in
+ * the app can reach a write, rename or delete: Umbra never changes the NAS.
+ */
+class NasFile internal constructor(private val file: File) : Closeable {
+    val size: Long get() = file.fileInformation.standardInformation.endOfFile
+
+    /** Reads up to [length] bytes at [fileOffset] into [buffer] from [bufferOffset]; -1 or 0 at the end. */
+    fun read(buffer: ByteArray, fileOffset: Long, bufferOffset: Int, length: Int): Int =
+        file.read(buffer, fileOffset, bufferOffset, length)
+
+    override fun close() = file.close()
+}
+
 /** A file or folder on the NAS. [path] starts with the share name and uses "\" ("Films\Dune (2021)"). */
 data class NasEntry(val name: String, val path: String, val isDirectory: Boolean, val size: Long, val modified: Long = 0)
 
@@ -36,6 +50,9 @@ data class NasEntry(val name: String, val path: String, val isDirectory: Boolean
  * Each share gets its own connection: over a single one, the ZimaOS server
  * answers a folder of one share with the same-named folder of another
  * ("Films\Drame" listed "Séries\Drame"), which merged shares in the library.
+ *
+ * Read-only by design: files open with GENERIC_READ only, and the class has
+ * no write, rename or delete operation (ReadOnlyTest keeps it that way).
  *
  * Blocking API: call from a background thread.
  */
@@ -90,17 +107,18 @@ class SmbNas(val source: SmbSource) : Closeable {
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */
-    fun open(path: String): File {
+    fun open(path: String): NasFile {
         val (shareName, inner) = split(path)
         return withShare(shareName) { share ->
-            share.openFile(
+            NasFile(share.openFile(
                 inner,
                 EnumSet.of(AccessMask.GENERIC_READ),
                 null,
                 SMB2ShareAccess.ALL,
+                // Only an existing file: never creates one.
                 SMB2CreateDisposition.FILE_OPEN,
                 null,
-            )
+            ))
         }
     }
 

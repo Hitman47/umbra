@@ -15,6 +15,9 @@ val localProperties = Properties().apply {
 }
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
+// Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
+val umbraVersion = "0.2.0"
+
 base {
     // APK names: umbra-debug.apk, umbra-release-unsigned.apk
     archivesName.set("umbra")
@@ -28,8 +31,9 @@ android {
         applicationId = "io.github.mkdevtests.umbra"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "0.1.0"
+        versionName = umbraVersion
+        // 0.2.0 -> 200, 1.12.3 -> 11203: always increasing, as Android requires.
+        versionCode = umbraVersion.split(".").map(String::toInt).let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
 
         buildConfigField("String", "TMDB_TOKEN", localProperty("tmdb.token"))
         buildConfigField("String", "THETVDB_TOKEN", localProperty("thetvdb.token"))
@@ -44,12 +48,15 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             resValue("string", "app_name", "Umbra Debug")
+            // Releases install as io.github.mkdevtests.umbra: not an update of this build.
+            buildConfigField("boolean", "UPDATES", "false")
         }
         release {
             // Signed by scripts/build-umbra-release.sh (zipalign + apksigner).
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             resValue("string", "app_name", "Umbra")
+            buildConfigField("boolean", "UPDATES", "true")
         }
     }
 

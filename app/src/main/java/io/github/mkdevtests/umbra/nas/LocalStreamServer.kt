@@ -2,7 +2,6 @@ package io.github.mkdevtests.umbra.nas
 
 import android.net.Uri
 import android.util.Log
-import com.hierynomus.smbj.share.File
 import fi.iki.elonen.NanoHTTPD
 import java.io.BufferedInputStream
 import java.io.InputStream
@@ -42,7 +41,7 @@ class LocalStreamServer(private val nas: () -> SmbNas?) : NanoHTTPD(HOST, 0) {
             Log.w(TAG, "open $path failed", e)
             return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
         }
-        val size = file.fileInformation.standardInformation.endOfFile
+        val size = file.size
 
         val range = parseRange(session.headers["range"], size)
         if (range == null) {
@@ -109,7 +108,7 @@ class LocalStreamServer(private val nas: () -> SmbNas?) : NanoHTTPD(HOST, 0) {
 
 /** Reads [length] bytes of an SMB file from [offset]; closing it closes the remote handle. */
 private class SmbRangeStream(
-    private val file: File,
+    private val file: NasFile,
     private var offset: Long,
     private var remaining: Long,
 ) : InputStream() {

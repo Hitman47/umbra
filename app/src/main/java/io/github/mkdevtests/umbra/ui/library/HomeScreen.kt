@@ -27,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.browse.BrowserScreen
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
+import io.github.mkdevtests.umbra.update.UpdateBanner
+import io.github.mkdevtests.umbra.update.Updater
 
 enum class HomeTab(val label: String) { Movies("Films"), Shows("Séries"), Folders("Partages") }
 
@@ -34,6 +36,7 @@ enum class HomeTab(val label: String) { Movies("Films"), Shows("Séries"), Folde
 fun HomeScreen(
     libraryViewModel: LibraryViewModel,
     browserViewModel: BrowserViewModel,
+    updater: Updater,
     tab: HomeTab,
     onTabChange: (HomeTab) -> Unit,
     onOpenMovie: (String) -> Unit,
@@ -63,6 +66,7 @@ fun HomeScreen(
                 FilterChip(selected = entry == tab, onClick = { onTabChange(entry) }, label = { Text(entry.label) })
             }
         }
+        UpdateBanner(updater)
 
         if (scan.running) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp))

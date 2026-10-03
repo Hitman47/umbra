@@ -1,16 +1,20 @@
 #!/bin/bash
 # Build, sign, install and launch the Umbra release APK from the current branch.
-# Usage: ./scripts/build-umbra-release.sh [--clean]
+# Usage: ./scripts/build-umbra-release.sh [--clean] [--no-install]
 #
 # Run from Git Bash (or WSL). Package: io.github.mkdevtests.umbra.
 #
-# Signing: a dedicated key when UMBRA_RELEASE_KEYSTORE is set
-#   UMBRA_RELEASE_KEYSTORE           path to the .jks
-#   UMBRA_RELEASE_KEYSTORE_PASSWORD  store password (required with the above)
-#   UMBRA_RELEASE_KEY_ALIAS          default: umbra
-#   UMBRA_RELEASE_KEY_PASSWORD       default: the store password
+# Signing: the dedicated key described by ~/.umbra/release.properties
+#   keystore=C:/Users/<you>/.umbra/umbra-release.jks
+#   storePassword=...
+#   keyAlias=umbra            (optional)
+#   keyPassword=...           (optional, default: storePassword)
+# or by the same values in env vars (they win):
+#   UMBRA_RELEASE_KEYSTORE, UMBRA_RELEASE_KEYSTORE_PASSWORD,
+#   UMBRA_RELEASE_KEY_ALIAS, UMBRA_RELEASE_KEY_PASSWORD
 # otherwise the Android debug keystore. Keep the same key over time:
-# switching keys forces an uninstall (and loses app data).
+# GitHub updates need it, and switching keys forces an uninstall (app data lost).
+# Back up ~/.umbra: it is not in the repo.
 
 set -e
 
@@ -22,9 +26,11 @@ cd "$REPO_ROOT"
 ensure_android_sdk "$REPO_ROOT"
 
 CLEAN=0
+INSTALL=1
 for arg in "$@"; do
     case "$arg" in
         --clean) CLEAN=1 ;;
+        --no-install) INSTALL=0 ;;
         *) echo "Unknown arg: $arg"; exit 2 ;;
     esac
 done
@@ -42,13 +48,21 @@ APKSIGNER="${BUILD_TOOLS}apksigner"
 [[ -f "$APKSIGNER" ]] || { echo "apksigner not found at $APKSIGNER"; exit 1; }
 
 # ----- signing keystore -----
+KEY_PROPERTIES="$HOME/.umbra/release.properties"
+key_property() { grep -E "^$1=" "$KEY_PROPERTIES" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r'; }
+if [[ -z "${UMBRA_RELEASE_KEYSTORE:-}" && -f "$KEY_PROPERTIES" ]]; then
+    UMBRA_RELEASE_KEYSTORE="$(key_property keystore)"
+    UMBRA_RELEASE_KEYSTORE_PASSWORD="$(key_property storePassword)"
+    UMBRA_RELEASE_KEY_ALIAS="$(key_property keyAlias)"
+    UMBRA_RELEASE_KEY_PASSWORD="$(key_property keyPassword)"
+fi
 if [[ -n "${UMBRA_RELEASE_KEYSTORE:-}" ]]; then
     KEYSTORE="$UMBRA_RELEASE_KEYSTORE"
     [[ -f "$KEYSTORE" ]] || { echo "UMBRA_RELEASE_KEYSTORE points to a missing file: $KEYSTORE"; exit 1; }
     KS_PASS="${UMBRA_RELEASE_KEYSTORE_PASSWORD:?UMBRA_RELEASE_KEYSTORE is set but UMBRA_RELEASE_KEYSTORE_PASSWORD is not}"
     KEY_ALIAS="${UMBRA_RELEASE_KEY_ALIAS:-umbra}"
     KEY_PASS="${UMBRA_RELEASE_KEY_PASSWORD:-$KS_PASS}"
-    KEYSTORE_KIND="release key (from env)"
+    KEYSTORE_KIND="release key"
 else
     KEYSTORE=""
     for candidate in \
@@ -97,4 +111,5 @@ rm -f "$ALIGNED" "$SIGNED.idsig"
 
 echo "==> APK ready: $SIGNED ($(du -h "$SIGNED" | cut -f1))"
 
-install_and_launch "$SIGNED" io.github.mkdevtests.umbra
+[[ $INSTALL == 1 ]] && install_and_launch "$SIGNED" io.github.mkdevtests.umbra
+exit 0
