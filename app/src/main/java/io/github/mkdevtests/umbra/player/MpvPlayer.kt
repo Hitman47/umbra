@@ -69,17 +69,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     @Volatile private var firstFrameAt = 0L
     @Volatile private var openMs: Long? = null
     @Volatile private var loadedMs: Long? = null
-    @Volatile private var started = false
 
-    /** The file failed to open (bad address, refused account, unreadable): mpv gave up before any picture. */
-    @Volatile var openFailed = false
-        private set
-
-    /** The first frame is shown. */
-    val isOpen get() = openMs != null
-
-    /** A seek is under way. */
-    val isSeeking get() = seekAt != 0L
     @Volatile private var seekAt = 0L
     private val seeks = java.util.Collections.synchronizedList(mutableListOf<Long>())
     @Volatile private var stallAt = 0L
@@ -159,8 +149,6 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         firstFrameAt = 0L
         openMs = null
         loadedMs = null
-        started = false
-        openFailed = false
         seekAt = 0L
         seeks.clear()
         stallAt = 0L
@@ -341,12 +329,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 selectTracks()
                 publishTracks()
             }
-            // After the end of the file replaced, if any: this file's own events follow.
-            START_FILE -> started = true
-            MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
-                if (started && openMs == null) openFailed = true
-                Log.i(TAG, "end of file")
-            }
+            MPVLib.MpvEvent.MPV_EVENT_END_FILE -> Log.i(TAG, "end of file")
         }
     }
 
@@ -431,9 +414,6 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
         /** MPV_EVENT_PLAYBACK_RESTART in mpv's client.h. */
         const val PLAYBACK_RESTART = 21
-
-        /** MPV_EVENT_START_FILE. */
-        const val START_FILE = 6
 
         const val MIN_STALL_MS = 300L
 

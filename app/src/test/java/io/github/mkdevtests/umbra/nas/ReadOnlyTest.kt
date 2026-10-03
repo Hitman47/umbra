@@ -40,14 +40,4 @@ class ReadOnlyTest {
         val hits = smbNas.readLines().withIndex().filter { (_, line) -> forbidden.containsMatchIn(line) }
         assertTrue("SMB write operation in SmbNas.kt: ${hits.map { "line ${it.index + 1}" }}", hits.isEmpty())
     }
-
-    @Test
-    fun nfsOnlyReads() {
-        val nfs = sources.single { it.name == "NfsNas.kt" }
-        val forbidden = Regex("""\.(write|remove|delete|mkdir|mkdirs|rename|renameTo|createNewFile|setAttributes|setLastModified|commit|symlink|link)\(""")
-        val hits = nfs.readLines().withIndex().filter { (_, line) -> forbidden.containsMatchIn(line) }
-        assertTrue("NFS write operation in NfsNas.kt: ${hits.map { "line ${it.index + 1}" }}", hits.isEmpty())
-        val emcUsers = sources.filter { file -> file.readLines().any { it.startsWith("import com.emc") } }
-        assertEquals(listOf(nfs), emcUsers)
-    }
 }

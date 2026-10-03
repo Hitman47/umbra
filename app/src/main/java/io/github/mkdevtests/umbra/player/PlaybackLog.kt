@@ -47,8 +47,6 @@ data class PlaybackMeasure(
     val fileMbps: Double? = null,
     val video: String? = null,
     val droppedFrames: Int? = null,
-    /** Why the file didn't play (the protocol test). */
-    val error: String? = null,
 ) {
     /** One line to paste: "03/10 21:14 · Dune · Zima · Wi-Fi · Local · SMB · ouverture 1,8 s · …". */
     fun line(): String = listOfNotNull(
@@ -58,7 +56,6 @@ data class PlaybackMeasure(
         network,
         route,
         protocol,
-        error?.let { "échec : $it" },
         openMs?.let { "ouverture ${seconds(it)}" + (loadedMs?.let { loaded -> " (fichier lu en ${seconds(loaded)})" } ?: "") },
         seeksMs.takeIf { it.isNotEmpty() }?.let { "sauts ${it.size} (médiane ${seconds(median(it))}, max ${seconds(it.max())})" },
         "coupures $stalls" + if (stalls > 0) " (${seconds(stalledMs)})" else "",
@@ -82,12 +79,10 @@ data class MeasureSummary(
     val seekMs: Long?,
     val stallsPerHour: Double?,
     val readMbps: Double?,
-    val failures: Int = 0,
 ) {
     fun line(): String = listOfNotNull(
         setup,
         "$count lecture${if (count > 1) "s" else ""}",
-        failures.takeIf { it > 0 }?.let { "$it échec${if (it > 1) "s" else ""}" },
         openMs?.let { "ouverture ${seconds(it)}" },
         seekMs?.let { "saut ${seconds(it)}" },
         stallsPerHour?.let { "coupures ${"%.1f".format(Locale.FRANCE, it)}/h" },
@@ -106,7 +101,6 @@ fun summarize(measures: List<PlaybackMeasure>): List<MeasureSummary> =
             seekMs = list.flatMap { it.seeksMs }.takeIf { it.isNotEmpty() }?.let(::median),
             stallsPerHour = watched.takeIf { it >= 60 }?.let { list.sumOf { m -> m.stalls } * 3600.0 / it },
             readMbps = list.mapNotNull { it.readMbps }.takeIf { it.isNotEmpty() }?.sorted()?.let { it[it.size / 2] },
-            failures = list.count { it.error != null },
         )
     }
 

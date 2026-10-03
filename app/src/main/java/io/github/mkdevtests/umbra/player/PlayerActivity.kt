@@ -76,13 +76,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
-import io.github.mkdevtests.umbra.bench.BENCH_SEEKS
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-
-/** How long a run of the protocol test waits for its first frame. */
-private const val BENCH_OPEN_TIMEOUT = 40_000L
 
 /** Full-screen player. Plays the queue in [EXTRA_QUEUE]: a film, or an episode and the ones after it. */
 class PlayerActivity : ComponentActivity() {
@@ -105,7 +100,6 @@ class PlayerActivity : ComponentActivity() {
         val settings = (application as NyxaraApp).settings.settings.value
         player = MpvPlayer(this, settings)
         start(queue[0])
-        if (queue[0].bench != null) runBench()
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
@@ -167,59 +161,23 @@ class PlayerActivity : ComponentActivity() {
     /** The queue index already measured: one measure per file. */
     private var measured = -1
 
-    /**
-     * The protocol test: each run opens its file, seeks to the same places
-     * (a quarter, 60 %, a tenth of the duration), plays a few seconds and is
-     * measured; then the next run, and back to the app at the end.
-     */
-    private fun runBench() {
-        lifecycleScope.launch {
-            while (true) {
-                benchRun()
-                if (index + 1 >= queue.size) break
-                index++
-                start(queue[index])
-            }
-            finish()
-        }
-    }
-
-    private suspend fun benchRun() {
-        val opened = withTimeoutOrNull(BENCH_OPEN_TIMEOUT) { while (!player.isOpen && !player.openFailed) delay(100) }
-        if (opened == null || player.openFailed) {
-            recordMeasure(error = if (opened == null) "pas d'image après ${BENCH_OPEN_TIMEOUT / 1000} s" else "lecture impossible (adresse, compte ou droits)")
-            return
-        }
-        delay(3_000)
-        val duration = player.duration.value
-        for (fraction in BENCH_SEEKS) {
-            player.seekTo(duration * fraction)
-            withTimeoutOrNull(30_000) { while (player.isSeeking) delay(50) }
-            delay(2_500)
-        }
-        delay(4_000)
-        recordMeasure()
-    }
-
     /** Keeps what this file cost to open, seek and play, for Réglages › Mesures de lecture. */
-    private fun recordMeasure(error: String? = null) {
+    private fun recordMeasure() {
         if (measured == index) return
         val item = queue.getOrNull(index) ?: return
         val figures = player.figures()
-        if (figures.openMs == null && error == null) return // never played: nothing to measure
+        if (figures.openMs == null) return // never played: nothing to measure
         measured = index
         val app = application as NyxaraApp
-        val stats = (item.statsKey ?: item.file)?.let { app.streamServer.statsFor(it) }
+        val stats = item.file?.let { app.streamServer.statsFor(it) }
         val source = item.file?.let { app.nas?.sourceOf(it) }
         app.measures.add(
             PlaybackMeasure(
                 at = System.currentTimeMillis(),
-                title = listOfNotNull(item.title, item.subtitle?.substringBefore(" · ")?.takeIf { item.bench == null }).joinToString(" "),
-                source = item.bench?.source ?: source?.label ?: "Appareil",
-                protocol = item.bench?.protocol ?: "SMB",
+                title = listOfNotNull(item.title, item.subtitle?.substringBefore(" · ")).joinToString(" "),
+                source = source?.label ?: "Appareil",
                 network = networkLabel(),
-                route = item.bench?.route ?: source?.host?.let(::routeOf) ?: "Local",
-                error = error,
+                route = source?.host?.let(::routeOf) ?: "Local",
                 openMs = figures.openMs,
                 loadedMs = figures.loadedMs,
                 seeksMs = figures.seeksMs,

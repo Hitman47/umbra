@@ -65,7 +65,6 @@ fun SettingsScreen(
     onRemoveSource: (SmbSource) -> Unit,
     onIncludeFolder: (SmbSource, String) -> Unit,
     onOpenStats: () -> Unit,
-    onOpenBench: () -> Unit,
     onBack: () -> Unit,
 ) {
     val settings by store.settings.collectAsState()
@@ -153,9 +152,6 @@ fun SettingsScreen(
             Section("Lecture") {
                 Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
                     TextButton(onClick = onOpenStats) { Text("Voir ›") }
-                }
-                Item("Tester les protocoles", "Les mêmes vidéos lues en SMB, WebDAV et NFS, mesurées.") {
-                    TextButton(onClick = onOpenBench) { Text("Ouvrir ›") }
                 }
             }
 

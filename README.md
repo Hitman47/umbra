@@ -6,7 +6,7 @@ App Android perso (téléphone / tablette) pour lire les vidéos d'un ou plusieu
 - Accès aux NAS en SMB, en lecture seule, via un mini-serveur HTTP local ; plusieurs sources, dossiers exclus.
 - Bibliothèque style Infuse : métadonnées TMDB (TheTVDB pour la numérotation des animes), fiches avec distribution, sagas et titres liés.
 - Suivi Trakt : synchronisation et scrobble.
-- Mesures de lecture et test des protocoles (SMB, WebDAV, NFS) dans Réglages › Lecture.
+- Mesures de lecture dans Réglages › Lecture. Comparaison SMB / WebDAV / NFS : `scripts/protocol_bench.py` (PC).
 
 Construire et installer : `./scripts/build-nyxara-debug.sh` (Git Bash). Publier : `./scripts/publish-nyxara-release.sh` depuis `main`.
 
