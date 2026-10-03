@@ -73,3 +73,17 @@ fun Backdrop(path: String?, modifier: Modifier = Modifier) {
 fun formatRuntime(minutes: Int?): String? = minutes?.let { if (it >= 60) "${it / 60} h ${"%02d".format(it % 60)}" else "$it min" }
 
 fun formatRating(rating: Double?): String? = rating?.let { "★ %.1f".format(it) }
+
+/** A small label over artwork, like "✓ Vu". */
+@Composable
+fun CornerBadge(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = Color.White,
+        modifier = modifier
+            .padding(6.dp)
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}

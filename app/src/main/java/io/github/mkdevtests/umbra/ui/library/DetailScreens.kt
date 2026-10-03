@@ -280,18 +280,7 @@ private fun EpisodeRow(episode: Episode, progress: Progress?, onClick: () -> Uni
                     drawStopIndicator = {},
                 )
             }
-            if (progress?.watched == true) {
-                Text(
-                    "✓ Vu",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50))
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                )
-            }
+            if (progress?.watched == true) CornerBadge("✓ Vu", Modifier.align(Alignment.TopEnd))
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(

@@ -73,7 +73,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun search(query: String, filters: SearchFilters): List<Found> {
         val hits = if (query.isBlank()) null else repository.search(query)
-        return searchResults(library.value, hidden.value, query, hits, filters)
+        return searchResults(library.value, hidden.value, query, hits, filters, history.value)
     }
 
     fun setHidden(movie: Movie, hidden: Boolean) = umbra.hidden.setHidden(movie.hideKey, hidden)

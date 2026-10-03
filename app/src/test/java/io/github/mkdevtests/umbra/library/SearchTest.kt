@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.library
 
+import io.github.mkdevtests.umbra.history.Progress
 import io.github.mkdevtests.umbra.history.hideKey
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -44,6 +45,22 @@ class SearchTest {
         val hidden = setOf(dune.hideKey)
         assertEquals(listOf("La Dune", "Show", "Sicario"), searchResults(library, hidden, "", null, SearchFilters()).map { it.title })
         assertEquals(listOf("Dune"), searchResults(library, hidden, "", null, SearchFilters(hidden = true)).map { it.title })
+    }
+
+    @Test
+    fun seenFilterAndBadges() {
+        val special = Episode(0, 1, "Séries\\Show\\S00E01.mkv", 1)
+        val episode2 = Episode(1, 2, "Séries\\Show\\S01E02.mkv", 1)
+        val twoEpisodes = Library(movies = listOf(dune, sicario), shows = listOf(show.copy(seasons = listOf(Season(0, episodes = listOf(special)), Season(1, episodes = listOf(episode, episode2))))))
+        fun watched(file: String) = file to Progress(file, 1400.0, 1440.0, 0)
+        fun titles(history: Map<String, Progress>, seen: Boolean?) =
+            searchResults(twoEpisodes, emptySet(), "", null, SearchFilters(seen = seen), history).map { it.title to it.badge }
+
+        val partly = mapOf(watched(dune.file), watched(episode.file), sicario.file to Progress(sicario.file, 600.0, 6000.0, 0))
+        assertEquals(listOf("Dune" to "✓ Vu"), titles(partly, seen = true))
+        assertEquals(listOf("Show" to "1/2", "Sicario" to null), titles(partly, seen = false)) // a film started isn't seen
+        // Every episode but the specials: the show is seen.
+        assertEquals(listOf("Dune" to "✓ Vu", "Show" to "✓ Vu"), titles(partly + watched(episode2.file), seen = true))
     }
 
     @Test

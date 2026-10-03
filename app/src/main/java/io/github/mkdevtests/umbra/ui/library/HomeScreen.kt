@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.browse.BrowserScreen
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
+import io.github.mkdevtests.umbra.history.seenOf
 import io.github.mkdevtests.umbra.history.without
 import io.github.mkdevtests.umbra.update.UpdateBanner
 import io.github.mkdevtests.umbra.update.Updater
@@ -91,14 +92,14 @@ fun HomeScreen(
                 onOpenShow = onOpenShow,
             )
             HomeTab.Movies -> PosterGrid(
-                items = library.movies.map { PosterItem(it.file, it.title, it.year, it.poster) },
+                items = library.movies.map { PosterItem(it.file, it.title, it.year, it.poster, badge = seenOf(it, history).badge) },
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucun film trouvé.",
                 onClick = onOpenMovie,
             )
             HomeTab.Shows -> PosterGrid(
                 items = library.shows.map { show ->
                     val episodes = show.seasons.sumOf { it.episodes.size }
-                    PosterItem(show.key, show.title, show.year, show.poster, "$episodes épisode${if (episodes > 1) "s" else ""}")
+                    PosterItem(show.key, show.title, show.year, show.poster, "$episodes épisode${if (episodes > 1) "s" else ""}", seenOf(show, history).badge)
                 },
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucune série trouvée.",
                 onClick = onOpenShow,
@@ -119,7 +120,15 @@ private fun StatusText(text: String, isError: Boolean = false) {
     )
 }
 
-internal data class PosterItem(val key: String, val title: String, val year: Int?, val poster: String?, val subtitle: String? = null)
+internal data class PosterItem(
+    val key: String,
+    val title: String,
+    val year: Int?,
+    val poster: String?,
+    val subtitle: String? = null,
+    /** "✓ Vu" or "3/10", in the poster's corner. */
+    val badge: String? = null,
+)
 
 @Composable
 internal fun PosterGrid(items: List<PosterItem>, emptyText: String, onClick: (String) -> Unit) {
@@ -138,7 +147,10 @@ internal fun PosterGrid(items: List<PosterItem>, emptyText: String, onClick: (St
     ) {
         items(items, key = { it.key }) { item ->
             Column(modifier = Modifier.clickable { onClick(item.key) }) {
-                Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth())
+                Box {
+                    Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth())
+                    item.badge?.let { CornerBadge(it, Modifier.align(Alignment.TopEnd)) }
+                }
                 Text(
                     item.title,
                     style = MaterialTheme.typography.bodyMedium,

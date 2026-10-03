@@ -54,11 +54,12 @@ fun SearchScreen(
     val query by viewModel.searchQuery.collectAsState()
     val filters by viewModel.searchFilters.collectAsState()
     val hidden by viewModel.hidden.collectAsState()
+    val history by viewModel.history.collectAsState()
     var results by remember { mutableStateOf<List<Found>?>(null) }
     val genres = remember(library) { genresOf(library) }
     val decades = remember(library) { decadesOf(library) }
 
-    LaunchedEffect(query, filters, library, hidden) {
+    LaunchedEffect(query, filters, library, hidden, history) {
         delay(150) // one search per pause in the typing
         results = viewModel.search(query, filters)
     }
@@ -102,6 +103,13 @@ fun SearchScreen(
                     label = { Text(kind.label) },
                 )
             }
+            items(listOf(true to "Vus", false to "Non vus")) { (seen, label) ->
+                FilterChip(
+                    selected = filters.seen == seen,
+                    onClick = { viewModel.searchFilters.value = filters.copy(seen = seen.takeIf { it != filters.seen }) },
+                    label = { Text(label) },
+                )
+            }
             item {
                 FilterChip(
                     selected = filters.hidden,
@@ -130,7 +138,7 @@ fun SearchScreen(
         }
         val found = results ?: return@Column
         PosterGrid(
-            items = found.map { PosterItem(it.key, it.title, it.year, it.poster, it.note) },
+            items = found.map { PosterItem(it.key, it.title, it.year, it.poster, it.note, it.badge) },
             emptyText = when {
                 filters.hidden -> "Aucun titre masqué."
                 query.isBlank() -> "Aucun titre pour ces filtres."

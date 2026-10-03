@@ -1,7 +1,10 @@
 package io.github.mkdevtests.umbra.library
 
 import io.github.mkdevtests.umbra.browse.naturalCompare
+import io.github.mkdevtests.umbra.history.Progress
+import io.github.mkdevtests.umbra.history.Seen
 import io.github.mkdevtests.umbra.history.hideKey
+import io.github.mkdevtests.umbra.history.seenOf
 
 enum class SearchKind(val label: String) { All("Tout"), Movies("Films"), Shows("Séries") }
 
@@ -12,6 +15,8 @@ data class SearchFilters(
     val decade: Int? = null,
     /** Only the hidden titles, to show one again. */
     val hidden: Boolean = false,
+    /** True: only what was watched to the end (every episode of a show); false: the rest. */
+    val seen: Boolean? = null,
 )
 
 /** What the index found: rows by title, then rows by actor or director. */
@@ -25,6 +30,7 @@ data class Found(
     val year: Int?,
     val poster: String?,
     val note: String? = null,
+    val badge: String? = null,
 )
 
 /**
@@ -32,7 +38,14 @@ data class Found(
  * others), then shows by an episode title, then actors and directors.
  * Without a query, every title, so the filters alone can browse.
  */
-fun searchResults(library: Library, hidden: Set<String>, query: String, hits: SearchHits?, filters: SearchFilters): List<Found> {
+fun searchResults(
+    library: Library,
+    hidden: Set<String>,
+    query: String,
+    hits: SearchHits?,
+    filters: SearchFilters,
+    history: Map<String, Progress> = emptyMap(),
+): List<Found> {
     val movies = library.movies.associateBy { it.file }
     val shows = library.shows.associateBy { it.key }
     val showOfEpisode by lazy { library.shows.flatMap { show -> show.seasons.flatMap { it.episodes }.map { it.file to show } }.toMap() }
@@ -68,10 +81,16 @@ fun searchResults(library: Library, hidden: Set<String>, query: String, hits: Se
 
     return found.values.mapNotNull { (item, note) ->
         when (item) {
-            is Movie -> item.takeIf { filters.kind != SearchKind.Shows && keep(it.hideKey, it.genres, it.year, hidden, filters) }
-                ?.let { Found(it.file, isShow = false, it.title, it.year, it.poster, note) }
-            is Show -> item.takeIf { filters.kind != SearchKind.Movies && keep(it.hideKey, it.genres, it.year, hidden, filters) }
-                ?.let { Found(it.key, isShow = true, it.title, it.year, it.poster, note) }
+            is Movie -> {
+                val seen = seenOf(item, history)
+                item.takeIf { filters.kind != SearchKind.Shows && keep(it.hideKey, it.genres, it.year, seen, hidden, filters) }
+                    ?.let { Found(it.file, isShow = false, it.title, it.year, it.poster, note, seen.badge) }
+            }
+            is Show -> {
+                val seen = seenOf(item, history)
+                item.takeIf { filters.kind != SearchKind.Movies && keep(it.hideKey, it.genres, it.year, seen, hidden, filters) }
+                    ?.let { Found(it.key, isShow = true, it.title, it.year, it.poster, note, seen.badge) }
+            }
             else -> null
         }
     }
@@ -86,8 +105,9 @@ fun genresOf(library: Library): List<String> =
 fun decadesOf(library: Library): List<Int> =
     (library.movies.mapNotNull { it.year } + library.shows.mapNotNull { it.year }).map { it / 10 * 10 }.distinct().sortedDescending()
 
-private fun keep(hideKey: String, genres: List<String>, year: Int?, hidden: Set<String>, filters: SearchFilters): Boolean =
+private fun keep(hideKey: String, genres: List<String>, year: Int?, seen: Seen, hidden: Set<String>, filters: SearchFilters): Boolean =
     (hideKey in hidden) == filters.hidden &&
+        (filters.seen == null || seen.all == filters.seen) &&
         (filters.genre == null || filters.genre in genres) &&
         (filters.decade == null || (year != null && year / 10 * 10 == filters.decade))
 
