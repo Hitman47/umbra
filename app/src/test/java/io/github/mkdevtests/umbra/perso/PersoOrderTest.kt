@@ -129,4 +129,17 @@ class PersoOrderTest {
         assertTrue((System.nanoTime() - started) / 1_000_000 < 5_000)
         assertEquals(2_000, order.played.toSet().size)
     }
+
+    @Test
+    fun the_queue_grows_while_the_folder_is_walked() {
+        // 15 played in an earlier session, the walk has found 5 so far.
+        val order = PlayOrder(files.take(5), shuffle = true, played = files.take(15), random = Random(6), complete = false)
+        val first = order.next()!!
+        // Nothing new found yet: the known ones play rather than ending the round.
+        assertTrue(first in files.take(5))
+        order.reset(files, complete = true)
+        // The round was kept: the 5 not played yet come first.
+        val next = List(5) { order.next()!! }
+        assertEquals(files.drop(15).toSet(), next.toSet())
+    }
 }

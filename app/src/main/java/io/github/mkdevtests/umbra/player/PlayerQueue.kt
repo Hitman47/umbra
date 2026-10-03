@@ -82,6 +82,9 @@ class PlayerQueue(
 
     fun toggleShuffle() = change { order.setShuffle(!order.shuffle) }
 
+    /** The walk of the folder found more ([complete]: all of it). */
+    fun keysChanged(keys: List<String>, complete: Boolean) = change { order.reset(keys, complete) }
+
     fun cycleRepeat() = change { order.repeat = order.repeat.next() }
 
     fun reshuffle() = change { order.reshuffle() }

@@ -20,17 +20,28 @@ enum class Repeat(val label: String) {
  * videos stays as fast as one of ten.
  */
 class PlayOrder(
-    val keys: List<String>,
+    keys: List<String>,
     shuffle: Boolean,
     played: Collection<String> = emptyList(),
     var repeat: Repeat = Repeat.All,
     private val random: Random = Random.Default,
+    /** False while the folder is still being walked: [reset] brings the rest. */
+    complete: Boolean = true,
 ) {
     init {
         require(keys.isNotEmpty()) { "no video" }
     }
 
-    private val position = HashMap<String, Int>(keys.size * 2).also { map -> keys.forEachIndexed { i, key -> map.putIfAbsent(key, i) } }
+    var keys: List<String> = keys
+        private set
+
+    /** All the keys are known: a round can end. */
+    var complete: Boolean = complete
+        private set
+
+    private var position = indexOf(keys)
+
+    private fun indexOf(keys: List<String>) = HashMap<String, Int>(keys.size * 2).also { map -> keys.forEachIndexed { i, key -> map.putIfAbsent(key, i) } }
 
     /** Where the order goes on from, in [keys]: the last key that came by the order, not one asked to play next. */
     private var cursor: String? = null
@@ -45,8 +56,8 @@ class PlayOrder(
     var current: String? = null
         private set
 
-    /** This shuffle round's keys, in the order played. */
-    private val round = played.filterTo(LinkedHashSet()) { it in position }
+    /** This shuffle round's keys, in the order played; kept whole until all the keys are known. */
+    private val round = if (complete) played.filterTo(LinkedHashSet()) { it in position } else LinkedHashSet(played)
 
     /** The rest of the round, in its random order; null: drawn when needed. */
     private var pending: ArrayDeque<String>? = null
@@ -92,6 +103,21 @@ class PlayOrder(
 
     /** What will play, in order: this round's rest when shuffled, up to the end (or around once with [Repeat.All]). */
     fun upcoming(): List<String> = upcomingSequence().toList()
+
+    /**
+     * The keys found so far ([complete]: all of them), the walk of a folder
+     * going on while the first video plays; what played and the order kept.
+     */
+    fun reset(keys: List<String>, complete: Boolean) {
+        if (keys.isEmpty()) return
+        this.keys = keys
+        this.complete = complete
+        position = indexOf(keys)
+        // Gone from the folder: out of the round and of the asked ones.
+        if (complete) round.retainAll(position.keys)
+        queued.retainAll { it in position }
+        pending = null
+    }
 
     fun setShuffle(on: Boolean) {
         shuffle = on
@@ -144,6 +170,8 @@ class PlayOrder(
     /** The rest of the round shuffled; a new round when it is over and the queue loops. */
     private fun draw(): ArrayDeque<String> {
         var fresh = keys.filter { it !in round && it !in removed && it != current }
+        // Still walking: what is known so far plays again rather than ending the round too early.
+        if (fresh.isEmpty() && !complete) return ArrayDeque(keys.filter { it !in removed && it != current }.shuffled(random))
         if (fresh.isEmpty() && repeat != Repeat.None) {
             round.clear()
             current?.let(round::add)

@@ -83,7 +83,8 @@ fun QueuePanel(queue: PlayerQueue, position: Double, duration: Double, onJump: (
         }
         val noun = if (queue.perso) "vidéo" else "épisode"
         Text(
-            "${queue.size} $noun${if (queue.size > 1) "s" else ""}" + if (queue.shuffle) " · ordre aléatoire" else " · dans l'ordre",
+            "${queue.size} $noun${if (queue.size > 1) "s" else ""}" + (if (queue.shuffle) " · ordre aléatoire" else " · dans l'ordre") +
+                if (!queue.order.complete) " · recherche des autres…" else "",
             color = Dim,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 24.dp),

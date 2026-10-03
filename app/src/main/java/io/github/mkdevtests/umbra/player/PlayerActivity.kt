@@ -122,6 +122,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import io.github.mkdevtests.umbra.nas.toUserMessage
+import io.github.mkdevtests.umbra.nas.within
 import io.github.mkdevtests.umbra.perso.PersoFolderState
 import io.github.mkdevtests.umbra.perso.PersoVideo
 import io.github.mkdevtests.umbra.perso.firstOf
@@ -274,44 +275,75 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /** Walks the Perso folder, then plays: the video asked, or where it stopped, or the next in its order. */
+    /**
+     * Plays a Perso folder without waiting for the whole of it: at once from
+     * its last walk (kept on the device), or the video asked, or the one that
+     * stopped midway; else, shuffled, as soon as the first videos are found.
+     * The walk goes on meanwhile and the queue grows with it.
+     */
     private fun preparePerso(request: PersoRequest) {
         lifecycleScope.launch {
             val nas = app.nas
             val offline = request.start?.let { app.downloads.localFile(persoDownloadKey(it)) } != null
-            val videos = if (request.only || nas == null) {
-                emptyList()
-            } else {
-                try {
-                    videosUnder(nas, request.folder)
-                } catch (e: Exception) {
-                    if (!offline) {
-                        preparing = "Lecture impossible : ${e.toUserMessage()}"
-                        return@launch
-                    }
-                    emptyList()
-                }
-            }
-            if (videos.isEmpty()) {
+            if (request.only || nas == null) {
                 // Downloaded: played alone, NAS or not.
-                if (offline) {
-                    val built = PlayerQueue(PlayOrder(listOf(request.start), shuffle = false, repeat = Repeat.None), ::persoItem, perso = true)
-                    queue = built
-                    start(built.begin(request.start))
-                } else {
-                    preparing = "Aucune vidéo dans ce dossier."
-                }
+                if (offline && request.start != null) beginPerso(request, listOf(request.start), complete = true, shuffle = false)
+                else preparing = if (request.only) "Vidéo introuvable sur l'appareil." else "NAS injoignable."
                 return@launch
             }
-            persoVideos = videos.associateBy { it.path }
-            val files = videos.map { it.path }
             val state = app.perso.folder(request.folder)
-            val order = PlayOrder(files, request.shuffle, state.played, repeat = Repeat.All)
-            val first = firstOf(order, request.start, state) { app.perso.progress.value[it] }
-            val built = PlayerQueue(order, ::persoItem, perso = true)
-            queue = built
-            start(built.begin(first))
-            saveFolder()
+            val resume = state.last?.takeIf { app.perso.progress.value[it]?.inProgress == true && it.within(request.folder) }
+            val cached = withContext(Dispatchers.IO) { app.persoTrees.load(request.folder) }
+            val known = LinkedHashMap<String, PersoVideo>()
+            cached?.forEach { known[it.path] = it }
+            listOfNotNull(request.start, resume).forEach { known.getOrPut(it) { PersoVideo(it) } }
+            persoVideos = known
+            // In name order the first video is only known from a walk, unless one is asked or resumed.
+            if (known.isNotEmpty() && (request.shuffle || cached != null || request.start != null || resume != null)) {
+                beginPerso(request, known.keys.toList(), complete = false)
+            }
+            val began = SystemClock.elapsedRealtime()
+            var grown = began
+            val all = try {
+                videosUnder(nas, request.folder) { batch ->
+                    withContext(Dispatchers.Main) {
+                        batch.forEach { known.putIfAbsent(it.path, it) }
+                        val now = SystemClock.elapsedRealtime()
+                        val queue = queue
+                        when {
+                            // Shuffled: enough found to draw from, or the walk is slow.
+                            queue == null && request.shuffle && (known.size >= FIRST_BATCH || now - began > FIRST_WAIT_MS) ->
+                                beginPerso(request, known.keys.toList(), complete = false)
+                            queue != null && now - grown > GROW_EVERY_MS -> {
+                                grown = now
+                                queue.keysChanged(known.keys.toList(), complete = false)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                if (queue == null) preparing = "Lecture impossible : ${e.toUserMessage()}"
+                return@launch
+            }
+            if (all.isEmpty()) {
+                if (queue == null) preparing = "Aucune vidéo dans ce dossier."
+                return@launch
+            }
+            // The whole folder, in name order: for the queue, and for the next time.
+            persoVideos = all.associateByTo(LinkedHashMap()) { it.path }
+            withContext(Dispatchers.IO) { app.persoTrees.save(request.folder, all) }
+            val keys = all.map { it.path }
+            queue?.keysChanged(keys, complete = true) ?: beginPerso(request, keys, complete = true)
         }
+    }
+
+    private fun beginPerso(request: PersoRequest, keys: List<String>, complete: Boolean, shuffle: Boolean = request.shuffle) {
+        val state = app.perso.folder(request.folder)
+        val order = PlayOrder(keys, shuffle, state.played, repeat = if (request.only) Repeat.None else Repeat.All, complete = complete)
+        val first = firstOf(order, request.start, state) { app.perso.progress.value[it] }
+        val built = PlayerQueue(order, ::persoItem, perso = true)
+        queue = built
+        start(built.begin(first))
     }
 
     /** A Perso video: from the device when downloaded, where it stopped. */
@@ -634,6 +666,13 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_PERSO = "perso"
         private const val ACTION_PIP_TOGGLE = "io.github.mkdevtests.umbra.PIP_TOGGLE"
         private const val PREFETCH_BEFORE_END = 90.0
+
+        /** A shuffled Perso folder starts once this many videos are found, or after [FIRST_WAIT_MS]. */
+        private const val FIRST_BATCH = 40
+        private const val FIRST_WAIT_MS = 1_500L
+
+        /** How often the queue takes in what the walk found meanwhile. */
+        private const val GROW_EVERY_MS = 2_000L
 
         /** ⏮ past this many seconds: back to the start of the video, not the one before. */
         private const val RESTART_AFTER = 5.0

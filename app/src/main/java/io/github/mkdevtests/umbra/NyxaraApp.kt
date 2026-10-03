@@ -98,6 +98,9 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** The Perso tab's history and lock, apart from the library. */
     val perso by lazy { io.github.mkdevtests.umbra.perso.PersoStore(this, scope) }
 
+    /** The videos of the Perso folders played last, for a shuffle that starts at once. */
+    val persoTrees by lazy { io.github.mkdevtests.umbra.perso.PersoTrees(noBackupFilesDir.resolve("perso-trees")) }
+
     /** Durations of the Perso videos, kept apart from the library's media infos and out of the backups. */
     val persoMedia by lazy { MediaInfoStore(noBackupFilesDir.resolve("perso-media.json"), { nas }, scope) }
 
