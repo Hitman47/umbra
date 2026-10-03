@@ -7,7 +7,6 @@ import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2ShareAccess
 import com.hierynomus.mssmb2.SMBApiException
 import com.hierynomus.protocol.transport.TransportException
-import com.hierynomus.security.bc.BCSecurityProvider
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
@@ -166,7 +165,7 @@ class SmbNas(override val source: NasSource) : NasClient {
     private fun newClient() = SMBClient(
         SmbConfig.builder()
             // Android's crypto lacks MD4, which NTLM needs: use smbj's BouncyCastle provider.
-            .withSecurityProvider(BCSecurityProvider())
+            .withSecurityProvider(SmbSecurity.provider())
             .withTimeout(15, TimeUnit.SECONDS)
             .withSoTimeout(30, TimeUnit.SECONDS)
             // Up to 4 MiB per READ (the NAS may allow less): a 2 MiB block in one round trip through Tailscale.

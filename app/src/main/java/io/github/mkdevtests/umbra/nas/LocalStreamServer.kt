@@ -3,7 +3,7 @@ package io.github.mkdevtests.umbra.nas
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.InputStream
-import io.github.mkdevtests.umbra.library.isImageName
+import io.github.mkdevtests.umbra.browse.isImageName
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.UUID

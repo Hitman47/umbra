@@ -14,6 +14,11 @@ private val JUNK_FOLDERS = setOf("@eadir", "#recycle", "\$recycle.bin", "system 
 val NasEntry.extension get() = name.substringAfterLast('.', "").lowercase()
 val NasEntry.isVideo get() = !isDirectory && extension in VIDEO_EXTENSIONS
 
+private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
+
+/** A picture by its name: artwork next to the videos (folder.jpg…). */
+fun isImageName(name: String) = name.substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS
+
 /** Folders first, then videos; other files and junk hidden; natural order ("Saison 2" < "Saison 10"). */
 fun sortForDisplay(entries: List<NasEntry>): List<NasEntry> = entries
     .filter { if (it.isDirectory) it.name.lowercase() !in JUNK_FOLDERS && !it.name.startsWith('.') else it.isVideo }

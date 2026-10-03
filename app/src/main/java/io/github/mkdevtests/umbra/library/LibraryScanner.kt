@@ -1,6 +1,7 @@
 package io.github.mkdevtests.umbra.library
 
 import android.util.Log
+import io.github.mkdevtests.umbra.browse.isImageName
 import io.github.mkdevtests.umbra.browse.isVideo
 import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.browse.subtitlesFor

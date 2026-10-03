@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.library
 
+import io.github.mkdevtests.umbra.browse.isImageName
 import kotlinx.serialization.Serializable
 
 /** Prefix of an artwork path that is an image on the NAS, not on TMDB: "nas:Films\Dune\folder.jpg". */
@@ -22,13 +23,10 @@ data class LocalArt(val posters: Map<String, String> = emptyMap(), val backdrops
     )
 }
 
-private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
 private val POSTER_NAMES = listOf("folder", "poster", "cover", "default", "show", "movie")
 private val BACKDROP_NAMES = listOf("fanart", "backdrop", "background", "art")
 /** Images that are no poster, even alone in their folder. */
 private val OTHER_NAMES = setOf("banner", "logo", "clearlogo", "clearart", "disc", "discart", "landscape", "thumb", "characterart")
-
-fun isImageName(name: String) = name.substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS
 
 /** The art of one folder ([folder], its [images] and [videos], as NAS paths). */
 fun folderArt(folder: String, images: List<String>, videos: List<String>): LocalArt {
