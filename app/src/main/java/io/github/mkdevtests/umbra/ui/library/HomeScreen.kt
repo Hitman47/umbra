@@ -72,14 +72,14 @@ fun HomeScreen(
 
         when (tab) {
             HomeTab.Movies -> PosterGrid(
-                items = library.movies.map { PosterItem(it.folder, it.title, it.year, it.poster) },
+                items = library.movies.map { PosterItem(it.file, it.title, it.year, it.poster) },
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucun film trouvé.",
                 onClick = onOpenMovie,
             )
             HomeTab.Shows -> PosterGrid(
                 items = library.shows.map { show ->
                     val episodes = show.seasons.sumOf { it.episodes.size }
-                    PosterItem(show.folder, show.title, show.year, show.poster, "$episodes épisode${if (episodes > 1) "s" else ""}")
+                    PosterItem(show.key, show.title, show.year, show.poster, "$episodes épisode${if (episodes > 1) "s" else ""}")
                 },
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucune série trouvée.",
                 onClick = onOpenShow,

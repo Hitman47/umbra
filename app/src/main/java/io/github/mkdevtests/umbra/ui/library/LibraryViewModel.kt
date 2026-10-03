@@ -29,9 +29,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** Called once a new NAS source is connected. */
     fun onSourceChanged() = repository.startScan()
 
-    fun movie(folder: String): Movie? = library.value.movies.firstOrNull { it.folder == folder }
+    fun movie(file: String): Movie? = library.value.movies.firstOrNull { it.file == file }
 
-    fun show(folder: String): Show? = library.value.shows.firstOrNull { it.folder == folder }
+    fun show(key: String): Show? = library.value.shows.firstOrNull { it.key == key }
 
     fun playIntent(movie: Movie): Intent = play(movie.file, movie.title, movie.subtitles)
 

@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.nas
 
+import android.util.Log
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.mssmb2.SMB2CreateDisposition
@@ -14,6 +15,8 @@ import com.hierynomus.smbj.common.SMBRuntimeException
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.share.File
+import com.rapid7.client.dcerpc.mssrvs.ServerService
+import com.rapid7.client.dcerpc.transport.SMBTransportFactories
 import java.io.Closeable
 import java.io.IOException
 import java.net.ConnectException
@@ -62,6 +65,30 @@ class SmbNas(val source: SmbSource) : Closeable {
                     )
                 }
         }
+    }
+
+    /**
+     * File shares the NAS offers to this user, like Infuse or a file manager
+     * would list them. Throws on connection or login errors; returns null when
+     * the NAS refuses to enumerate its shares (the user then types them).
+     */
+    fun availableShares(): List<String>? {
+        val session = synchronized(this) { session?.takeIf { it.connection.isConnected } ?: openSession() }
+        val shares = try {
+            ServerService(SMBTransportFactories.SRVSVC.getTransport(session)).shares1
+        } catch (e: Exception) {
+            Log.w(TAG, "share enumeration failed", e)
+            return null
+        } catch (e: LinkageError) {
+            // dcerpc is built against an older smbj: fail soft if an API moved.
+            Log.w(TAG, "share enumeration unavailable", e)
+            return null
+        }
+        return shares
+            // Disk shares only (not printers or IPC$), without hidden admin shares ("C$").
+            .filter { it.type and 0xFFFF == 0 && !it.netName.endsWith('$') }
+            .map { it.netName }
+            .distinct()
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */
@@ -128,6 +155,10 @@ class SmbNas(val source: SmbSource) : Closeable {
         runCatching { session?.connection?.close(true) }
         session = null
         shares.clear()
+    }
+
+    private companion object {
+        const val TAG = "SmbNas"
     }
 }
 

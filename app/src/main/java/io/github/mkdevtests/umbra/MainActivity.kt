@@ -46,8 +46,8 @@ class MainActivity : ComponentActivity() {
 
 /** Screens stacked above the home screen. */
 private sealed interface Detail {
-    data class MovieDetail(val folder: String) : Detail
-    data class ShowDetail(val folder: String) : Detail
+    data class MovieDetail(val file: String) : Detail
+    data class ShowDetail(val key: String) : Detail
 }
 
 /** NAS setup until a source works, then the library. */
@@ -67,6 +67,7 @@ private fun UmbraRoot(
     if (editingSource) {
         SourceScreen(
             initial = browserViewModel.source,
+            onDiscover = browserViewModel::discoverShares,
             onConnect = { source ->
                 browserViewModel.connect(source).also { error ->
                     if (error == null) {
@@ -93,7 +94,7 @@ private fun UmbraRoot(
             onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
             onEditSource = { editingSource = true },
         )
-        is Detail.MovieDetail -> libraryViewModel.movie(detail.folder)?.let { MovieDetailScreen(it, libraryViewModel, back) } ?: back()
-        is Detail.ShowDetail -> libraryViewModel.show(detail.folder)?.let { ShowDetailScreen(it, libraryViewModel, back) } ?: back()
+        is Detail.MovieDetail -> libraryViewModel.movie(detail.file)?.let { MovieDetailScreen(it, libraryViewModel, back) } ?: back()
+        is Detail.ShowDetail -> libraryViewModel.show(detail.key)?.let { ShowDetailScreen(it, libraryViewModel, back) } ?: back()
     }
 }

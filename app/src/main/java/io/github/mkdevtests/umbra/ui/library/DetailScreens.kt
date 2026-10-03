@@ -72,7 +72,7 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> U
 @Composable
 fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
-    var selected by rememberSaveable(show.folder) { mutableIntStateOf(show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1) }
+    var selected by rememberSaveable(show.key) { mutableIntStateOf(show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1) }
     val season = show.seasons.firstOrNull { it.number == selected }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {

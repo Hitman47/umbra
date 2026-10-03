@@ -37,7 +37,7 @@ class LibraryRepository(private val app: UmbraApp) {
     private val loadJob = scope.launch {
         if (!file.exists()) return@launch
         runCatching { json.decodeFromString(Library.serializer(), file.readText()) }
-            .onSuccess { _library.value = it }
+            .onSuccess { if (it.version == Library.VERSION) _library.value = it }
             .onFailure { Log.w(TAG, "library.json unreadable, rescanning", it) }
     }
 

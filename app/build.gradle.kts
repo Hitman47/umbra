@@ -83,6 +83,7 @@ dependencies {
 
     // NAS access: SMB2/3 client + localhost HTTP server feeding mpv.
     implementation(libs.smbj)
+    implementation(libs.dcerpc)
     implementation(libs.nanohttpd)
 
     // Metadata (TMDB) and artwork.
@@ -90,4 +91,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+
+    testImplementation(libs.junit)
 }

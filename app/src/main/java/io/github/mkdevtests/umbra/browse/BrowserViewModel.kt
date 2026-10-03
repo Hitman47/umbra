@@ -29,6 +29,16 @@ data class BrowserState(
     val error: String? = null,
 )
 
+/** Result of the first setup step: logging in and listing the NAS shares. */
+sealed interface ShareDiscovery {
+    data class Found(val shares: List<String>) : ShareDiscovery
+
+    /** Logged in, but the NAS won't list its shares: the user types them. */
+    data object Manual : ShareDiscovery
+
+    data class Failed(val message: String) : ShareDiscovery
+}
+
 class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     private val umbra = app as UmbraApp
@@ -84,6 +94,20 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
         val subtitles = subtitlesFor(video, listing).map { server.urlFor(it.path) }
         return PlayerActivity.intent(getApplication(), server.urlFor(video.path), video.name, subtitles)
     }
+
+    /** Logs in to the NAS at [host] and lists its file shares. */
+    suspend fun discoverShares(host: String, username: String, password: String): ShareDiscovery =
+        withContext(Dispatchers.IO) {
+            val nas = SmbNas(SmbSource(host, emptyList(), username, password))
+            try {
+                val shares = nas.availableShares()
+                if (shares.isNullOrEmpty()) ShareDiscovery.Manual else ShareDiscovery.Found(shares.sortedWith(::naturalCompare))
+            } catch (e: Exception) {
+                ShareDiscovery.Failed(e.toUserMessage())
+            } finally {
+                nas.close()
+            }
+        }
 
     /**
      * Connects to [source] and, if it works, makes it the app's source.

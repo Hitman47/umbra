@@ -11,21 +11,48 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import kotlin.math.abs
+import kotlin.math.ln
 
 /** Minimal TMDB v3 client, French first. Blocking I/O runs on [Dispatchers.IO]. */
 class Tmdb(private val token: String, private val http: OkHttpClient) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun searchMovie(query: String, year: Int?): TmdbSearchItem? =
-        get("search/movie", TmdbSearch.serializer(), "query" to query, "year" to year?.toString())
-            .results.firstOrNull()
-            ?: if (year != null) searchMovie(query, null) else null
+    /**
+     * Best TMDB film for the first of [queries] that matches well, else the
+     * best candidate overall. Results are ranked by title equality and year,
+     * not just taken in TMDB's order.
+     */
+    suspend fun findMovie(queries: List<String>, year: Int?): Int? =
+        find(queries, year) { query -> search("search/movie", "year", query, year) }
 
-    suspend fun searchShow(query: String, year: Int?): TmdbSearchItem? =
-        get("search/tv", TmdbSearch.serializer(), "query" to query, "first_air_date_year" to year?.toString())
-            .results.firstOrNull()
-            ?: if (year != null) searchShow(query, null) else null
+    suspend fun findShow(queries: List<String>, year: Int?): Int? =
+        find(queries, year) { query -> search("search/tv", "first_air_date_year", query, year) }
+
+    /** TMDB film for an IMDb id ("tt0055928"), the most reliable match when the file name has one. */
+    suspend fun movieForImdb(imdbId: String): Int? =
+        get("find/$imdbId", TmdbFind.serializer(), "external_source" to "imdb_id").movieResults.firstOrNull()?.id
+
+    private suspend fun find(queries: List<String>, year: Int?, search: suspend (String) -> List<TmdbSearchItem>): Int? {
+        var best: Pair<TmdbSearchItem, Double>? = null
+        for (query in queries.filter { it.isNotBlank() }.distinct()) {
+            val candidate = search(query).withIndex().maxByOrNull { (index, item) -> score(item, index, query, year) } ?: continue
+            val score = score(candidate.value, candidate.index, query, year)
+            if (best == null || score > best.second) best = candidate.value to score
+            if (score >= GOOD_MATCH) break // same title: no need to try the other queries
+        }
+        return best?.first?.id
+    }
+
+    /** Year-filtered search first; without the year if that finds nothing (wrong or missing year). */
+    private suspend fun search(path: String, yearParam: String, query: String, year: Int?): List<TmdbSearchItem> {
+        if (year != null) {
+            get(path, TmdbSearch.serializer(), "query" to query, yearParam to year.toString()).results
+                .takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return get(path, TmdbSearch.serializer(), "query" to query).results
+    }
 
     suspend fun movie(id: Int): TmdbMovie {
         val movie = get("movie/$id", TmdbMovie.serializer())
@@ -72,6 +99,30 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
     }
 
     companion object {
+        private const val EXACT_TITLE = 100.0
+        private const val GOOD_MATCH = 80.0
+
+        /** Higher is better: same title (French or original), same year, high in TMDB's ranking. */
+        private fun score(item: TmdbSearchItem, index: Int, query: String, year: Int?): Double {
+            val wanted = normalizeTitle(query)
+            val titles = listOfNotNull(item.title, item.originalTitle, item.name, item.originalName).map(::normalizeTitle)
+            var score = -3.0 * index + ln(1.0 + (item.popularity ?: 0.0))
+            score += when {
+                wanted in titles -> EXACT_TITLE
+                titles.any { it.isNotEmpty() && (it.startsWith(wanted) || wanted.startsWith(it)) } -> 30.0
+                else -> 0.0
+            }
+            val released = (item.releaseDate ?: item.firstAirDate)?.take(4)?.toIntOrNull()
+            if (year != null && released != null) {
+                score += when (abs(released - year)) {
+                    0 -> 50.0
+                    1 -> 30.0
+                    else -> -20.0
+                }
+            }
+            return score
+        }
+
         private const val BASE_URL = "https://api.themoviedb.org/3/"
         private const val LANGUAGE = "fr-FR"
 
@@ -84,7 +135,19 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
 data class TmdbSearch(val results: List<TmdbSearchItem> = emptyList())
 
 @Serializable
-data class TmdbSearchItem(val id: Int)
+data class TmdbSearchItem(
+    val id: Int,
+    val title: String? = null,
+    @SerialName("original_title") val originalTitle: String? = null,
+    val name: String? = null,
+    @SerialName("original_name") val originalName: String? = null,
+    @SerialName("release_date") val releaseDate: String? = null,
+    @SerialName("first_air_date") val firstAirDate: String? = null,
+    val popularity: Double? = null,
+)
+
+@Serializable
+data class TmdbFind(@SerialName("movie_results") val movieResults: List<TmdbSearchItem> = emptyList())
 
 @Serializable
 data class TmdbGenre(val name: String)
