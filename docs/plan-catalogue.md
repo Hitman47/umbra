@@ -1,6 +1,6 @@
 # Plan : vue « Profils » de l'onglet Perso (catalogue externe)
 
-État : **en cours**. Déjà écrit et compilé (pas encore branché à l'interface) :
+État : **fait** (1.1.0), à vérifier sur appareil.
 `catalog/Catalog.kt`, `catalog/CatalogClient.kt`, `catalog/CatalogStore.kt`,
 route photo dans `nas/LocalStreamServer.kt`.
 
