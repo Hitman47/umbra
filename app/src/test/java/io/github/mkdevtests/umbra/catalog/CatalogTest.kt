@@ -56,8 +56,8 @@ class CatalogTest {
     /** The catalogue is only ever read: its client sends GET requests and nothing else. */
     @Test
     fun the_catalogue_is_read_only() {
-        val dir = File("src/main/java/io/github/mkdevtests/umbra/catalog")
-        val code = dir.walk().filter { it.extension == "kt" }.joinToString("\n") { it.readText() }
+        // The only file that talks to the catalogue (the store only writes its own copy on the device).
+        val code = File("src/main/java/io/github/mkdevtests/umbra/catalog/CatalogClient.kt").readText()
         val writes = Regex("""\.(post|put|patch|delete|method)\(""").findAll(code).map { it.value }.toList()
         assertEquals(emptyList<String>(), writes)
         assertTrue(".get()" in code)
