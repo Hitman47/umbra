@@ -2,6 +2,7 @@ package io.github.mkdevtests.umbra.ui.library
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,7 @@ import io.github.mkdevtests.umbra.home.nextUp
 import io.github.mkdevtests.umbra.home.regularEpisodes
 import io.github.mkdevtests.umbra.home.taste
 import io.github.mkdevtests.umbra.library.Library
+import io.github.mkdevtests.umbra.library.sagasOf
 import io.github.mkdevtests.umbra.library.Tmdb
 import io.github.mkdevtests.umbra.ui.theme.GlassButton
 import io.github.mkdevtests.umbra.ui.theme.GlowButton
@@ -93,9 +95,13 @@ fun FeedScreen(
     viewModel: LibraryViewModel,
     wide: Boolean,
     emptyText: String,
-    onOpenMovie: (String) -> Unit,
-    onOpenShow: (String) -> Unit,
+    links: TitleLinks,
+    shortcuts: List<String>,
+    onOpenShortcut: (String) -> Unit,
+    onLongPress: (TitleTarget) -> Unit,
 ) {
+    val onOpenMovie = links.onOpenMovie
+    val onOpenShow = links.onOpenShow
     val context = LocalContext.current
     // A scan publishes the library many times: keep the rows still until it ends,
     // or a poster moves under the finger.
@@ -136,7 +142,9 @@ fun FeedScreen(
             genre to titles.filter { genre in it.first }.sortedByDescending { it.second ?: 0.0 }.take(20).map { it.third }
         }.filter { it.second.size >= 4 }
     }
+    val sagas = remember(library) { sagasOf(library) }
     val open = { pick: Pick -> if (pick.isShow) onOpenShow(pick.key) else onOpenMovie(pick.key) }
+    val press = { pick: Pick -> onLongPress(TitleTarget(pick.key, pick.isShow)) }
     val play = { item: Resume -> context.startActivity(viewModel.playIntent(item)) }
 
     val featured = remember(resume, fresh, library) {
@@ -203,6 +211,7 @@ fun FeedScreen(
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         if (featured.isNotEmpty()) item { HeroPager(featured, wide) }
+        if (shortcuts.isNotEmpty()) item { Shortcuts(shortcuts, onOpenShortcut) }
         if (resume.isNotEmpty()) {
             item {
                 Shelf("Lecture en cours") {
@@ -211,13 +220,16 @@ fun FeedScreen(
                             item, wide,
                             onOpen = { item.movie?.let { onOpenMovie(it.file) } ?: onOpenShow(item.show!!.key) },
                             onPlay = { play(item) },
+                            onLongPress = {
+                                onLongPress(item.movie?.let { TitleTarget(it.file) } ?: TitleTarget(item.show!!.key, isShow = true, episode = item.episode?.file))
+                            },
                         )
                     }
                 }
             }
         }
         if (fresh.isNotEmpty()) {
-            item { Shelf("Ajouts récents") { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER)) } } }
+            item { Shelf("Ajouts récents") { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } } }
         }
         if (movies.isNotEmpty()) {
             item {
@@ -226,7 +238,7 @@ fun FeedScreen(
                     mode = movieMode,
                     onMode = { movieMode = it; movieSeed = Random.nextLong() },
                     onRefresh = { movieSeed = Random.nextLong() },
-                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER)) } }
+                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
             }
         }
         if (shows.isNotEmpty()) {
@@ -236,12 +248,24 @@ fun FeedScreen(
                     mode = showMode,
                     onMode = { showMode = it; showSeed = Random.nextLong() },
                     onRefresh = { showSeed = Random.nextLong() },
-                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER)) } }
+                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
+            }
+        }
+        if (sagas.isNotEmpty()) {
+            item {
+                Shelf("Sagas") {
+                    items(sagas, key = { it.id }) { saga ->
+                        PosterCard(
+                            sagaItem(saga, history), { links.onOpenSaga(saga.id) }, Modifier.width(POSTER),
+                            onLongClick = { onLongPress(TitleTarget("saga:${saga.id}")) },
+                        )
+                    }
+                }
             }
         }
         genres.forEach { (genre, picks) ->
             item(key = "genre:$genre") {
-                Shelf(genre) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER)) } }
+                Shelf(genre) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
             }
         }
     }
@@ -340,8 +364,11 @@ private fun HeroPage(item: Featured, wide: Boolean) {
 
 /** A film or episode under way: its picture, how far it went, what's left. A touch opens its page, ▶ plays it. */
 @Composable
-private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: () -> Unit) {
-    Column(modifier = Modifier.width(if (wide) 300.dp else 260.dp).clickable(onClick = onOpen), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: () -> Unit, onLongPress: () -> Unit) {
+    Column(
+        modifier = Modifier.width(if (wide) 300.dp else 260.dp).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -382,6 +409,39 @@ private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: 
             }
         }
         Text(describe(item), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** The folders chosen as shortcuts ("Films", "Anime"…), each opening its titles. */
+@Composable
+private fun Shortcuts(roots: List<String>, onOpen: (String) -> Unit) {
+    LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(roots, key = { it }) { root ->
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .clickable { onOpen(root) }
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(shortcutIcon(root), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                Text(root, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** An icon guessed from the folder's name. */
+internal fun shortcutIcon(root: String) = root.lowercase().let { name ->
+    when {
+        "anim" in name -> NyxaraIcons.Sparkle
+        "série" in name || "serie" in name || "show" in name || "tv" in name -> NyxaraIcons.Tv
+        "film" in name || "movie" in name || "ciné" in name -> NyxaraIcons.Movie
+        "spectacle" in name || "concert" in name || "humour" in name -> NyxaraIcons.Mic
+        "doc" in name -> NyxaraIcons.Info
+        else -> NyxaraIcons.Folder
     }
 }
 

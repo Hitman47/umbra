@@ -59,6 +59,12 @@ data class Movie(
     @ColumnInfo(defaultValue = "[]") val directors: List<String> = emptyList(),
     /** False for a film matched before credits were fetched: the next scan looks it up again. */
     @ColumnInfo(defaultValue = "0") val hasCredits: Boolean = false,
+    /** TMDB collection the film belongs to ("Dune - Saga"), its name and poster. */
+    val sagaId: Int? = null,
+    val saga: String? = null,
+    val sagaPoster: String? = null,
+    /** False for a film matched before sagas were read: the next scan looks it up again. */
+    @ColumnInfo(defaultValue = "0") val sagaChecked: Boolean = false,
 )
 
 @Serializable

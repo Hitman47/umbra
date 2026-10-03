@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val nyxaraVersion = "0.6.0"
+val nyxaraVersion = "0.7.0"
 
 base {
     // APK names: nyxara-debug.apk, nyxara-release-unsigned.apk
@@ -40,6 +40,7 @@ android {
         // Trakt app of the user (trakt.tv/oauth/applications); the secret is optional.
         buildConfigField("String", "TRAKT_CLIENT_ID", localProperty("trakt.clientId"))
         buildConfigField("String", "TRAKT_CLIENT_SECRET", localProperty("trakt.clientSecret"))
+        buildConfigField("String", "OPENSUBTITLES_KEY", localProperty("opensubtitles.key"))
 
         // libmpv ships 4 ABIs (~100 MB); the target tablet is arm64.
         ndk { abiFilters += "arm64-v8a" }

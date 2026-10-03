@@ -23,7 +23,7 @@ class ExtrasTest {
     fun sagaInReleaseOrderAndOwnedFirst() {
         val saga = TmdbCollection(
             5, "Dune - Saga",
-            listOf(TmdbSearchItem(2, title = "Dune 2", releaseDate = "2024-02-28"), TmdbSearchItem(1, title = "Dune", releaseDate = "2021-09-15"), TmdbSearchItem(6, title = "Dune 3")),
+            parts = listOf(TmdbSearchItem(2, title = "Dune 2", releaseDate = "2024-02-28"), TmdbSearchItem(1, title = "Dune", releaseDate = "2021-09-15"), TmdbSearchItem(6, title = "Dune 3")),
         )
         val tmdb = TmdbMovieExtras(
             credits = TmdbFullCredits(

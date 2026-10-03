@@ -195,10 +195,21 @@ data class TmdbJob(val job: String? = null)
 data class TmdbFullCredits(val cast: List<TmdbCredit> = emptyList(), val crew: List<TmdbCredit> = emptyList())
 
 @Serializable
-data class TmdbCollectionRef(val id: Int, val name: String? = null)
+data class TmdbCollectionRef(
+    val id: Int,
+    val name: String? = null,
+    @SerialName("poster_path") val posterPath: String? = null,
+)
 
 @Serializable
-data class TmdbCollection(val id: Int, val name: String? = null, val parts: List<TmdbSearchItem> = emptyList())
+data class TmdbCollection(
+    val id: Int,
+    val name: String? = null,
+    val overview: String? = null,
+    @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("backdrop_path") val backdropPath: String? = null,
+    val parts: List<TmdbSearchItem> = emptyList(),
+)
 
 @Serializable
 data class TmdbMovieExtras(
@@ -234,6 +245,7 @@ data class TmdbMovie(
     val genres: List<TmdbGenre> = emptyList(),
     @SerialName("vote_average") val voteAverage: Double? = null,
     val credits: TmdbCredits? = null,
+    @SerialName("belongs_to_collection") val collection: TmdbCollectionRef? = null,
 )
 
 @Serializable

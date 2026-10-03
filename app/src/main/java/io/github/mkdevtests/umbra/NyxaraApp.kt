@@ -20,6 +20,11 @@ import io.github.mkdevtests.umbra.history.WatchHistory
 import io.github.mkdevtests.umbra.update.Updater
 import io.github.mkdevtests.umbra.trakt.Trakt
 import io.github.mkdevtests.umbra.trakt.TraktApi
+import io.github.mkdevtests.umbra.media.MediaInfoStore
+import io.github.mkdevtests.umbra.subtitles.OpenSubtitles
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,6 +68,14 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     val trakt by lazy {
         Trakt(this, TraktApi(BuildConfig.TRAKT_CLIENT_ID, BuildConfig.TRAKT_CLIENT_SECRET, "Nyxara/${BuildConfig.VERSION_NAME}", OkHttpClient()))
     }
+
+    /** Long-lived work of the app (media headers, subtitles), not tied to a screen. */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Quality, languages and subtitles of the video files, read from their headers. */
+    val mediaInfo by lazy { MediaInfoStore(filesDir.resolve("media-info.json"), { nas }, scope) }
+
+    val openSubtitles by lazy { OpenSubtitles(this, BuildConfig.OPENSUBTITLES_KEY, "Nyxara v${BuildConfig.VERSION_NAME}", OkHttpClient()) }
 
     override fun onCreate() {
         super.onCreate()

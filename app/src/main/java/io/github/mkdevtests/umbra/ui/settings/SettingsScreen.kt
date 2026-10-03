@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -38,7 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import io.github.mkdevtests.umbra.browse.naturalCompare
+import io.github.mkdevtests.umbra.library.shortcutRoots
+import io.github.mkdevtests.umbra.settings.SEEK_STEPS
+import io.github.mkdevtests.umbra.settings.SUBTITLE_LANGUAGES
+import io.github.mkdevtests.umbra.settings.seekStepLabel
+import io.github.mkdevtests.umbra.subtitles.OpenSubtitles
 import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.nas.NasSource
 import io.github.mkdevtests.umbra.ui.theme.ScreenTitle
@@ -57,6 +66,7 @@ import java.io.File
 fun SettingsScreen(
     store: SettingsStore,
     trakt: Trakt,
+    openSubtitles: OpenSubtitles,
     updater: Updater,
     sources: List<NasSource>,
     imageCache: File,
@@ -144,6 +154,21 @@ fun SettingsScreen(
                 }
             }
 
+            Section("Accueil") {
+                val roots = remember(sources) { sources.flatMap { source -> source.shares.map(source::rootOf) }.sortedWith(::naturalCompare) }
+                val chosen = shortcutRoots(settings.homeShortcuts, roots)
+                ChipsItem("Raccourcis", "Dossiers proposés en haut de l'accueil, chacun avec ses films et séries.") {
+                    roots.forEach { root ->
+                        val on = chosen.any { it.equals(root, ignoreCase = true) }
+                        FilterChip(
+                            selected = on,
+                            onClick = { store.update { it.copy(homeShortcuts = roots.filter { r -> if (r == root) !on else chosen.any { c -> c.equals(r, ignoreCase = true) } }) } },
+                            label = { Text(root) },
+                        )
+                    }
+                }
+            }
+
             Section("Bibliothèque") {
                 Item("Actualiser au lancement", "Seuls les fichiers nouveaux ou modifiés sont analysés.") {
                     Switch(checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
@@ -152,12 +177,36 @@ fun SettingsScreen(
             }
 
             Section("Lecture") {
+                ChipsItem("Saut ⏪ ⏩", "Aussi au double appui sur les bords de l'image. Modifiable pendant la lecture : appui long sur ⏪ ou ⏩.") {
+                    SEEK_STEPS.forEach { step ->
+                        FilterChip(selected = settings.seekStep == step, onClick = { store.update { it.copy(seekStep = step) } }, label = { Text(seekStepLabel(step)) })
+                    }
+                }
+                Item("Passer les génériques tout seul", "Sinon, un bouton « Passer » apparaît pendant le générique (fichiers avec chapitres).") {
+                    Switch(checked = settings.autoSkip, onCheckedChange = { on -> store.update { it.copy(autoSkip = on) } })
+                }
+                Item("Épisode suivant au générique", "Compte à rebours de 10 s dès le générique de fin, annulable.") {
+                    Switch(checked = settings.nextEpisodeCountdown, onCheckedChange = { on -> store.update { it.copy(nextEpisodeCountdown = on) } })
+                }
+                Item("Image dans l'image", "Quitter le lecteur (bouton Accueil) garde la vidéo dans une petite fenêtre.") {
+                    Switch(checked = settings.pictureInPicture, onCheckedChange = { on -> store.update { it.copy(pictureInPicture = on) } })
+                }
+                val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+                Item("Son en arrière-plan", "Écran éteint ou autre appli : le son continue, avec une notification pour mettre en pause.") {
+                    Switch(checked = settings.backgroundAudio, onCheckedChange = { on ->
+                        store.update { it.copy(backgroundAudio = on) }
+                        // The notification's pause button needs Android's permission.
+                        if (on && android.os.Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    })
+                }
                 Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
                     TextButton(onClick = onOpenStats) { Text("Voir ›") }
                 }
             }
 
             TraktSection(trakt)
+
+            OpenSubtitlesSection(openSubtitles, settings.onlineSubtitleLanguages) { languages -> store.update { it.copy(onlineSubtitleLanguages = languages) } }
 
             Section("Mises à jour") {
                 if (BuildConfig.UPDATES) {
@@ -214,6 +263,51 @@ private fun TraktSection(trakt: Trakt) {
     }
 }
 
+/** Subtitles searched online from the player: the languages, and an optional account for more downloads. */
+@Composable
+private fun OpenSubtitlesSection(service: OpenSubtitles, languages: List<String>, onLanguages: (List<String>) -> Unit) {
+    val status by service.status.collectAsState()
+    Section("Sous-titres en ligne") {
+        if (!status.configured) {
+            Item("Clé OpenSubtitles absente", "Ajoute opensubtitles.key dans local.properties puis recompile.")
+            return@Section
+        }
+        ChipsItem("Langues cherchées", "Dans le lecteur : Sous-titres › Chercher en ligne.") {
+            SUBTITLE_LANGUAGES.forEach { (code, name) ->
+                val on = code in languages
+                FilterChip(
+                    selected = on,
+                    onClick = { onLanguages(if (on) languages - code else SUBTITLE_LANGUAGES.keys.filter { it in languages || it == code }) },
+                    label = { Text(name) },
+                )
+            }
+        }
+        val user = status.user
+        if (user != null) {
+            Item("Compte $user", status.allowed?.let { "$it téléchargements par jour" }) {
+                TextButton(onClick = service::logout) { Text("Déconnecter") }
+            }
+        } else {
+            var name by remember { mutableStateOf("") }
+            var password by remember { mutableStateOf("") }
+            Item("Compte (facultatif)", "Sans compte : 5 téléchargements par jour. Gratuit sur opensubtitles.com : 20 par jour.")
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(name, { name = it }, label = { Text("Identifiant") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(
+                    password, { password = it }, label = { Text("Mot de passe") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { service.login(name.trim(), password) }, enabled = name.isNotBlank() && password.isNotEmpty() && !status.busy) { Text("Connecter") }
+            }
+        }
+        status.error?.let { Item("Erreur", it) }
+    }
+}
+
 /** Battery saver cuts Nyxara's network in the background: offers the system dialog that exempts it. */
 @SuppressLint("BatteryLife")
 @Composable
@@ -260,6 +354,17 @@ private fun ColumnScope.Item(label: String, detail: String? = null, controls: (@
             detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         controls?.let { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { it() } }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.background)
+}
+
+/** A settings row whose choices go below it, on as many lines as they need. */
+@Composable
+private fun ColumnScope.ChipsItem(label: String?, detail: String?, chips: @Composable () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        label?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+        detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { chips() }
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.background)
 }

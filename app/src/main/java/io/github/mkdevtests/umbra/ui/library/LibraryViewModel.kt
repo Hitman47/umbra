@@ -24,6 +24,8 @@ import androidx.lifecycle.viewModelScope
 import io.github.mkdevtests.umbra.trakt.TraktTarget
 import io.github.mkdevtests.umbra.library.Extras
 import io.github.mkdevtests.umbra.trakt.withTrakt
+import io.github.mkdevtests.umbra.browse.naturalCompare
+import io.github.mkdevtests.umbra.library.shortcutRoots
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -85,7 +87,41 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** Cast, saga and related titles of a page; null offline or for a title TMDB doesn't know. */
     suspend fun extras(movie: Movie): Extras? = runCatching { repository.extras(movie) }.getOrNull()
 
+    suspend fun saga(id: Int) = repository.saga(id)
+
+    /** Quality, languages and subtitles of the files read so far. */
+    val mediaInfo = nyxara.mediaInfo.infos
+
+    /** Reads the headers of these files ([path] to size) on the NAS, once. */
+    fun requestMediaInfo(files: List<Pair<String, Long>>) = nyxara.mediaInfo.request(files)
+
+    val settings = nyxara.settings.settings
+
+    /** The folders offered as home shortcuts ("Films", "Anime"…). */
+    val shortcuts: StateFlow<List<String>> = combine(settings, nyxara.sourceList) { settings, sources ->
+        shortcutRoots(settings.homeShortcuts, sources.flatMap { source -> source.shares.map(source::rootOf) }.sortedWith(::naturalCompare))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     suspend fun extras(show: Show): Extras? = runCatching { repository.extras(show) }.getOrNull()
+
+    /** Marks a film watched or not; watched also goes to Trakt. */
+    fun markWatched(movie: Movie, watched: Boolean) {
+        nyxara.history.mark(mapOf(movie.file to (movie.runtime ?: 0) * 60.0), watched)
+        if (watched) movie.tmdbId?.let { nyxara.trakt.markWatched(listOf(TraktTarget(movieTmdb = it, label = movie.title))) }
+    }
+
+    /** Marks [episodes] of [show] (all of them by default, specials aside) watched or not. */
+    fun markWatched(show: Show, watched: Boolean, episodes: List<Episode> = show.seasons.filter { it.number > 0 }.flatMap { it.episodes }) {
+        nyxara.history.mark(episodes.associate { it.file to (it.runtime ?: 0) * 60.0 }, watched)
+        if (watched) {
+            val id = show.tmdbId ?: return
+            nyxara.trakt.markWatched(
+                episodes.filter { it.hasMetadata }.map {
+                    TraktTarget(showTmdb = id, season = it.season, episode = it.number, label = "${show.title} S%02dE%02d".format(it.season, it.number))
+                },
+            )
+        }
+    }
 
     fun setHidden(movie: Movie, hidden: Boolean) = nyxara.hidden.setHidden(movie.hideKey, hidden)
 

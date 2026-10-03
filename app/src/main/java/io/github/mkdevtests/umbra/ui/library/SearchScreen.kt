@@ -58,6 +58,7 @@ fun SearchScreen(
     viewModel: LibraryViewModel,
     onOpenMovie: (String) -> Unit,
     onOpenShow: (String) -> Unit,
+    onLongPress: (TitleTarget) -> Unit,
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -154,20 +155,21 @@ fun SearchScreen(
         }
         val found = results ?: return@Column
         PosterGrid(
-            items = found.map { PosterItem(it.key, it.title, it.year, it.poster, it.note, it.badge) },
+            items = found.map { PosterItem(it.key, it.title, it.year, it.poster, it.note, it.badge, isShow = it.isShow) },
             emptyText = when {
                 filters.hidden -> "Aucun titre masqué."
                 query.isBlank() -> "Aucun titre pour ces filtres."
                 else -> "Rien pour « $query »."
             },
             onClick = { key -> if (found.first { it.key == key }.isShow) onOpenShow(key) else onOpenMovie(key) },
+            onLongClick = { onLongPress(TitleTarget(it.key, it.isShow)) },
         )
     }
 }
 
 /** A filter chip opening its list of choices: "Genre ▾". */
 @Composable
-private fun <T> Dropdown(text: String, active: Boolean, options: List<Pair<T, String>>, onSelect: (T) -> Unit) {
+internal fun <T> Dropdown(text: String, active: Boolean, options: List<Pair<T, String>>, onSelect: (T) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         FilterChip(selected = active, onClick = { open = true }, label = { Text("$text  ▾") })

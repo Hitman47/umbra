@@ -263,8 +263,8 @@ class LibraryScanner(
         val movies = forEachParallel(groups, "Films") { group ->
             val name = names.getValue(group.first())
             val template = group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> movie.tmdbId != null } }
-                // Matched before credits were fetched: refresh it.
-                ?.let { movie -> if (movie.hasCredits) movie else lookup("film ${movie.title}") { tmdb.movie(movie.tmdbId!!).toMovie(name) } ?: movie }
+                // Matched before credits or sagas were fetched: refresh it.
+                ?.let { movie -> if (movie.hasCredits && movie.sagaChecked) movie else lookup("film ${movie.title}") { tmdb.movie(movie.tmdbId!!).toMovie(name) } ?: movie }
                 // Unchanged since TMDB found nothing for it: don't ask again.
                 ?: group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> unchanged(movie.fileSize, movie.modified, it.entry) } }
                 ?: lookup("film ${group.first().entry.name}") {
@@ -327,6 +327,10 @@ class LibraryScanner(
         cast = credits?.actors().orEmpty(),
         directors = credits?.crew.orEmpty().filter { it.job == "Director" }.map { it.name }.distinct(),
         hasCredits = credits != null,
+        sagaId = collection?.id,
+        saga = collection?.name,
+        sagaPoster = collection?.posterPath,
+        sagaChecked = true,
     )
 
     // --- Shows ---

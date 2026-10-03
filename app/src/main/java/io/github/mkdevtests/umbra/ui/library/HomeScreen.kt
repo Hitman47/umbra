@@ -1,6 +1,8 @@
 package io.github.mkdevtests.umbra.ui.library
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -36,6 +38,7 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,7 +53,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.browse.BrowserScreen
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
+import io.github.mkdevtests.umbra.history.Progress
 import io.github.mkdevtests.umbra.history.seenOf
+import io.github.mkdevtests.umbra.library.Library
+import io.github.mkdevtests.umbra.library.Movie
+import io.github.mkdevtests.umbra.library.Saga
+import io.github.mkdevtests.umbra.library.Show
+import io.github.mkdevtests.umbra.library.decadeLabel
+import io.github.mkdevtests.umbra.library.sagasOf
 import io.github.mkdevtests.umbra.history.without
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.ui.theme.NyxaraLogo
@@ -75,13 +85,18 @@ fun HomeScreen(
     onTabChange: (HomeTab) -> Unit,
     onOpenMovie: (String) -> Unit,
     onOpenShow: (String) -> Unit,
+    onOpenSaga: (Int) -> Unit,
+    onOpenShortcut: (String) -> Unit,
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val content: @Composable (Modifier) -> Unit = { modifier ->
-            HomeContent(libraryViewModel, browserViewModel, updater, tab, wide, onOpenMovie, onOpenShow, onPickLocalFile, onOpenSettings, modifier)
+            HomeContent(
+                libraryViewModel, browserViewModel, updater, tab, wide,
+                TitleLinks(onOpenMovie, onOpenShow, onOpenSaga), onOpenShortcut, onPickLocalFile, onOpenSettings, modifier,
+            )
         }
         if (wide) {
             Row(modifier = Modifier.fillMaxSize()) {
@@ -132,12 +147,16 @@ private fun HomeContent(
     updater: Updater,
     tab: HomeTab,
     wide: Boolean,
-    onOpenMovie: (String) -> Unit,
-    onOpenShow: (String) -> Unit,
+    links: TitleLinks,
+    onOpenShortcut: (String) -> Unit,
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier,
 ) {
+    val onOpenMovie = links.onOpenMovie
+    val onOpenShow = links.onOpenShow
+    val menu = rememberTitleMenu(libraryViewModel, links)
+    val shortcuts by libraryViewModel.shortcuts.collectAsState()
     val fullLibrary by libraryViewModel.library.collectAsState()
     val hidden by libraryViewModel.hidden.collectAsState()
     // Hidden titles stay out of every list; the search finds them with its "Masqués" filter.
@@ -179,34 +198,21 @@ private fun HomeContent(
                 viewModel = libraryViewModel,
                 wide = wide,
                 emptyText = scanning ?: "Aucune vidéo trouvée.",
-                onOpenMovie = onOpenMovie,
-                onOpenShow = onOpenShow,
+                links = links,
+                shortcuts = shortcuts,
+                onOpenShortcut = onOpenShortcut,
+                onLongPress = menu,
             )
-            HomeTab.Movies -> PosterGrid(
-                items = library.movies.map {
-                    PosterItem(it.file, it.title, it.year, it.poster, badge = seenOf(it, history).badge, added = it.modified, rating = it.rating)
-                },
-                emptyText = scanning ?: "Aucun film trouvé.",
-                onClick = onOpenMovie,
-                noun = "film",
-            )
+            HomeTab.Movies -> MovieGrid(library, history, scanning ?: "Aucun film trouvé.", links, menu)
             HomeTab.Shows -> PosterGrid(
-                items = library.shows.map { show ->
-                    val episodes = show.seasons.flatMap { it.episodes }
-                    PosterItem(
-                        show.key, show.title, show.year, show.poster,
-                        subtitle = "${episodes.size} épisode${if (episodes.size > 1) "s" else ""}",
-                        badge = seenOf(show, history).badge,
-                        added = episodes.maxOfOrNull { it.modified } ?: 0,
-                        rating = show.rating,
-                    )
-                },
+                items = showItems(library.shows, history),
                 emptyText = scanning ?: "Aucune série trouvée.",
                 onClick = onOpenShow,
                 noun = "série",
+                onLongClick = { menu(TitleTarget(it.key, isShow = true)) },
             )
             HomeTab.Folders -> BrowserScreen(browserViewModel, fullLibrary, onOpenMovie, onOpenShow, onExcluded = libraryViewModel::onFolderExcluded)
-            HomeTab.Search -> SearchScreen(fullLibrary, libraryViewModel, onOpenMovie, onOpenShow)
+            HomeTab.Search -> SearchScreen(fullLibrary, libraryViewModel, onOpenMovie, onOpenShow, onLongPress = menu)
         }
     }
 }
@@ -232,17 +238,82 @@ internal data class PosterItem(
     /** When its newest file arrived on the NAS, to sort by. */
     val added: Long = 0,
     val rating: Double? = null,
+    val isShow: Boolean = false,
+    val genres: List<String> = emptyList(),
+    /** Watched to the end (every episode of a show): the "Vus" filter. */
+    val watched: Boolean = false,
 )
+
+internal fun movieItem(movie: Movie, history: Map<String, Progress>): PosterItem {
+    val seen = seenOf(movie, history)
+    return PosterItem(movie.file, movie.title, movie.year, movie.poster, badge = seen.badge, added = movie.modified, rating = movie.rating, genres = movie.genres, watched = seen.all)
+}
+
+internal fun showItems(shows: List<Show>, history: Map<String, Progress>) = shows.map { show ->
+    val episodes = show.seasons.flatMap { it.episodes }
+    val seen = seenOf(show, history)
+    PosterItem(
+        show.key, show.title, show.year, show.poster,
+        subtitle = "${episodes.size} épisode${if (episodes.size > 1) "s" else ""}",
+        badge = seen.badge,
+        added = episodes.maxOfOrNull { it.modified } ?: 0,
+        rating = show.rating,
+        isShow = true,
+        genres = show.genres,
+        watched = seen.all,
+    )
+}
+
+internal fun sagaItem(saga: Saga, history: Map<String, Progress>): PosterItem {
+    val watched = saga.movies.count { history[it.file]?.watched == true }
+    return PosterItem(
+        "saga:${saga.id}", saga.name, saga.movies.first().year, saga.poster,
+        subtitle = "${saga.movies.size} films",
+        badge = if (watched == saga.movies.size) "✓ Vu" else if (watched > 0) "$watched/${saga.movies.size}" else null,
+        added = saga.movies.maxOf { it.modified },
+        rating = saga.movies.mapNotNull { it.rating }.average().takeIf { !it.isNaN() },
+        genres = saga.movies.flatMap { it.genres }.distinct(),
+        watched = watched == saga.movies.size,
+    )
+}
+
+/** The "Films" tab: films, or their sagas. */
+@Composable
+private fun MovieGrid(library: Library, history: Map<String, Progress>, emptyText: String, links: TitleLinks, menu: (TitleTarget) -> Unit) {
+    var bySaga by rememberSaveable { mutableStateOf(false) }
+    val sagas = remember(library) { sagasOf(library) }
+    val items = remember(library, history, bySaga) {
+        if (bySaga) sagas.map { sagaItem(it, history) } else library.movies.map { movieItem(it, history) }
+    }
+    PosterGrid(
+        items = items,
+        emptyText = emptyText,
+        onClick = { key -> key.removePrefix("saga:").toIntOrNull()?.takeIf { key.startsWith("saga:") }?.let(links.onOpenSaga) ?: links.onOpenMovie(key) },
+        noun = if (bySaga) "saga" else "film",
+        onLongClick = { menu(TitleTarget(it.key)) },
+        chips = {
+            if (sagas.isNotEmpty()) FilterChip(selected = bySaga, onClick = { bySaga = !bySaga }, label = { Text("Sagas") })
+        },
+    )
+}
 
 /** Orders of a poster grid. */
 internal enum class GridSort(val label: String) { Title("Titre"), Added("Ajouts récents"), Year("Année"), Rating("Note") }
 
 /**
- * A grid of posters. With a [noun], a header counts them ("212 films") and
- * offers to sort them; the order is kept per grid.
+ * A grid of posters. With a [noun], a header counts them ("212 films"),
+ * offers to sort and filter them (watched, genre, decade, and [chips]); the
+ * choices are kept per grid.
  */
 @Composable
-internal fun PosterGrid(items: List<PosterItem>, emptyText: String, onClick: (String) -> Unit, noun: String? = null) {
+internal fun PosterGrid(
+    items: List<PosterItem>,
+    emptyText: String,
+    onClick: (String) -> Unit,
+    noun: String? = null,
+    onLongClick: ((PosterItem) -> Unit)? = null,
+    chips: @Composable () -> Unit = {},
+) {
     if (items.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -250,14 +321,26 @@ internal fun PosterGrid(items: List<PosterItem>, emptyText: String, onClick: (St
         return
     }
     var sort by rememberSaveable(noun) { mutableStateOf(GridSort.Title) }
-    val sorted = remember(items, sort) {
-        when (sort) {
-            GridSort.Title -> items
-            GridSort.Added -> items.sortedByDescending { it.added }
-            GridSort.Year -> items.sortedByDescending { it.year ?: 0 }
-            GridSort.Rating -> items.sortedByDescending { it.rating ?: 0.0 }
+    var seen by rememberSaveable(noun) { mutableStateOf<Boolean?>(null) }
+    var genre by rememberSaveable(noun) { mutableStateOf<String?>(null) }
+    var decade by rememberSaveable(noun) { mutableStateOf<Int?>(null) }
+    val genres = remember(items) { items.flatMap { it.genres }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key to it.value } }
+    val decades = remember(items) { items.mapNotNull { it.year?.let { year -> year / 10 * 10 } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.key }.map { it.key to it.value } }
+    val shown = remember(items, sort, seen, genre, decade) {
+        items.filter { item ->
+            (seen == null || item.watched == seen) &&
+                (genre == null || genre in item.genres) &&
+                (decade == null || item.year?.let { it / 10 * 10 } == decade)
+        }.let { kept ->
+            when (sort) {
+                GridSort.Title -> kept
+                GridSort.Added -> kept.sortedByDescending { it.added }
+                GridSort.Year -> kept.sortedByDescending { it.year ?: 0 }
+                GridSort.Rating -> kept.sortedByDescending { it.rating ?: 0.0 }
+            }
         }
     }
+    val filtered = seen != null || genre != null || decade != null
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 128.dp),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
@@ -267,19 +350,53 @@ internal fun PosterGrid(items: List<PosterItem>, emptyText: String, onClick: (St
     ) {
         if (noun != null) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${items.size} $noun${if (items.size > 1) "s" else ""}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    SortMenu(sort) { sort = it }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${shown.size} $noun${if (shown.size > 1) "s" else ""}" + if (filtered) " sur ${items.size}" else "",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        SortMenu(sort) { sort = it }
+                    }
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        chips()
+                        listOf(true to "Vus", false to "Non vus").forEach { (value, label) ->
+                            FilterChip(selected = seen == value, onClick = { seen = value.takeIf { it != seen } }, label = { Text(label) })
+                        }
+                        if (genres.size > 1) {
+                            Dropdown(
+                                text = genre ?: "Genre",
+                                active = genre != null,
+                                options = listOf<Pair<String?, String>>(null to "Tous les genres") + genres.map { (name, count) -> name to "$name ($count)" },
+                                onSelect = { genre = it },
+                            )
+                        }
+                        if (decades.size > 1) {
+                            Dropdown(
+                                text = decade?.let(::decadeLabel) ?: "Années",
+                                active = decade != null,
+                                options = listOf<Pair<Int?, String>>(null to "Toutes les années") + decades.map { (value, count) -> value to "${decadeLabel(value)} ($count)" },
+                                onSelect = { decade = it },
+                            )
+                        }
+                        if (filtered) TextButton(onClick = { seen = null; genre = null; decade = null }) { Text("Effacer") }
+                    }
                 }
             }
         }
-        items(sorted, key = { it.key }) { item ->
-            PosterCard(item, onClick = { onClick(item.key) })
+        if (shown.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Text("Aucun titre pour ces filtres.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 32.dp))
+            }
+        }
+        items(shown, key = { it.key }) { item ->
+            PosterCard(item, onClick = { onClick(item.key) }, onLongClick = onLongClick?.let { { it(item) } })
         }
     }
 }
@@ -302,10 +419,10 @@ private fun SortMenu(sort: GridSort, onSort: (GridSort) -> Unit) {
     }
 }
 
-/** A poster with its title and year below, its badge in the corner. */
+/** A poster with its title and year below, its badge in the corner. A long press opens [onLongClick]'s menu. */
 @Composable
-internal fun PosterCard(item: PosterItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.clickable(onClick = onClick)) {
+internal fun PosterCard(item: PosterItem, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
+    Column(modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box {
             Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth())
             item.badge?.let { CornerBadge(it, Modifier.align(Alignment.TopEnd)) }

@@ -311,30 +311,53 @@ class Trakt(private val context: Context, private val api: TraktApi) {
         if (endpoint == TraktEndpoint.ScrobbleStop && percent < 1) return
         scrobbles.trySend {
             val token = accessToken() ?: return@trySend
-            val body = when {
-                target.movieTmdb != null -> TraktScrobble(percent, movie = TraktScrobbleItem(TraktIds(tmdb = target.movieTmdb)))
-                target.showTmdb != null -> {
-                    val id = episodeId(target.showTmdb, target.season, target.episode)
-                    if (id == null) {
-                        Log.w(TAG, "no Trakt episode for ${target.label}, not scrobbled")
-                        return@trySend
-                    }
-                    TraktScrobble(percent, episode = TraktScrobbleItem(TraktIds(trakt = id)))
-                }
-                else -> return@trySend
-            }
-            try {
-                val answer = api.scrobble(endpoint, token, body)
-                // What Trakt understood: action, progress and the episode or film it matched.
-                val what = listOf("action", "progress", "movie", "show", "episode").mapNotNull { key -> answer[key]?.let { "$key=$it" } }
-                Log.i(TAG, "${endpoint.name} ${target.label} at ${percent.toInt()} % → ${what.joinToString(" ").take(600)}")
-            } catch (e: TraktHttpException) {
-                if (e.code != 409) throw e // 409: just scrobbled, Trakt keeps the first one
-            }
+            send(endpoint, token, target, percent)
             if (endpoint == TraktEndpoint.ScrobbleStop) {
                 delay(3_000)
                 syncNow(force = false)
             }
+        }
+    }
+
+    /**
+     * Marks [targets] watched on Trakt, as a player finishing them would: a
+     * scrobble stop at 100 % each (Trakt adds a play), one at a time, then a sync.
+     * Nothing is ever removed on Trakt: "not watched" stays on the tablet.
+     */
+    fun markWatched(targets: List<TraktTarget>) {
+        val status = _status.value
+        if (!status.connected || !status.scrobble || targets.isEmpty()) return
+        scrobbles.trySend {
+            val token = accessToken() ?: return@trySend
+            targets.forEach { target ->
+                runCatching { send(TraktEndpoint.ScrobbleStop, token, target, 100.0) }
+                    .onFailure { Log.w(TAG, "not marked on Trakt: ${target.label}", it) }
+                delay(1_100) // Trakt's limit: one write a second
+            }
+            syncNow(force = false)
+        }
+    }
+
+    private suspend fun send(endpoint: TraktEndpoint, token: String, target: TraktTarget, percent: Double) {
+        val body = when {
+            target.movieTmdb != null -> TraktScrobble(percent, movie = TraktScrobbleItem(TraktIds(tmdb = target.movieTmdb)))
+            target.showTmdb != null -> {
+                val id = episodeId(target.showTmdb, target.season, target.episode)
+                if (id == null) {
+                    Log.w(TAG, "no Trakt episode for ${target.label}, not scrobbled")
+                    return
+                }
+                TraktScrobble(percent, episode = TraktScrobbleItem(TraktIds(trakt = id)))
+            }
+            else -> return
+        }
+        try {
+            val answer = api.scrobble(endpoint, token, body)
+            // What Trakt understood: action, progress and the episode or film it matched.
+            val what = listOf("action", "progress", "movie", "show", "episode").mapNotNull { key -> answer[key]?.let { "$key=$it" } }
+            Log.i(TAG, "${endpoint.name} ${target.label} at ${percent.toInt()} % → ${what.joinToString(" ").take(600)}")
+        } catch (e: TraktHttpException) {
+            if (e.code != 409) throw e // 409: just scrobbled, Trakt keeps the first one
         }
     }
 

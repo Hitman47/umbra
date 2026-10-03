@@ -57,6 +57,13 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     private val _subtitleDelay = MutableStateFlow(0.0)
     val subtitleDelay: StateFlow<Double> = _subtitleDelay.asStateFlow()
 
+    private val _audioDelay = MutableStateFlow(0.0)
+    val audioDelay: StateFlow<Double> = _audioDelay.asStateFlow()
+
+    /** The file's chapters: intro and credits are offered to skip. */
+    private val _chapters = MutableStateFlow<List<Chapter>>(emptyList())
+    val chapters: StateFlow<List<Chapter>> = _chapters.asStateFlow()
+
     private val _speed = MutableStateFlow(1.0)
     val speed: StateFlow<Double> = _speed.asStateFlow()
 
@@ -136,6 +143,8 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.observeProperty("core-idle", MpvFormat.MPV_FORMAT_FLAG)
         mpv.observeProperty("track-list", MpvFormat.MPV_FORMAT_NONE)
         mpv.observeProperty("sub-delay", MpvFormat.MPV_FORMAT_DOUBLE)
+        mpv.observeProperty("audio-delay", MpvFormat.MPV_FORMAT_DOUBLE)
+        mpv.observeProperty("chapter-list", MpvFormat.MPV_FORMAT_NONE)
         mpv.observeProperty("speed", MpvFormat.MPV_FORMAT_DOUBLE)
         mpv.observeProperty("eof-reached", MpvFormat.MPV_FORMAT_FLAG)
     }
@@ -148,6 +157,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         // The previous file's values must not be saved as this one's progress.
         _position.value = 0.0
         _duration.value = 0.0
+        _chapters.value = emptyList()
         loadAt = SystemClock.elapsedRealtime()
         firstFrameAt = 0L
         openMs = null
@@ -216,6 +226,24 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     /** Subtitles later (positive) or earlier, in seconds; kept for the next files. */
     fun shiftSubtitles(seconds: Double) = mpv.command(arrayOf("add", "sub-delay", seconds.toString()))
 
+    /** Sound later (positive) or earlier, in seconds. */
+    fun shiftAudio(seconds: Double) = mpv.command(arrayOf("add", "audio-delay", seconds.toString()))
+
+    /** Adds a subtitle file (downloaded) and shows it. */
+    fun addSubtitles(path: String) = mpv.command(arrayOf("sub-add", path, "select"))
+
+    /** No video decoding while only the sound plays (background): the picture comes back with [enabled]. */
+    fun setVideoEnabled(enabled: Boolean) = mpv.setPropertyString("vid", if (enabled) "auto" else "no")
+
+    /** The picture's size as displayed (aspect applied), for the picture-in-picture window. */
+    fun videoSize(): Pair<Int, Int>? {
+        val width = mpv.getPropertyString("video-params/dw")?.toIntOrNull() ?: return null
+        val height = mpv.getPropertyString("video-params/dh")?.toIntOrNull() ?: return null
+        return (width to height).takeIf { width > 0 && height > 0 }
+    }
+
+    val isPlaying get() = !_paused.value && !_ended.value && _duration.value > 0
+
     fun setSpeed(speed: Double) = mpv.setPropertyDouble("speed", speed)
 
     fun toggleFill() {
@@ -269,7 +297,10 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     // --- MPVLib.EventObserver (mpv event thread) ---
 
     override fun eventProperty(property: String) {
-        if (property == "track-list") publishTracks()
+        when (property) {
+            "track-list" -> publishTracks()
+            "chapter-list" -> publishChapters()
+        }
     }
 
     override fun eventProperty(property: String, value: Long) {}
@@ -279,6 +310,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
             "time-pos" -> _position.value = value
             "duration" -> _duration.value = value
             "sub-delay" -> _subtitleDelay.value = value
+            "audio-delay" -> _audioDelay.value = value
             "speed" -> _speed.value = value
         }
     }
@@ -331,6 +363,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 externalSubtitles.forEach { mpv.command(arrayOf("sub-add", it, "auto")) }
                 selectTracks()
                 publishTracks()
+                publishChapters()
             }
             MPVLib.MpvEvent.MPV_EVENT_END_FILE -> Log.i(TAG, "end of file")
         }
@@ -360,6 +393,18 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         }
         _audioTracks.value = tracks.filter { it.type == "audio" }.map { it.toPlayerTrack() }
         _subtitleTracks.value = tracks.filter { it.type == "sub" }.map { it.toPlayerTrack() }
+    }
+
+    private fun publishChapters() {
+        _chapters.value = try {
+            (0 until (mpv.getPropertyString("chapter-list/count")?.toIntOrNull() ?: 0)).mapNotNull { i ->
+                val start = mpv.getPropertyString("chapter-list/$i/time")?.toDoubleOrNull() ?: return@mapNotNull null
+                Chapter(mpv.getPropertyString("chapter-list/$i/title").orEmpty(), start)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "chapters unreadable", e)
+            emptyList()
+        }
     }
 
     private fun readTracks(): List<MpvTrack> =

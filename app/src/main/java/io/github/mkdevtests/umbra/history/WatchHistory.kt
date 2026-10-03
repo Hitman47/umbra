@@ -87,6 +87,21 @@ class WatchHistory(private val dao: ProgressDao) {
         }
     }
 
+    /**
+     * Marks [files] (path → duration in seconds, 0 if unknown) watched or not,
+     * as the user asks from a poster or a page. "Not watched" is a fresh
+     * position 0: newer than what Trakt says, it wins on the screens.
+     */
+    fun mark(files: Map<String, Double>, watched: Boolean) {
+        val now = System.currentTimeMillis()
+        val entries = files.map { (file, known) ->
+            val duration = _progress.value[file]?.duration?.takeIf { it > 0 } ?: known.takeIf { it > 0 } ?: 1.0
+            Progress(file, if (watched) duration else 0.0, duration, now)
+        }
+        _progress.update { it + entries.associateBy { entry -> entry.file } }
+        scope.launch { runCatching { entries.forEach { dao.save(it) } }.onFailure { Log.w(TAG, "marks not saved", it) } }
+    }
+
     /** Called by the player while it plays [file]; ignored until mpv knows the duration. */
     fun save(file: String, position: Double, duration: Double) {
         if (duration <= 0) return

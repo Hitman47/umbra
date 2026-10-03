@@ -82,6 +82,14 @@ class LibraryRepository(private val app: NyxaraApp) {
         return movieExtras(movie, details, saga, _library.value).also { extras["m:$id"] = it }
     }
 
+    private val sagas = java.util.concurrent.ConcurrentHashMap<Int, TmdbCollection>()
+
+    /** A saga's page; null offline. */
+    suspend fun saga(id: Int): SagaPage? {
+        val collection = sagas[id] ?: runCatching { tmdb.collection(id) }.getOrNull()?.also { sagas[id] = it } ?: return null
+        return sagaPage(collection, _library.value)
+    }
+
     suspend fun extras(show: Show): Extras? {
         val id = show.tmdbId ?: return null
         extras["t:$id"]?.let { return it }

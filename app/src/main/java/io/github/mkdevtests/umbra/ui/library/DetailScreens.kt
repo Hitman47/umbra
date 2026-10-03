@@ -2,6 +2,7 @@ package io.github.mkdevtests.umbra.ui.library
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,6 +69,13 @@ import io.github.mkdevtests.umbra.library.Version
 import io.github.mkdevtests.umbra.library.describeVersion
 import io.github.mkdevtests.umbra.library.versions
 import io.github.mkdevtests.umbra.library.versionsOf
+import io.github.mkdevtests.umbra.media.MediaInfo
+import io.github.mkdevtests.umbra.media.audioLanguages
+import io.github.mkdevtests.umbra.media.badges
+import io.github.mkdevtests.umbra.media.compactLine
+import io.github.mkdevtests.umbra.media.detailLine
+import io.github.mkdevtests.umbra.media.resolutionLabel
+import io.github.mkdevtests.umbra.media.subtitleLanguages
 import io.github.mkdevtests.umbra.ui.theme.GlassButton
 import io.github.mkdevtests.umbra.ui.theme.GlassIconButton
 import io.github.mkdevtests.umbra.ui.theme.GlowButton
@@ -79,8 +87,11 @@ import java.util.Locale
 class DetailLinks(
     val onOpenMovie: (String) -> Unit,
     val onOpenShow: (String) -> Unit,
+    val onOpenSaga: (Int) -> Unit,
     val onPerson: (String) -> Unit,
-)
+) {
+    val titleLinks get() = TitleLinks(onOpenMovie, onOpenShow, onOpenSaga)
+}
 
 @Composable
 fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLinks, onBack: () -> Unit) {
@@ -93,6 +104,8 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
     val progress = history[movie.file]
     val hidden by viewModel.hidden.collectAsState()
     val isHidden = movie.hideKey in hidden
+    val infos by viewModel.mediaInfo.collectAsState()
+    LaunchedEffect(versions) { viewModel.requestMediaInfo(versions.map { it.file to it.size }) }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(movie.backdrop, onBack) }
         item {
@@ -117,11 +130,13 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
                         onClick = { context.startActivity(viewModel.playIntent(movie, version = version)) },
                     )
                 }
+                MarkButton(progress?.watched == true) { viewModel.markWatched(movie, progress?.watched != true) }
                 HideButton(isHidden) { viewModel.setHidden(movie, !isHidden) }
             }
         }
         item {
             Column(modifier = Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                infos[version.file]?.let { MediaBlock(it) }
                 movie.tagline?.let { Text(it, style = MaterialTheme.typography.titleMedium, fontStyle = FontStyle.Italic) }
                 movie.overview?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                 if (extras == null) Credits("Réalisation", movie.directors, movie.cast)
@@ -129,13 +144,13 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
         }
         if (versions.size > 1) {
             item {
-                VersionList(versions, version, viewModel::sourceLabel) {
+                VersionList(versions, version, viewModel::sourceLabel, infos = infos) {
                     version = it
                     viewModel.chooseVersion(movie.file, it)
                 }
             }
         }
-        extras?.let { item { ExtrasRows(it, links) } }
+        extras?.let { item { ExtrasRows(it, links, movie.sagaId) } }
         item {
             Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) { FileInfo(version.file, version.size) }
         }
@@ -155,10 +170,13 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
         )
     }
     var picking by remember(show.key) { mutableStateOf<Episode?>(null) }
+    var pressed by remember(show.key) { mutableStateOf<Episode?>(null) }
     val season = show.seasons.firstOrNull { it.number == selected }
     val history by viewModel.history.collectAsState()
     val hidden by viewModel.hidden.collectAsState()
     val isHidden = show.hideKey in hidden
+    val infos by viewModel.mediaInfo.collectAsState()
+    LaunchedEffect(season) { viewModel.requestMediaInfo(season?.episodes.orEmpty().map { it.file to it.fileSize }) }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(show.backdrop, onBack) }
@@ -180,6 +198,8 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                     }
                     GlassButton("Corriger", onClick = onFixMatch, icon = NyxaraIcons.Edit)
                 }
+                val seen = io.github.mkdevtests.umbra.history.seenOf(show, history)
+                MarkButton(seen.all, all = true) { viewModel.markWatched(show, !seen.all) }
                 HideButton(isHidden) { viewModel.setHidden(show, !isHidden) }
             }
         }
@@ -204,9 +224,20 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                 }
             }
         }
+        season?.takeIf { it.episodes.isNotEmpty() }?.let { shown ->
+            item {
+                val allSeen = shown.episodes.all { history[it.file]?.watched == true }
+                Row(modifier = Modifier.padding(horizontal = 12.dp)) {
+                    TextButton(onClick = { viewModel.markWatched(show, !allSeen, shown.episodes) }) {
+                        Icon(if (allSeen) NyxaraIcons.Close else NyxaraIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(if (allSeen) "  Marquer la saison non vue" else "  Marquer la saison vue")
+                    }
+                }
+            }
+        }
         items(season?.episodes.orEmpty(), key = { "${it.season}-${it.number}" }) { episode ->
             val versions = show.versionsOf(episode)
-            EpisodeRow(episode, history[episode.file], versions.size) {
+            EpisodeRow(episode, history[episode.file], versions.size, infos[episode.file], onLongClick = { pressed = episode }) {
                 // Several files of this episode: which one, first.
                 if (versions.size > 1) picking = episode else context.startActivity(viewModel.playIntent(show, episode))
             }
@@ -214,13 +245,16 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
         extras?.let { item { Column(modifier = Modifier.padding(bottom = 32.dp)) { ExtrasRows(it, links) } } }
     }
 
+    pressed?.let { episode -> EpisodeMenu(show, episode, history, viewModel, onOpen = null) { pressed = null } }
+
     picking?.let { episode ->
         val versions = show.versionsOf(episode)
         AlertDialog(
             onDismissRequest = { picking = null },
             title = { Text("S%02dE%02d · quelle version ?".format(episode.season, episode.number)) },
             text = {
-                VersionList(versions, viewModel.preferredVersion(episode.file, versions), viewModel::sourceLabel, padding = 0.dp) { chosen ->
+                LaunchedEffect(versions) { viewModel.requestMediaInfo(versions.map { it.file to it.size }) }
+                VersionList(versions, viewModel.preferredVersion(episode.file, versions), viewModel::sourceLabel, padding = 0.dp, infos = infos) { chosen ->
                     picking = null
                     viewModel.chooseVersion(episode.file, chosen)
                     context.startActivity(viewModel.playIntent(show, episode, version = chosen))
@@ -238,6 +272,7 @@ private fun VersionList(
     selected: Version,
     sourceLabel: (String) -> String?,
     padding: androidx.compose.ui.unit.Dp = 24.dp,
+    infos: Map<String, MediaInfo> = emptyMap(),
     onSelect: (Version) -> Unit,
 ) {
     Column(modifier = Modifier.padding(horizontal = padding, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -257,7 +292,12 @@ private fun VersionList(
             ) {
                 RadioButton(selected = chosen, onClick = null)
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(info.quality, style = MaterialTheme.typography.titleSmall)
+                    val media = infos[version.file]
+                    Text(
+                        media?.let { listOfNotNull(resolutionLabel(it.video?.width, it.video?.height), it.video?.hdr).joinToString(" ") }?.ifEmpty { null } ?: info.quality,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    media?.let { Text(it.detailLine(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
                     Text(
                         listOfNotNull(info.details, sourceLabel(version.file)).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
@@ -278,19 +318,21 @@ private fun VersionList(
 
 /** Cast and crew with their photos, the saga, the library's related titles and TMDB's recommendations. */
 @Composable
-private fun ExtrasRows(extras: Extras, links: DetailLinks) {
+private fun ExtrasRows(extras: Extras, links: DetailLinks, sagaId: Int? = null) {
     Column {
         PeopleRow("Distribution", extras.cast, links.onPerson)
         PeopleRow("Équipe", extras.crew, links.onPerson)
-        RelatedRow(extras.saga ?: "Saga", extras.sagaParts, links)
+        RelatedRow(extras.saga ?: "Saga", extras.sagaParts, links, onMore = sagaId?.let { { links.onOpenSaga(it) } })
         RelatedRow("Dans la bibliothèque", extras.linked, links)
         RelatedRow("Titres similaires", extras.recommended, links)
     }
 }
 
 @Composable
-private fun RowTitle(title: String) {
-    io.github.mkdevtests.umbra.ui.theme.SectionHeader(title, modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 10.dp))
+private fun RowTitle(title: String, onMore: (() -> Unit)? = null) {
+    io.github.mkdevtests.umbra.ui.theme.SectionHeader(title, modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 10.dp)) {
+        onMore?.let { TextButton(onClick = it) { Text("Tout voir ›") } }
+    }
 }
 
 /** People in a row; a touch searches the library for them. */
@@ -344,9 +386,9 @@ private fun PeopleRow(title: String, people: List<Person>, onPerson: (String) ->
 
 /** Posters in a row; titles missing from the library are dimmed and don't open. */
 @Composable
-private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks) {
+private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks, onMore: (() -> Unit)? = null) {
     if (items.isEmpty()) return
-    RowTitle(title)
+    RowTitle(title, onMore)
     LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(items) { item ->
             val open = item.movie?.let { { links.onOpenMovie(it) } } ?: item.show?.let { { links.onOpenShow(it) } }
@@ -365,6 +407,46 @@ private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks) 
                 )
             }
         }
+    }
+}
+
+/** What the file holds: badges ("4K", "HDR10", "HEVC", "E-AC3 5.1"), then its audio and subtitle languages. */
+@Composable
+private fun MediaBlock(info: MediaInfo) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val badges = info.badges()
+        if (badges.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { badges.forEach { Tag(it) } }
+        val audio = info.audioLanguages()
+        val subtitles = info.subtitleLanguages()
+        if (audio.isNotEmpty()) CreditLine("Audio", audio.joinToString(", ") { languageName(it) })
+        CreditLine("Sous-titres", if (subtitles.isEmpty()) "aucun dans le fichier" else subtitles.joinToString(", ") { languageName(it) })
+    }
+}
+
+/** "FR" → "Français", "FR forcés" → "Français (forcés)". */
+private fun languageName(label: String): String {
+    val code = label.substringBefore(' ')
+    val name = when (code) {
+        "VFF" -> "Français (VFF)"
+        "VFQ" -> "Français (VFQ)"
+        else -> Locale.forLanguageTag(code.lowercase()).getDisplayLanguage(Locale.FRENCH).replaceFirstChar { it.uppercase() }.ifEmpty { code }
+    }
+    return if (label.endsWith(" forcés")) "$name (forcés)" else name
+}
+
+/** Marks the title (or, [all], every episode) watched, or not watched any more. */
+@Composable
+private fun MarkButton(watched: Boolean, all: Boolean = false, onClick: () -> Unit) {
+    TextButton(onClick = onClick) {
+        Icon(if (watched) NyxaraIcons.Close else NyxaraIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(
+            when {
+                all && watched -> "  Tout marquer non vu"
+                all -> "  Tout marquer vu"
+                watched -> "  Marquer comme non vu"
+                else -> "  Marquer comme vu"
+            },
+        )
     }
 }
 
@@ -459,9 +541,9 @@ private fun TitleBlock(
 }
 
 @Composable
-private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, onClick: () -> Unit) {
+private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, media: MediaInfo?, onLongClick: () -> Unit, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Box(
@@ -501,6 +583,9 @@ private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, onC
             val meta = listOfNotNull(formatRuntime(episode.runtime), episode.airDate?.let(::formatDate), "$versions versions".takeIf { versions > 1 })
             if (meta.isNotEmpty()) {
                 Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            media?.compactLine()?.ifEmpty { null }?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             episode.overview?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
