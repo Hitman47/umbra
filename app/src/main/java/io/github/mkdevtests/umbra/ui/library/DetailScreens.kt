@@ -90,7 +90,7 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> U
 }
 
 @Composable
-fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit) {
+fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit, onFixMatch: () -> Unit) {
     val context = LocalContext.current
     var selected by rememberSaveable(show.key) { mutableIntStateOf(show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1) }
     val season = show.seasons.firstOrNull { it.number == selected }
@@ -104,16 +104,19 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
                 poster = show.poster,
                 title = show.title,
                 originalTitle = show.originalTitle,
-                meta = listOfNotNull(show.year?.toString(), "$episodes épisodes", formatRating(show.rating)),
+                meta = listOfNotNull(show.year?.toString(), statusLabel(show.status), seasonsOwned(show), "$episodes épisodes", formatRating(show.rating)),
                 genres = show.genres,
             ) {
                 val resume = nextUp(show, history)
                 val next = resume?.episode ?: show.regularEpisodes().firstOrNull() ?: season?.episodes?.firstOrNull()
-                if (next != null) {
-                    Button(onClick = { context.startActivity(viewModel.playIntent(show, next)) }) {
-                        val code = "S%02dE%02d".format(next.season, next.number)
-                        Text(if (resume?.progress != null) "▶  Reprendre $code" else "▶  $code")
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (next != null) {
+                        Button(onClick = { context.startActivity(viewModel.playIntent(show, next)) }) {
+                            val code = "S%02dE%02d".format(next.season, next.number)
+                            Text(if (resume?.progress != null) "▶  Reprendre $code" else "▶  $code")
+                        }
                     }
+                    OutlinedButton(onClick = onFixMatch) { Text("Corriger le matching") }
                 }
             }
         }
@@ -132,7 +135,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
                     FilterChip(
                         selected = it.number == selected,
                         onClick = { selected = it.number },
-                        label = { Text(if (it.number == 0) "Spéciaux" else "Saison ${it.number}") },
+                        label = { Text((if (it.number == 0) "Spéciaux" else "Saison ${it.number}") + episodesOwned(show, it.number, it.episodes.size)) },
                     )
                 }
             }
@@ -141,6 +144,30 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
             EpisodeRow(episode, history[episode.file]) { context.startActivity(viewModel.playIntent(show, episode)) }
         }
     }
+}
+
+/** TMDB status in French; null when TMDB doesn't say. */
+private fun statusLabel(status: String?): String? = when (status) {
+    "Returning Series" -> "En cours"
+    "Ended" -> "Terminée"
+    "Canceled" -> "Annulée"
+    "In Production", "Planned", "Pilot" -> "En production"
+    else -> null
+}
+
+/** "3 saisons sur 5": regular seasons with files, out of those on TMDB. */
+private fun seasonsOwned(show: Show): String? {
+    val owned = show.seasons.count { it.number > 0 && it.episodes.isNotEmpty() }
+    val total = show.seasonEpisodes.keys.count { it > 0 }
+    if (owned == 0) return null
+    val noun = if (owned > 1) "saisons" else "saison"
+    return if (total > owned) "$owned $noun sur $total" else "$owned $noun"
+}
+
+/** " · 8/12" on a season chip when files are missing. */
+private fun episodesOwned(show: Show, season: Int, owned: Int): String {
+    val total = show.seasonEpisodes[season] ?: return ""
+    return if (season > 0 && total > owned) " · $owned/$total" else ""
 }
 
 @Composable

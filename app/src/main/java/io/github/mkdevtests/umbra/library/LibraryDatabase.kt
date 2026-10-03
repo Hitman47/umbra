@@ -35,6 +35,7 @@ data class ShowRow(
     val seasonEpisodes: Map<Int, Int>,
     val folders: List<String>,
     @ColumnInfo(defaultValue = "[]") val duplicates: List<String>,
+    @ColumnInfo(defaultValue = "[]") val groups: List<String>,
 )
 
 @Entity(tableName = "seasons", primaryKeys = ["showKey", "number"])
@@ -179,18 +180,18 @@ abstract class LibraryDao {
     }
 
     private fun Show.toRow() = ShowRow(
-        key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates,
+        key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups,
     )
 
     private fun ShowRow.toShow(seasons: List<Season>) = Show(
-        key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, seasons,
+        key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups, seasons,
     )
 }
 
 @Database(
     entities = [Movie::class, ShowRow::class, SeasonRow::class, Episode::class, MetaRow::class, SearchRow::class],
-    version = 2,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    version = 3,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 @TypeConverters(Converters::class)
 abstract class LibraryDatabase : RoomDatabase() {

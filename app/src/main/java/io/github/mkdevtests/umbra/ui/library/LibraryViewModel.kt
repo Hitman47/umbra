@@ -30,6 +30,17 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rescan() = repository.startScan()
 
+    suspend fun searchShows(query: String) = repository.searchShows(query)
+
+    suspend fun seasonsOf(tmdbId: Int) = repository.seasonsOf(tmdbId)
+
+    fun fixMatch(groups: List<String>, tmdbId: Int?, season: Int?, firstEpisode: Int) =
+        repository.fixMatch(groups, tmdbId, season, firstEpisode)
+
+    fun resetMatch(groups: List<String>) = repository.resetMatch(groups)
+
+    val matchFixes = umbra.matchFixes.fixes
+
     /** Called once a new NAS source is connected. */
     fun onSourceChanged() = repository.startScan()
 

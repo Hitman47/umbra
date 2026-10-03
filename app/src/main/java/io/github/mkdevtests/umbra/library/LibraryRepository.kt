@@ -4,8 +4,10 @@ import android.util.Log
 import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.UmbraApp
 import io.github.mkdevtests.umbra.browse.naturalCompare
+import io.github.mkdevtests.umbra.history.MatchFix
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.toUserMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,6 +31,8 @@ class LibraryRepository(private val app: UmbraApp) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val tmdb by lazy { Tmdb(BuildConfig.TMDB_TOKEN, OkHttpClient()) }
     private var scanJob: Job? = null
+    /** Groups whose correction was removed, matched again by the next scan. */
+    private val rematch = java.util.Collections.synchronizedSet(HashSet<String>())
 
     private val _library = MutableStateFlow(Library())
     val library: StateFlow<Library> = _library.asStateFlow()
@@ -61,6 +65,36 @@ class LibraryRepository(private val app: UmbraApp) {
         }
     }
 
+    /** Shows on TMDB for what the user typed, to correct a match. */
+    suspend fun searchShows(query: String): List<TmdbSearchItem> = tmdb.searchShows(query)
+
+    /** TMDB seasons of a show, to place a folder in one of them. */
+    suspend fun seasonsOf(tmdbId: Int): List<TmdbSeasonSummary> = tmdb.show(tmdbId).seasons
+
+    /** Saves the user's choice for [groups] and rescans, which applies it. */
+    fun fixMatch(groups: List<String>, tmdbId: Int?, season: Int?, firstEpisode: Int) {
+        scope.launch {
+            app.matchFixes.save(groups.map { MatchFix(it, tmdbId, season, firstEpisode) })
+            rematch -= groups.toSet()
+            restartScan()
+        }
+    }
+
+    /** Back to the automatic match for [groups]. */
+    fun resetMatch(groups: List<String>) {
+        scope.launch {
+            app.matchFixes.remove(groups)
+            rematch += groups
+            restartScan()
+        }
+    }
+
+    /** A running scan was started without the latest correction: start over. */
+    private suspend fun restartScan() {
+        scanJob?.let { it.cancel(); it.join() }
+        startScan()
+    }
+
     @Synchronized
     fun startScan() {
         if (scanJob?.isActive == true) return
@@ -72,14 +106,20 @@ class LibraryRepository(private val app: UmbraApp) {
                 val key = keyOf(smb.source)
                 val previous = _library.value.takeIf { it.source == key }
                     ?: Library().also { _library.value = it } // another share: don't show its titles
-                val scanner = LibraryScanner(smb, tmdb) { _scan.value = ScanState(running = true, progress = it) }
+                val fixes = app.matchFixes.load()
+                val again = synchronized(rematch) { rematch.toSet() }
+                val scanner = LibraryScanner(smb, tmdb, fixes, again) { _scan.value = ScanState(running = true, progress = it) }
                 val started = System.currentTimeMillis()
                 val requests = tmdb.requests.get()
                 val result = scanner.scan(previous, key)
                 _library.value = result
                 save(result)
+                rematch -= again
                 Log.i(TAG, "scan done in ${(System.currentTimeMillis() - started) / 1000} s, ${tmdb.requests.get() - requests} TMDB requests")
                 _scan.value = ScanState()
+            } catch (e: CancellationException) {
+                _scan.value = ScanState()
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "scan failed", e)
                 _scan.value = ScanState(error = e.toUserMessage())

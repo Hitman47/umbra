@@ -33,6 +33,10 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
     suspend fun findShow(queries: List<String>, year: Int?): Int? =
         find(queries, year) { query -> search("search/tv", "first_air_date_year", query, year) }
 
+    /** Shows for what the user typed, in TMDB's order, to pick the right one by hand. */
+    suspend fun searchShows(query: String): List<TmdbSearchItem> =
+        get("search/tv", TmdbSearch.serializer(), "query" to query).results
+
     /** TMDB film for an IMDb id ("tt0055928"), the most reliable match when the file name has one. */
     suspend fun movieForImdb(imdbId: String): Int? =
         get("find/$imdbId", TmdbFind.serializer(), "external_source" to "imdb_id").movieResults.firstOrNull()?.id
@@ -148,6 +152,7 @@ data class TmdbSearchItem(
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("first_air_date") val firstAirDate: String? = null,
     val popularity: Double? = null,
+    @SerialName("poster_path") val posterPath: String? = null,
 )
 
 @Serializable

@@ -11,6 +11,8 @@ import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.SourceStore
 import io.github.mkdevtests.umbra.settings.SettingsStore
+import io.github.mkdevtests.umbra.history.HistoryDatabase
+import io.github.mkdevtests.umbra.history.MatchFixes
 import io.github.mkdevtests.umbra.history.WatchHistory
 import io.github.mkdevtests.umbra.update.Updater
 import okhttp3.OkHttpClient
@@ -34,7 +36,12 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     val updater by lazy { Updater(this, OkHttpClient()) }
 
-    val history by lazy { WatchHistory(this) }
+    /** The user's own data (history, match corrections), kept apart from the library cache. */
+    val userData by lazy { HistoryDatabase.open(this) }
+
+    val history by lazy { WatchHistory(userData.dao()) }
+
+    val matchFixes by lazy { MatchFixes(userData.matchFixes()) }
 
     override fun onCreate() {
         super.onCreate()

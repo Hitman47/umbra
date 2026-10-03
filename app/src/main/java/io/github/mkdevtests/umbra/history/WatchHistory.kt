@@ -1,6 +1,7 @@
 package io.github.mkdevtests.umbra.history
 
 import android.content.Context
+import androidx.room.AutoMigration
 import android.util.Log
 import androidx.room.Dao
 import androidx.room.Database
@@ -49,18 +50,28 @@ interface ProgressDao {
 }
 
 /**
- * Its own database, unlike the library: the library is a cache rebuilt by a
- * scan, the history is the user's and must survive any library change.
+ * What the user did, apart from the library: the library is a cache rebuilt
+ * by a scan, the history and the match corrections must survive any change.
+ * Never migrated destructively.
  */
-@Database(entities = [Progress::class], version = 1)
+@Database(
+    entities = [Progress::class, MatchFix::class],
+    version = 2,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 abstract class HistoryDatabase : RoomDatabase() {
     abstract fun dao(): ProgressDao
+
+    abstract fun matchFixes(): MatchFixDao
+
+    companion object {
+        fun open(context: Context): HistoryDatabase =
+            Room.databaseBuilder(context, HistoryDatabase::class.java, "history.db").build()
+    }
 }
 
 /** What was watched and where playback stopped, kept in memory for the screens. */
-class WatchHistory(context: Context) {
-
-    private val dao = Room.databaseBuilder(context, HistoryDatabase::class.java, "history.db").build().dao()
+class WatchHistory(private val dao: ProgressDao) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _progress = MutableStateFlow<Map<String, Progress>>(emptyMap())

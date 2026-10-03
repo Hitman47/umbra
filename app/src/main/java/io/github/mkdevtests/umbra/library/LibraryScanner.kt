@@ -4,6 +4,7 @@ import android.util.Log
 import io.github.mkdevtests.umbra.browse.isVideo
 import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.browse.subtitlesFor
+import io.github.mkdevtests.umbra.history.MatchFix
 import io.github.mkdevtests.umbra.nas.NasEntry
 import io.github.mkdevtests.umbra.nas.SmbNas
 import kotlinx.coroutines.CancellationException
@@ -49,6 +50,10 @@ private const val MAX_DEPTH = 8
 class LibraryScanner(
     private val smb: SmbNas,
     private val tmdb: Tmdb,
+    /** The user's corrections, by group: they win over the TMDB search and the last scan. */
+    private val fixes: Map<String, MatchFix> = emptyMap(),
+    /** Groups whose correction was just removed: matched again rather than kept from the last scan. */
+    private val rematch: Set<String> = emptySet(),
     private val onProgress: (String) -> Unit,
 ) {
     /** Parallel TMDB calls: their latency overlaps without hitting the rate limit. */
@@ -273,15 +278,19 @@ class LibraryScanner(
 
     private suspend fun scanShows(episodes: List<EpisodeFile>, previous: List<Show>, counts: Map<String, Int>): List<Show> {
         val knownShowOf = previous.flatMap { show -> (show.seasons.flatMap { it.episodes }.map { it.file } + show.duplicates).map { it to show } }.toMap()
-        val knownEpisodes = previous.flatMap { show -> show.seasons.flatMap { it.episodes } }.associateBy { it.file }
+        val knownEpisodes = previous.flatMap { show -> show.seasons.flatMap { it.episodes }.map { it.copy(showKey = show.key) } }.associateBy { it.file }
         val previousByKey = previous.associateBy { it.key }
 
         // 1. Which show each folder or title is.
         val groups = episodes.groupBy { it.group }.values.toList()
-        val identified = forEachParallel(groups, "Séries") { group ->
+        val identified = forEachParallel(groups, "Séries") { files ->
+            val fix = fixes[files.first().group]
+            val group = fix?.let { files.map { file -> file.fixed(it) } } ?: files
             val known = group.firstNotNullOfOrNull { knownShowOf[it.video.entry.path]?.takeIf { show -> show.tmdbId != null } }
+                ?.takeIf { group.first().group !in rematch }
             val name = group.groupingBy { it.show }.eachCount().maxBy { it.value }.key
             val show = when {
+                fix != null -> fixedShow(fix, name, previousByKey)
                 known == null -> matchShow(name)
                 // Matched by an older version, without the season sizes: refresh it.
                 known.seasonEpisodes.isEmpty() -> lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known
@@ -301,7 +310,8 @@ class LibraryScanner(
                     val video = file.video
                     val episode = file.episode!!
                     knownEpisodes[video.entry.path]
-                        ?.takeIf { it.season == number && it.number == episode }
+                        // Same place in the same show: a corrected match takes the new show's details.
+                        ?.takeIf { it.showKey == show.key && it.season == number && it.number == episode }
                         ?.takeIf { it.hasMetadata || unchanged(it.fileSize, it.modified, video.entry) }
                         ?.copy(fileSize = video.entry.size, modified = video.entry.modified, subtitles = video.subtitles)
                         ?: Episode(number, episode, video.entry.path, video.entry.size, video.subtitles, title = file.title, modified = video.entry.modified)
@@ -312,7 +322,8 @@ class LibraryScanner(
                 val onTmdb = show.seasonEpisodes.isEmpty() || number in show.seasonEpisodes
                 // Episodes TMDB had no details for, unchanged since: not asked again.
                 val missing = episodesOfSeason.any { episode ->
-                    !episode.hasMetadata && knownEpisodes[episode.file]?.let { unchanged(it.fileSize, it.modified, episode) } != true
+                    !episode.hasMetadata &&
+                        knownEpisodes[episode.file]?.takeIf { !it.hasMetadata && it.showKey == show.key }?.let { unchanged(it.fileSize, it.modified, episode) } != true
                 }
                 if (show.tmdbId != null && onTmdb && missing) {
                     lookup("saison $number de ${show.title}") { withSeasonDetails(show.tmdbId, season) } ?: season
@@ -325,6 +336,7 @@ class LibraryScanner(
                 seasons = seasons.sortedBy { it.number },
                 folders = showFolders(all, counts),
                 duplicates = all.map { it.video.entry.path }.filterNot { it in shown },
+                groups = all.map { it.group }.distinct().sorted(),
             )
         }
     }
@@ -366,6 +378,21 @@ class LibraryScanner(
         files.mapNotNull { it.folder }.distinct().filter { folder ->
             counts[folder] == files.count { it.video.entry.path.startsWith("$folder\\") }
         }
+
+    /** The files of a corrected group, in the season the user chose. Specials keep their numbers. */
+    private fun EpisodeFile.fixed(fix: MatchFix): EpisodeFile {
+        val season = fix.season ?: return this
+        if (this.season == 0 && season != 0) return this
+        return copy(season = season, episode = episode?.let { it + fix.firstEpisode - 1 }, seasonKnown = true)
+    }
+
+    /** The show the user chose; reuses the last scan's details when it had them. */
+    private suspend fun fixedShow(fix: MatchFix, name: ParsedName, previous: Map<String, Show>): Show {
+        val id = fix.tmdbId ?: return Show(key = "title:${normalizeTitle(name.title)}", title = name.title, year = name.year)
+        previous["tmdb:$id"]?.takeIf { it.seasonEpisodes.isNotEmpty() }?.let { return it }
+        return lookup("série $id") { tmdb.show(id).toShow(name) }
+            ?: Show(key = "tmdb:$id", tmdbId = id, title = name.title, year = name.year) // retried by the next scan
+    }
 
     private suspend fun matchShow(name: ParsedName): Show {
         val unmatched = Show(key = "title:${normalizeTitle(name.title)}", title = name.title, year = name.year)

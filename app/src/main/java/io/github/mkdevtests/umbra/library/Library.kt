@@ -79,6 +79,8 @@ data class Show(
     val folders: List<String> = emptyList(),
     /** Episode files hidden as copies of another one: known to the next scan, which doesn't look them up again. */
     val duplicates: List<String> = emptyList(),
+    /** The scanner's groups of episode files ("folder:…", "title:…"): what a match correction applies to. */
+    val groups: List<String> = emptyList(),
     val seasons: List<Season> = emptyList(),
 )
 
