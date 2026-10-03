@@ -33,6 +33,7 @@ import io.github.mkdevtests.umbra.history.without
 import io.github.mkdevtests.umbra.library.Related
 import io.github.mkdevtests.umbra.library.SagaPage
 import io.github.mkdevtests.umbra.library.inRoot
+import io.github.mkdevtests.umbra.library.universesOf
 import io.github.mkdevtests.umbra.ui.theme.GlassButton
 import io.github.mkdevtests.umbra.ui.theme.GlassIconButton
 import io.github.mkdevtests.umbra.ui.theme.GlowButton
@@ -135,5 +136,36 @@ fun SagaScreen(id: Int, viewModel: LibraryViewModel, links: TitleLinks, onBack: 
                 )
             }
         }
+    }
+}
+
+/**
+ * A universe: the library's titles tied by their characters or a franchise
+ * ("Batman": the Burton films, Nolan's trilogy, The Batman, Joker…), in release order.
+ */
+@Composable
+fun UniverseScreen(name: String, viewModel: LibraryViewModel, links: TitleLinks, onBack: () -> Unit) {
+    val full by viewModel.library.collectAsState()
+    val hidden by viewModel.hidden.collectAsState()
+    val history by viewModel.history.collectAsState()
+    val library = remember(full, hidden) { full.without(hidden) }
+    val universe = remember(library, name) { universesOf(library).firstOrNull { it.name == name } }
+    val menu = rememberTitleMenu(viewModel, links)
+    val items = remember(universe, library, history) {
+        val byFile = library.movies.associateBy { it.file }
+        val byKey = library.shows.associateBy { it.key }
+        universe?.titles.orEmpty().mapNotNull { title ->
+            title.movie?.let(byFile::get)?.let { movieItem(it, history) } ?: title.show?.let(byKey::get)?.let { showItems(listOf(it), history).single() }
+        }
+    }
+    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+        ScreenTitle(name, onBack)
+        PosterGrid(
+            items = items,
+            emptyText = "Cet univers n'est plus dans la bibliothèque.",
+            onClick = { key -> if (items.first { it.key == key }.isShow) links.onOpenShow(key) else links.onOpenMovie(key) },
+            noun = "titre",
+            onLongClick = { menu(TitleTarget(it.key, it.isShow)) },
+        )
     }
 }

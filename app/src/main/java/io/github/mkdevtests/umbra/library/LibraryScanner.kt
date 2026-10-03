@@ -310,7 +310,7 @@ class LibraryScanner(
             val name = names.getValue(group.first())
             val template = group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> movie.tmdbId != null } }
                 // Matched before credits or sagas were fetched: refresh it.
-                ?.let { movie -> if (movie.hasCredits && movie.sagaChecked) movie else lookup("film ${movie.title}") { tmdb.movie(movie.tmdbId!!).toMovie(name) } ?: movie }
+                ?.let { movie -> if (movie.hasCredits && movie.sagaChecked && movie.linksChecked) movie else lookup("film ${movie.title}") { tmdb.movie(movie.tmdbId!!).toMovie(name) } ?: movie }
                 // Unchanged since TMDB found nothing for it: don't ask again.
                 ?: group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> unchanged(movie.fileSize, movie.modified, it.entry) } }
                 ?: lookup("film ${group.first().entry.name}") {
@@ -377,6 +377,9 @@ class LibraryScanner(
         saga = collection?.name,
         sagaPoster = collection?.posterPath,
         sagaChecked = true,
+        characters = leadCharacters(credits?.cast.orEmpty().map { it.character }),
+        universes = franchiseKeywords(keywords?.all.orEmpty().map { it.name }),
+        linksChecked = true,
     )
 
     // --- Shows ---
@@ -400,7 +403,7 @@ class LibraryScanner(
                 fix != null -> fixedShow(fix, name, previousByKey) to "correction"
                 known == null -> matchShow(name) to "recherche TMDB « ${name.title} »"
                 // Matched by an older version, without the season sizes or the credits: refresh it.
-                known.seasonEpisodes.isEmpty() || !known.hasCredits -> (lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known) to "reconnue avant"
+                known.seasonEpisodes.isEmpty() || !known.hasCredits || !known.linksChecked -> (lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known) to "reconnue avant"
                 else -> known to "reconnue avant"
             }
             decisions += MatchDecision(group.first().group, group.size, how, show.key, show.title, show.year, show.tmdbId)
@@ -546,7 +549,7 @@ class LibraryScanner(
     /** The show the user chose; reuses the last scan's details when it had them. */
     private suspend fun fixedShow(fix: MatchFix, name: ParsedName, previous: Map<String, Show>): Show {
         val id = fix.tmdbId ?: return Show(key = "title:${normalizeTitle(name.title)}", title = name.title, year = name.year)
-        previous["tmdb:$id"]?.takeIf { it.seasonEpisodes.isNotEmpty() && it.hasCredits }?.let { return it }
+        previous["tmdb:$id"]?.takeIf { it.seasonEpisodes.isNotEmpty() && it.hasCredits && it.linksChecked }?.let { return it }
         return lookup("série $id") { tmdb.show(id).toShow(name) }
             ?: Show(key = "tmdb:$id", tmdbId = id, title = name.title, year = name.year) // retried by the next scan
     }
@@ -574,6 +577,9 @@ class LibraryScanner(
         cast = credits?.actors().orEmpty(),
         directors = createdBy.map { it.name }.distinct(),
         hasCredits = credits != null,
+        characters = leadCharacters(credits?.cast.orEmpty().map { it.character }),
+        universes = franchiseKeywords(keywords?.all.orEmpty().map { it.name }),
+        linksChecked = true,
     )
 
     private suspend fun withSeasonDetails(showId: Int, season: Season): Season {

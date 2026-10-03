@@ -67,7 +67,11 @@ import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.Tmdb
 import io.github.mkdevtests.umbra.library.Version
 import io.github.mkdevtests.umbra.library.describeVersion
+import io.github.mkdevtests.umbra.library.LinkRow
+import io.github.mkdevtests.umbra.library.characterRow
+import io.github.mkdevtests.umbra.library.directorRow
 import io.github.mkdevtests.umbra.library.groupLabel
+import io.github.mkdevtests.umbra.library.linkables
 import io.github.mkdevtests.umbra.library.versions
 import io.github.mkdevtests.umbra.library.versionsOf
 import io.github.mkdevtests.umbra.media.MediaInfo
@@ -90,8 +94,9 @@ class DetailLinks(
     val onOpenShow: (String) -> Unit,
     val onOpenSaga: (Int) -> Unit,
     val onPerson: (String) -> Unit,
+    val onOpenUniverse: (String) -> Unit = {},
 ) {
-    val titleLinks get() = TitleLinks(onOpenMovie, onOpenShow, onOpenSaga)
+    val titleLinks get() = TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse)
 }
 
 @Composable
@@ -151,7 +156,7 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
                 }
             }
         }
-        extras?.let { item { ExtrasRows(it, links, movie.sagaId) } }
+        item { ExtrasRows(extras, links, localRows(viewModel, movie = movie.file), movie.sagaId) }
         item {
             Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) { FileInfo(version.file, version.size) }
         }
@@ -264,7 +269,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                 if (versions.size > 1) picking = episode else context.startActivity(viewModel.playIntent(show, episode))
             }
         }
-        extras?.let { item { Column(modifier = Modifier.padding(bottom = 32.dp)) { ExtrasRows(it, links) } } }
+        item { Column(modifier = Modifier.padding(bottom = 32.dp)) { ExtrasRows(extras, links, localRows(viewModel, show = show.key)) } }
     }
 
     pressed?.let { episode -> EpisodeMenu(show, episode, history, viewModel, onOpen = null) { pressed = null } }
@@ -340,13 +345,33 @@ private fun VersionList(
 
 /** Cast and crew with their photos, the saga, the library's related titles and TMDB's recommendations. */
 @Composable
-private fun ExtrasRows(extras: Extras, links: DetailLinks, sagaId: Int? = null) {
+private fun ExtrasRows(extras: Extras?, links: DetailLinks, local: List<LinkRow>, sagaId: Int? = null) {
     Column {
-        PeopleRow("Distribution", extras.cast, links.onPerson)
-        PeopleRow("Équipe", extras.crew, links.onPerson)
-        RelatedRow(extras.saga ?: "Saga", extras.sagaParts, links, onMore = sagaId?.let { { links.onOpenSaga(it) } })
-        RelatedRow("Dans la bibliothèque", extras.linked, links)
-        RelatedRow("Titres similaires", extras.recommended, links)
+        if (extras != null) {
+            PeopleRow("Distribution", extras.cast, links.onPerson)
+            PeopleRow("Équipe", extras.crew, links.onPerson)
+            RelatedRow(extras.saga ?: "Saga", extras.sagaParts, links, onMore = sagaId?.let { { links.onOpenSaga(it) } })
+        }
+        // The library's titles with the same characters, by the same director: offline too.
+        local.forEach { RelatedRow(it.title, it.items, links) }
+        if (extras != null) {
+            val shown = local.flatMapTo(HashSet()) { row -> row.items.mapNotNull { it.movie ?: it.show } }
+            RelatedRow("Dans la bibliothèque", extras.linked.filter { (it.movie ?: it.show) !in shown }, links)
+            RelatedRow("Titres similaires", extras.recommended, links)
+        }
+    }
+}
+
+/** "Aussi avec Batman" and "Du même réalisateur" for the film [movie] or the show [show], from the library alone. */
+@Composable
+private fun localRows(viewModel: LibraryViewModel, movie: String? = null, show: String? = null): List<LinkRow> {
+    val library by viewModel.library.collectAsState()
+    return remember(library, movie, show) {
+        val all = library.linkables()
+        val self = all.firstOrNull { (movie != null && it.movie == movie) || (show != null && it.show == show) } ?: return@remember emptyList()
+        val characters = characterRow(self, all)
+        val director = directorRow(self, all, characters?.items.orEmpty().mapNotNullTo(HashSet()) { it.movie ?: it.show })
+        listOfNotNull(characters, director)
     }
 }
 

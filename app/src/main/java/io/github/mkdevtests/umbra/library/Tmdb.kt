@@ -62,14 +62,14 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
     }
 
     suspend fun movie(id: Int): TmdbMovie {
-        val movie = get("movie/$id", TmdbMovie.serializer(), "append_to_response" to "credits")
+        val movie = get("movie/$id", TmdbMovie.serializer(), "append_to_response" to "credits,keywords")
         if (!movie.overview.isNullOrBlank()) return movie
         // Many films have no French synopsis: fall back to English.
         return movie.copy(overview = get("movie/$id", TmdbMovie.serializer(), "language" to "en-US").overview)
     }
 
     suspend fun show(id: Int): TmdbShow {
-        val show = get("tv/$id", TmdbShow.serializer(), "append_to_response" to "credits")
+        val show = get("tv/$id", TmdbShow.serializer(), "append_to_response" to "credits,keywords")
         if (!show.overview.isNullOrBlank()) return show
         return show.copy(overview = get("tv/$id", TmdbShow.serializer(), "language" to "en-US").overview)
     }
@@ -251,7 +251,17 @@ data class TmdbMovie(
     @SerialName("vote_average") val voteAverage: Double? = null,
     val credits: TmdbCredits? = null,
     @SerialName("belongs_to_collection") val collection: TmdbCollectionRef? = null,
+    val keywords: TmdbKeywords? = null,
 )
+
+/** A film's keywords come as "keywords", a show's as "results". */
+@Serializable
+data class TmdbKeywords(val keywords: List<TmdbKeyword> = emptyList(), val results: List<TmdbKeyword> = emptyList()) {
+    val all get() = keywords + results
+}
+
+@Serializable
+data class TmdbKeyword(val name: String)
 
 @Serializable
 data class TmdbCredits(val cast: List<TmdbPerson> = emptyList(), val crew: List<TmdbPerson> = emptyList()) {
@@ -260,7 +270,7 @@ data class TmdbCredits(val cast: List<TmdbPerson> = emptyList(), val crew: List<
 }
 
 @Serializable
-data class TmdbPerson(val name: String, val job: String? = null)
+data class TmdbPerson(val name: String, val job: String? = null, val character: String? = null)
 
 @Serializable
 data class TmdbShow(
@@ -277,6 +287,7 @@ data class TmdbShow(
     val seasons: List<TmdbSeasonSummary> = emptyList(),
     @SerialName("created_by") val createdBy: List<TmdbPerson> = emptyList(),
     val credits: TmdbCredits? = null,
+    val keywords: TmdbKeywords? = null,
 )
 
 @Serializable

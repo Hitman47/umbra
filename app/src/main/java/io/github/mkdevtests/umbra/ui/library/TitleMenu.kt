@@ -42,6 +42,7 @@ class TitleLinks(
     val onOpenMovie: (String) -> Unit,
     val onOpenShow: (String) -> Unit,
     val onOpenSaga: (Int) -> Unit = {},
+    val onOpenUniverse: (String) -> Unit = {},
 )
 
 /**

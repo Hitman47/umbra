@@ -65,6 +65,12 @@ data class Movie(
     val sagaPoster: String? = null,
     /** False for a film matched before sagas were read: the next scan looks it up again. */
     @ColumnInfo(defaultValue = "0") val sagaChecked: Boolean = false,
+    /** Its leads' characters ("Bruce Wayne / Batman"), cleaned: what links it to the other films with them. */
+    @ColumnInfo(defaultValue = "[]") val characters: List<String> = emptyList(),
+    /** TMDB keywords naming a franchise ("dc extended universe (dceu)"). */
+    @ColumnInfo(defaultValue = "[]") val universes: List<String> = emptyList(),
+    /** False for a film matched before characters were read: the next scan looks it up again. */
+    @ColumnInfo(defaultValue = "0") val linksChecked: Boolean = false,
 )
 
 @Serializable
@@ -98,6 +104,9 @@ data class Show(
     val directors: List<String> = emptyList(),
     val hasCredits: Boolean = false,
     val seasons: List<Season> = emptyList(),
+    val characters: List<String> = emptyList(),
+    val universes: List<String> = emptyList(),
+    val linksChecked: Boolean = false,
 )
 
 @Serializable

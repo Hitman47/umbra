@@ -60,7 +60,9 @@ import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Saga
 import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.decadeLabel
+import io.github.mkdevtests.umbra.library.Universe
 import io.github.mkdevtests.umbra.library.sagasOf
+import io.github.mkdevtests.umbra.library.universesOf
 import io.github.mkdevtests.umbra.history.without
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.ui.theme.NyxaraLogo
@@ -86,6 +88,7 @@ fun HomeScreen(
     onOpenMovie: (String) -> Unit,
     onOpenShow: (String) -> Unit,
     onOpenSaga: (Int) -> Unit,
+    onOpenUniverse: (String) -> Unit,
     onOpenShortcut: (String) -> Unit,
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -95,7 +98,7 @@ fun HomeScreen(
         val content: @Composable (Modifier) -> Unit = { modifier ->
             HomeContent(
                 libraryViewModel, browserViewModel, updater, tab, wide,
-                TitleLinks(onOpenMovie, onOpenShow, onOpenSaga), onOpenShortcut, onPickLocalFile, onOpenSettings, modifier,
+                TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse), onOpenShortcut, onPickLocalFile, onOpenSettings, modifier,
             )
         }
         if (wide) {
@@ -280,23 +283,62 @@ internal fun sagaItem(saga: Saga, history: Map<String, Progress>): PosterItem {
     )
 }
 
-/** The "Films" tab: films, or their sagas. */
+/** What the "Films" tab shows. */
+private enum class MovieView { Films, Sagas, Universes }
+
+/** The "Films" tab: films, their sagas, or the universes their characters make. */
 @Composable
 private fun MovieGrid(library: Library, history: Map<String, Progress>, emptyText: String, links: TitleLinks, menu: (TitleTarget) -> Unit) {
-    var bySaga by rememberSaveable { mutableStateOf(false) }
+    var view by rememberSaveable { mutableStateOf(MovieView.Films) }
     val sagas = remember(library) { sagasOf(library) }
-    val items = remember(library, history, bySaga) {
-        if (bySaga) sagas.map { sagaItem(it, history) } else library.movies.map { movieItem(it, history) }
+    val universes = remember(library) { universesOf(library) }
+    val items = remember(library, history, view) {
+        when (view) {
+            MovieView.Films -> library.movies.map { movieItem(it, history) }
+            MovieView.Sagas -> sagas.map { sagaItem(it, history) }
+            MovieView.Universes -> universes.map { universeItem(it, history) }
+        }
     }
     PosterGrid(
         items = items,
         emptyText = emptyText,
-        onClick = { key -> key.removePrefix("saga:").toIntOrNull()?.takeIf { key.startsWith("saga:") }?.let(links.onOpenSaga) ?: links.onOpenMovie(key) },
-        noun = if (bySaga) "saga" else "film",
-        onLongClick = { menu(TitleTarget(it.key)) },
-        chips = {
-            if (sagas.isNotEmpty()) FilterChip(selected = bySaga, onClick = { bySaga = !bySaga }, label = { Text("Sagas") })
+        onClick = { key ->
+            when {
+                key.startsWith("saga:") -> key.removePrefix("saga:").toIntOrNull()?.let(links.onOpenSaga)
+                key.startsWith(UNIVERSE) -> links.onOpenUniverse(key.removePrefix(UNIVERSE))
+                else -> links.onOpenMovie(key)
+            }
         },
+        noun = when (view) {
+            MovieView.Films -> "film"
+            MovieView.Sagas -> "saga"
+            MovieView.Universes -> "univers"
+        },
+        onLongClick = { item -> if (!item.key.startsWith(UNIVERSE)) menu(TitleTarget(item.key)) },
+        chips = {
+            if (sagas.isNotEmpty()) {
+                FilterChip(selected = view == MovieView.Sagas, onClick = { view = if (view == MovieView.Sagas) MovieView.Films else MovieView.Sagas }, label = { Text("Sagas") })
+            }
+            if (universes.isNotEmpty()) {
+                FilterChip(selected = view == MovieView.Universes, onClick = { view = if (view == MovieView.Universes) MovieView.Films else MovieView.Universes }, label = { Text("Univers") })
+            }
+        },
+    )
+}
+
+/** Key prefix of a universe's poster: "universe:Batman". */
+private const val UNIVERSE = "universe:"
+
+internal fun universeItem(universe: Universe, history: Map<String, Progress>): PosterItem {
+    val seen = universe.titles.count { title ->
+        title.movie?.let { history[it]?.watched == true } ?: false
+    }
+    return PosterItem(
+        UNIVERSE + universe.name, universe.name, universe.titles.first().year, universe.poster,
+        subtitle = "${universe.titles.size} titres",
+        badge = if (seen > 0) "$seen/${universe.titles.size}" else null,
+        added = 0,
+        rating = universe.titles.mapNotNull { it.rating }.average().takeIf { !it.isNaN() },
     )
 }
 
@@ -356,7 +398,7 @@ internal fun PosterGrid(
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${shown.size} $noun${if (shown.size > 1) "s" else ""}" + if (filtered) " sur ${items.size}" else "",
+                            "${shown.size} $noun${if (shown.size > 1 && !noun.endsWith("s")) "s" else ""}" + if (filtered) " sur ${items.size}" else "",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),

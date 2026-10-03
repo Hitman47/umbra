@@ -35,6 +35,7 @@ import io.github.mkdevtests.umbra.ui.library.MovieDetailScreen
 import io.github.mkdevtests.umbra.ui.library.SagaScreen
 import io.github.mkdevtests.umbra.ui.library.ShortcutScreen
 import io.github.mkdevtests.umbra.ui.library.ShowDetailScreen
+import io.github.mkdevtests.umbra.ui.library.UniverseScreen
 import io.github.mkdevtests.umbra.ui.settings.CorrectionsScreen
 import io.github.mkdevtests.umbra.ui.settings.FoldersScreen
 import io.github.mkdevtests.umbra.ui.settings.MeasuresScreen
@@ -68,6 +69,7 @@ private sealed interface Detail {
     data class FixMatch(val key: String) : Detail
     data class Saga(val id: Int) : Detail
     data class Shortcut(val root: String) : Detail
+    data class Universe(val name: String) : Detail
     data object Settings : Detail
     data object Measures : Detail
     data object Corrections : Detail
@@ -121,6 +123,7 @@ private fun NyxaraRoot(
         onOpenMovie = { stack.add(Detail.MovieDetail(it)) },
         onOpenShow = { stack.add(Detail.ShowDetail(it)) },
         onOpenSaga = { stack.add(Detail.Saga(it)) },
+        onOpenUniverse = { stack.add(Detail.Universe(it)) },
         // An actor or a director: the search tab, with their titles in the library.
         onPerson = { name ->
             libraryViewModel.searchFilters.value = SearchFilters()
@@ -141,6 +144,7 @@ private fun NyxaraRoot(
                 onOpenMovie = { stack.add(Detail.MovieDetail(it)) },
                 onOpenShow = { stack.add(Detail.ShowDetail(it)) },
                 onOpenSaga = { stack.add(Detail.Saga(it)) },
+                onOpenUniverse = { stack.add(Detail.Universe(it)) },
                 onOpenShortcut = { stack.add(Detail.Shortcut(it)) },
                 onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
                 onOpenSettings = { stack.add(Detail.Settings) },
@@ -150,6 +154,7 @@ private fun NyxaraRoot(
                 ShowDetailScreen(show, libraryViewModel, links, back, onFixMatch = { stack.add(Detail.FixMatch(show.key)) })
             } ?: back()
             is Detail.Saga -> SagaScreen(detail.id, libraryViewModel, links.titleLinks, back)
+            is Detail.Universe -> UniverseScreen(detail.name, libraryViewModel, links.titleLinks, back)
             is Detail.Shortcut -> ShortcutScreen(detail.root, libraryViewModel, links.titleLinks, back)
             is Detail.FixMatch -> showOf(detail.key)?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
             Detail.Settings -> SettingsScreen(

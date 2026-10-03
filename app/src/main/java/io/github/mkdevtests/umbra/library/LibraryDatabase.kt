@@ -39,6 +39,9 @@ data class ShowRow(
     @ColumnInfo(defaultValue = "[]") val cast: List<String>,
     @ColumnInfo(defaultValue = "[]") val directors: List<String>,
     @ColumnInfo(defaultValue = "0") val hasCredits: Boolean,
+    @ColumnInfo(defaultValue = "[]") val characters: List<String>,
+    @ColumnInfo(defaultValue = "[]") val universes: List<String>,
+    @ColumnInfo(defaultValue = "0") val linksChecked: Boolean,
 )
 
 @Entity(tableName = "seasons", primaryKeys = ["showKey", "number"])
@@ -190,19 +193,22 @@ abstract class LibraryDao {
 
     private fun Show.toRow() = ShowRow(
         key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups,
-        cast, directors, hasCredits,
+        cast, directors, hasCredits, characters, universes, linksChecked,
     )
 
     private fun ShowRow.toShow(seasons: List<Season>) = Show(
         key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups,
-        cast, directors, hasCredits, seasons,
+        cast, directors, hasCredits, seasons, characters, universes, linksChecked,
     )
 }
 
 @Database(
     entities = [Movie::class, ShowRow::class, SeasonRow::class, Episode::class, MetaRow::class, SearchRow::class],
-    version = 5,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5)],
+    version = 6,
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6),
+    ],
 )
 @TypeConverters(Converters::class)
 abstract class LibraryDatabase : RoomDatabase() {
