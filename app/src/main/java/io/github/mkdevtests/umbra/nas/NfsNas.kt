@@ -27,6 +27,14 @@ class NfsNas(val server: String, val export: String) {
         NfsFile(file)
     }
 
+    /** [relative] is a file or folder of the export. */
+    fun exists(relative: String): Boolean = explained { Nfs3File(nfs, pathOf(relative)).exists() }
+
+    /** Names in the folder at [relative] ("" for the export itself). */
+    fun list(relative: String): List<String> = explained { Nfs3File(nfs, pathOf(relative)).list() }
+
+    private fun pathOf(relative: String) = "/" + relative.replace('\\', '/').trim('/')
+
     /** The NAS's refusals in words: the client library only gives the protocol's status number. */
     private fun <T> explained(block: () -> T): T = try {
         block()

@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
@@ -47,38 +48,96 @@ class ProtocolBench(private val app: NyxaraApp) {
         )
     }
 
-    /** One video of the folder read in each protocol: null when it works, else why not. */
-    suspend fun check(config: BenchConfig, webdavPassword: String): Map<Protocol, String?> = withContext(Dispatchers.IO) {
+    /**
+     * One video of the folder looked for in each protocol. When WebDAV or NFS
+     * doesn't have it where expected, its path is tried without its first
+     * folders: the one that matches tells which SMB folder the WebDAV or NFS
+     * folder really is ([BenchCheck.folder]). Otherwise, what the folder holds.
+     */
+    suspend fun check(config: BenchConfig, webdavPassword: String): BenchCheck = withContext(Dispatchers.IO) {
         val file = benchFiles(app.library.library.value, config.smbFolder, 1, 0).firstOrNull()
-            ?: return@withContext Protocol.entries.associateWith { "aucune vidéo de la bibliothèque dans ce dossier" }
+            ?: return@withContext BenchCheck(Protocol.entries.associateWith { "aucune vidéo de la bibliothèque dans ce dossier" })
         val relative = relativePath(file.path, config.smbFolder)
-        Protocol.entries.associateWith { protocol ->
+        val folders = mutableMapOf<Protocol, String>()
+        val problems = Protocol.entries.associateWith { protocol ->
             runCatching {
                 when (protocol) {
-                    Protocol.Smb -> app.nas?.open(file.path)?.use { it.size } ?: error("aucun NAS")
-                    Protocol.WebDav -> webdavCheck(config, webdavPassword, relative)
-                    Protocol.Nfs -> NfsNas(config.nfsServer.trim(), config.nfsExport.trim()).open(relative).use { it.size }
+                    Protocol.Smb -> {
+                        app.nas?.open(file.path)?.use { it.size } ?: error("aucun NAS")
+                        null
+                    }
+                    Protocol.WebDav -> webdavCheck(config, webdavPassword, file.path, relative)?.let { (folder, problem) ->
+                        folder?.let { folders[protocol] = it }
+                        problem
+                    }
+                    Protocol.Nfs -> nfsCheck(config, file.path, relative)?.let { (folder, problem) ->
+                        folder?.let { folders[protocol] = it }
+                        problem
+                    }
                 }
-                null
             }.getOrElse { it.toUserMessage().ifBlank { it.toString() } }
         }
+        BenchCheck(problems, folders.values.firstOrNull(), file.path)
     }
 
-    private fun webdavCheck(config: BenchConfig, password: String, relative: String) {
+    /** Null when found where expected; else the SMB folder that matches, or why it fails. */
+    private fun webdavCheck(config: BenchConfig, password: String, file: String, relative: String): Pair<String?, String?>? {
         val (user, pass) = webdavAccount(config, password)
-        val request = Request.Builder()
-            .url(webdavUrlWithoutAccount(config.webdavUrl, relative))
-            .header("Range", "bytes=0-0")
-            .apply { if (user.isNotEmpty()) header("Authorization", Credentials.basic(user, pass)) }
-            .build()
-        http.newCall(request).execute().use { response ->
-            when {
-                response.isSuccessful -> Unit
-                response.code == 401 -> error("compte refusé (401)" + if (response.header("WWW-Authenticate")?.startsWith("Digest") == true) ", Digest : le lecteur essaiera quand même" else "")
-                response.code == 404 -> error("fichier introuvable (404) : vérifie l'URL du dossier")
-                else -> error("HTTP ${response.code}")
+        val auth = if (user.isNotEmpty()) Credentials.basic(user, pass) else null
+        fun status(url: String): Int {
+            val request = Request.Builder().url(url).header("Range", "bytes=0-0").apply { auth?.let { header("Authorization", it) } }.build()
+            return http.newCall(request).execute().use { it.code }
+        }
+        val first = status(webdavUrlWithoutAccount(config.webdavUrl, relative))
+        when {
+            first in 200..299 -> return null
+            first == 401 -> error("compte refusé (401) : renseigne le compte WebDAV de ZimaOS")
+            first != 404 -> error("HTTP $first")
+        }
+        for ((candidate, folder) in pathCandidates(file)) {
+            for (form in unicodeForms(candidate)) {
+                if (status(webdavUrlWithoutAccount(config.webdavUrl, form)) in 200..299) {
+                    return folder to "trouvé, mais l'URL correspond au dossier SMB « $folder »"
+                }
             }
         }
+        // Not found anywhere: what the folder (or the first parent that answers) holds.
+        val base = config.webdavUrl.trim().trimEnd('/')
+        val host = base.substringBefore("://") + "://" + base.substringAfter("://").substringBefore('/')
+        val segments = base.removePrefix(host).split('/').filter { it.isNotEmpty() }
+        for (depth in segments.size downTo 0) {
+            val url = host + segments.take(depth).joinToString("") { "/$it" } + "/"
+            val names = webdavList(url, auth) ?: continue
+            val where = url.removePrefix(host).ifEmpty { "/" }
+            val shown = names.take(10).joinToString(", ").ifEmpty { "(vide)" }
+            return null to (if (depth == segments.size) "« ${file.substringAfterLast('\\')} » introuvable. " else "dossier introuvable. ") +
+                "Contenu de « $where » : $shown"
+        }
+        return null to "fichier introuvable (404), et le serveur ne liste aucun dossier : vérifie l'URL"
+    }
+
+    /** Names in a WebDAV folder, or null if it doesn't answer as a folder. */
+    private fun webdavList(url: String, auth: String?): List<String>? {
+        val request = Request.Builder()
+            .url(url)
+            .method("PROPFIND", ByteArray(0).toRequestBody(null))
+            .header("Depth", "1")
+            .apply { auth?.let { header("Authorization", it) } }
+            .build()
+        return runCatching {
+            http.newCall(request).execute().use { response -> if (response.code == 207) propfindNames(response.body?.string().orEmpty()) else null }
+        }.getOrNull()
+    }
+
+    /** Like [webdavCheck], in the NFS export. */
+    private fun nfsCheck(config: BenchConfig, file: String, relative: String): Pair<String?, String?>? {
+        val nfs = NfsNas(config.nfsServer.trim(), config.nfsExport.trim())
+        if (unicodeForms(relative).any(nfs::exists)) return null
+        for ((candidate, folder) in pathCandidates(file)) {
+            if (unicodeForms(candidate).any(nfs::exists)) return folder to "trouvé, mais l'export correspond au dossier SMB « $folder »"
+        }
+        val shown = nfs.list("").take(10).joinToString(", ").ifEmpty { "(vide)" }
+        return null to "« ${file.substringAfterLast('\\')} » introuvable. Contenu de l'export : $shown"
     }
 
     /** The WebDAV account: the one typed, else the SMB source's. */
@@ -120,3 +179,9 @@ class ProtocolBench(private val app: NyxaraApp) {
         const val KEY = "config"
     }
 }
+
+/**
+ * The access check: [problems] per protocol (null: works); [folder], the SMB
+ * folder WebDAV or NFS really match when it isn't the one chosen; [file], the video looked for.
+ */
+data class BenchCheck(val problems: Map<Protocol, String?>, val folder: String? = null, val file: String? = null)

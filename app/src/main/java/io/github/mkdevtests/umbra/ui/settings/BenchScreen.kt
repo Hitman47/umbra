@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import io.github.mkdevtests.umbra.bench.BenchCheck
 import io.github.mkdevtests.umbra.bench.BenchConfig
 import io.github.mkdevtests.umbra.bench.Protocol
 import io.github.mkdevtests.umbra.bench.ProtocolBench
@@ -53,7 +54,7 @@ fun BenchScreen(bench: ProtocolBench, library: Library, onOpenMeasures: () -> Un
     val scope = rememberCoroutineScope()
     var config by remember { mutableStateOf(bench.load()) }
     var password by remember { mutableStateOf("") }
-    var checks by remember { mutableStateOf<Map<Protocol, String?>?>(null) }
+    var checks by remember { mutableStateOf<BenchCheck?>(null) }
     var checking by remember { mutableStateOf(false) }
     val folders = remember(library) { videoFolders(library) }
     val count = remember(library, config.smbFolder) { benchFiles(library, config.smbFolder, Int.MAX_VALUE, 0).size }
@@ -107,14 +108,24 @@ fun BenchScreen(bench: ProtocolBench, library: Library, onOpenMeasures: () -> Un
                 }
             }
 
-            checks?.let { results ->
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    results.forEach { (protocol, problem) ->
+            checks?.let { result ->
+                Column(modifier = width, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    result.file?.let {
+                        Text("Vidéo cherchée : ${it.replace("\\", " › ")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    result.problems.forEach { (protocol, problem) ->
                         Text(
                             if (problem == null) "✓  ${protocol.label} : accessible" else "✗  ${protocol.label} : $problem",
                             color = if (problem == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                    }
+                    result.folder?.let { folder ->
+                        Button(onClick = {
+                            config = config.copy(smbFolder = folder)
+                            bench.save(config)
+                            checks = null
+                        }) { Text("Prendre « ${folder.ifEmpty { "racine" }} » comme dossier SMB") }
                     }
                 }
             }

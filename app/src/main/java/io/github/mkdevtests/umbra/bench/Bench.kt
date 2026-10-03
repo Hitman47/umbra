@@ -88,3 +88,25 @@ private fun encode(text: String, allowed: String): String = buildString {
         if (c < 0x80 && (ch.isLetterOrDigit() || ch in allowed)) append(ch) else append("%%%02X".format(c))
     }
 }
+
+/**
+ * Where [file] might be below the WebDAV or NFS folder: its path without
+ * the first folders, from the longest ("Vidéos\Films\Dune\Dune.mkv"…) to
+ * the file name alone, each with the SMB folder it implies.
+ */
+fun pathCandidates(file: String): List<Pair<String, String>> {
+    val parts = file.split('\\').filter { it.isNotEmpty() }
+    return (0 until parts.size).map { k -> parts.drop(k).joinToString("\\") to parts.take(k).joinToString("\\") }
+}
+
+/** [text] and its decomposed form ("é" as e + accent), as some NAS store names; once if the same. */
+fun unicodeForms(text: String): List<String> =
+    listOf(text, java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD), java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFC)).distinct()
+
+/** Names in a WebDAV folder listing (PROPFIND answer), the folder itself left out. */
+fun propfindNames(xml: String): List<String> {
+    val hrefs = Regex("""<(?:[A-Za-z0-9]+:)?href>([^<]+)</(?:[A-Za-z0-9]+:)?href>""").findAll(xml).map { it.groupValues[1].trim() }.toList()
+    return hrefs.drop(1).mapNotNull { href ->
+        runCatching { java.net.URLDecoder.decode(href.trimEnd('/').substringAfterLast('/').replace("+", "%2B"), "UTF-8") }.getOrNull()
+    }.filter { it.isNotEmpty() }
+}

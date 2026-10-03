@@ -34,4 +34,23 @@ class BenchTest {
         val order = benchOrder(files, Protocol.entries)
         assertEquals(listOf(Protocol.Smb, Protocol.WebDav, Protocol.Nfs, Protocol.WebDav, Protocol.Nfs, Protocol.Smb), order.map { it.second })
     }
+
+    @Test
+    fun candidatesFromLongestPath() {
+        assertEquals(
+            listOf("Vidéos\\Films\\Dune.mkv" to "", "Films\\Dune.mkv" to "Vidéos", "Dune.mkv" to "Vidéos\\Films"),
+            pathCandidates("Vidéos\\Films\\Dune.mkv"),
+        )
+        assertEquals(2, unicodeForms("Vidéos").size)
+        assertEquals(1, unicodeForms("Films").size)
+    }
+
+    @Test
+    fun webdavListing() {
+        val xml = """<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">
+            <D:response><D:href>/media/sdb1/Vid%C3%A9os/</D:href></D:response>
+            <D:response><D:href>/media/sdb1/Vid%C3%A9os/Films/</D:href></D:response>
+            <D:response><D:href>/media/sdb1/Vid%C3%A9os/Dune%20+%20Co.mkv</D:href></D:response></D:multistatus>"""
+        assertEquals(listOf("Films", "Dune + Co.mkv"), propfindNames(xml))
+    }
 }
