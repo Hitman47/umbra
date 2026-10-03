@@ -63,7 +63,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -124,7 +123,6 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import io.github.mkdevtests.umbra.nas.toUserMessage
 import io.github.mkdevtests.umbra.perso.PersoFolderState
-import io.github.mkdevtests.umbra.perso.PersoOrder
 import io.github.mkdevtests.umbra.perso.PersoVideo
 import io.github.mkdevtests.umbra.perso.firstOf
 import io.github.mkdevtests.umbra.perso.videosUnder
@@ -140,16 +138,22 @@ import kotlin.math.sign
 class PlayerActivity : ComponentActivity() {
 
     private lateinit var player: MpvPlayer
-    private val queue = mutableStateListOf<PlayItem>()
+
+    /** What plays, what comes next; null while a Perso folder is walked. */
+    private var queue by mutableStateOf<PlayerQueue?>(null)
+
+    /** The item playing. */
+    private val current get() = queue?.current
 
     /** The Perso folder played, null for the library's videos. */
     private var perso: PersoRequest? = null
-    private var persoOrder: PersoOrder? = null
     private var persoVideos: Map<String, PersoVideo> = emptyMap()
 
     /** While a Perso folder is walked: what is happening, or why it can't play. */
     private var preparing by mutableStateOf<String?>(null)
-    private var index by mutableIntStateOf(0)
+
+    /** Bumped at each file started: one measure, one prefetch per file. */
+    private var started = 0
     private val app get() = application as NyxaraApp
     private val settings get() = app.settings.settings.value
 
@@ -175,11 +179,17 @@ class PlayerActivity : ComponentActivity() {
         }
 
         perso = intent.getStringExtra(EXTRA_PERSO)?.let { Json.decodeFromString(PersoRequest.serializer(), it) }
-        queue += intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }.orEmpty()
-        if (queue.isEmpty() && perso == null) return finish()
+        val items = intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }.orEmpty()
+        if (items.isEmpty() && perso == null) return finish()
         player = MpvPlayer(this, settings)
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
-        perso?.let(::preparePerso) ?: start(queue[0])
+        perso?.let(::preparePerso) ?: run {
+            // A film, or an episode and the next ones: in order, no loop.
+            val byKey = items.associateBy(PlayItem::key)
+            val built = PlayerQueue(PlayOrder(byKey.keys.toList(), shuffle = false, repeat = Repeat.None), { byKey.getValue(it) }, perso = false)
+            queue = built
+            start(built.begin(items[0].key))
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
@@ -194,8 +204,15 @@ class PlayerActivity : ComponentActivity() {
                 if (it) {
                     saveProgress()
                     scrobbler.stop()
-                    // Out of sight, nobody sees the countdown: the next episode starts at once. Perso: always.
-                    if ((background || inPip || perso != null) && index + 1 < queue.size) playNext()
+                    val queue = queue
+                    when {
+                        queue == null -> Unit
+                        // Arrêter après : it stays there.
+                        queue.stopAfter -> Unit
+                        queue.repeat == Repeat.One -> current?.let { start(it.copy(start = 0.0)) }
+                        // Out of sight, nobody sees the countdown: the next episode starts at once. Perso: always.
+                        (background || inPip || queue.perso) && queue.upNext != null -> playNext()
+                    }
                 }
             }
         }
@@ -205,9 +222,9 @@ class PlayerActivity : ComponentActivity() {
             combine(player.position, player.duration) { position, duration -> duration > 0 && duration - position < PREFETCH_BEFORE_END }
                 .distinctUntilChanged()
                 .collect { near ->
-                    val next = queue.getOrNull(index + 1)
-                    if (near && next != null && warmed != index) {
-                        warmed = index
+                    val next = queue?.upNext
+                    if (near && next != null && warmed != started) {
+                        warmed = started
                         (next.stream ?: next.file)?.let { app.streamServer.prefetch(it) }
                     }
                 }
@@ -233,22 +250,23 @@ class PlayerActivity : ComponentActivity() {
 
         setContent {
             NyxaraTheme {
-                val item = queue.getOrNull(index)
-                if (item == null) {
+                val queue = queue
+                val item = queue?.current
+                if (queue == null || item == null) {
                     Preparing(preparing ?: "Préparation…", onBack = ::finish)
                 } else {
                     PlayerScreen(
                         player = player,
                         item = item,
-                        next = queue.getOrNull(index + 1),
+                        queue = queue,
                         settings = settings,
                         inPip = inPip,
                         onlineHook = if (perso == null) onlineSubtitles() else null,
                         onNext = ::playNext,
+                        onJump = ::jumpTo,
                         onPip = ::enterPip,
                         onBack = ::finish,
-                        perso = perso != null,
-                        onPrevious = if (perso != null && index > 0) ::playPrevious else null,
+                        onPrevious = ::playPrevious,
                     )
                 }
             }
@@ -276,8 +294,9 @@ class PlayerActivity : ComponentActivity() {
             if (videos.isEmpty()) {
                 // Downloaded: played alone, NAS or not.
                 if (offline) {
-                    queue += persoItem(request.start)
-                    start(queue[0])
+                    val built = PlayerQueue(PlayOrder(listOf(request.start), shuffle = false, repeat = Repeat.None), ::persoItem, perso = true)
+                    queue = built
+                    start(built.begin(request.start))
                 } else {
                     preparing = "Aucune vidéo dans ce dossier."
                 }
@@ -286,12 +305,12 @@ class PlayerActivity : ComponentActivity() {
             persoVideos = videos.associateBy { it.path }
             val files = videos.map { it.path }
             val state = app.perso.folder(request.folder)
-            val order = PersoOrder(files, request.shuffle, state.played)
-            val first = firstOf(order, files, request.shuffle, request.start, state) { app.perso.progress.value[it] }
-            persoOrder = order
-            queue += persoItem(first)
-            queue += persoItem(order.next())
-            start(queue[0])
+            val order = PlayOrder(files, request.shuffle, state.played, repeat = Repeat.All)
+            val first = firstOf(order, request.start, state) { app.perso.progress.value[it] }
+            val built = PlayerQueue(order, ::persoItem, perso = true)
+            queue = built
+            start(built.begin(first))
+            saveFolder()
         }
     }
 
@@ -305,36 +324,51 @@ class PlayerActivity : ComponentActivity() {
             subtitles = local?.localSubtitles ?: persoVideos[path]?.subtitles.orEmpty().map(app::playUrl),
             file = path,
             start = app.perso.resumeAt(path),
+            minutes = app.persoMedia.infos.value[path]?.duration?.let { (it / 60).toInt().coerceAtLeast(1) },
         )
     }
 
+    /** ⏮: the start of this video after a few seconds of it, else the one before. */
     private fun playPrevious() {
-        if (index == 0) return
-        saveProgress()
-        index--
-        queue[index] = persoItem(queue[index].file!!)
-        start(queue[index])
-        updateBackground()
+        val queue = queue ?: return
+        if (player.position.value > RESTART_AFTER) {
+            player.seekTo(0.0)
+            return
+        }
+        leaveCurrent()
+        start(fresh(queue.back() ?: return))
     }
 
     private fun playNext() {
+        val queue = queue ?: return
+        leaveCurrent()
+        start(fresh(queue.advance() ?: return))
+    }
+
+    /** A video of the panel, now; [fromStart]: "Reprendre au début". */
+    private fun jumpTo(key: String, fromStart: Boolean) {
+        val queue = queue ?: return
+        leaveCurrent()
+        if (fromStart && perso != null) app.perso.forget(listOf(key))
+        val item = fresh(queue.jump(key))
+        start(if (fromStart) item.copy(start = 0.0) else item)
+    }
+
+    /** Saved, scrobbled and measured before another video starts. */
+    private fun leaveCurrent() {
         saveProgress()
         scrobbler.stop()
         recordMeasure()
-        index++
-        if (perso != null) {
-            // Where it stopped now, not when it was queued; the order always one video ahead.
-            queue[index] = persoItem(queue[index].file!!)
-            persoOrder?.let { order -> if (index + 1 == queue.size) queue += persoItem(order.next()) }
-        }
-        start(queue[index])
-        updateBackground()
     }
 
+    /** Perso: where it stopped now, not when the queue was made. */
+    private fun fresh(item: PlayItem): PlayItem = if (perso != null) persoItem(item.key) else item
+
     private fun updateBackground() {
+        val item = current ?: return
         if (background) {
-            BackgroundPlayback.title = queue[index].title
-            BackgroundPlayback.subtitle = queue[index].subtitle
+            BackgroundPlayback.title = item.title
+            BackgroundPlayback.subtitle = item.subtitle
             PlaybackService.update(this)
         }
     }
@@ -343,12 +377,14 @@ class PlayerActivity : ComponentActivity() {
         super.onPause()
         if (!::player.isInitialized) return
         saveProgress()
+        saveFolder()
         // The small window, or the sound alone out of sight: playback goes on.
         if (isInPictureInPictureMode) return
-        if (settings.backgroundAudio && player.isPlaying && !isFinishing && index < queue.size) {
+        val item = current
+        if (settings.backgroundAudio && player.isPlaying && !isFinishing && item != null) {
             background = true
-            BackgroundPlayback.title = queue[index].title
-            BackgroundPlayback.subtitle = queue[index].subtitle
+            BackgroundPlayback.title = item.title
+            BackgroundPlayback.subtitle = item.subtitle
             BackgroundPlayback.playing = true
             BackgroundPlayback.toggle = { runOnUiThread { player.togglePause() } }
             BackgroundPlayback.stop = { runOnUiThread { finish() } }
@@ -421,7 +457,7 @@ class PlayerActivity : ComponentActivity() {
             languages = languages,
             status = app.openSubtitles.status,
             search = {
-                val item = queue[index]
+                val item = current ?: return@OnlineSubtitlesHook emptyList()
                 val read = item.stream ?: item.file
                 val hash = withContext(Dispatchers.IO) { runCatching { read?.let { app.nas?.open(it)?.use(::movieHash) } }.getOrNull() }
                 val target = item.trakt
@@ -441,12 +477,14 @@ class PlayerActivity : ComponentActivity() {
                 val track = OnlineTrack(app.openSubtitles.download(subtitle).absolutePath, subtitle.language)
                 player.addSubtitles(track)
                 // Back with the video next time, without downloading it again.
-                queue[index].file?.let { app.subtitleMemory.remember(it, track.language, track.path) }
+                current?.file?.let { app.subtitleMemory.remember(it, track.language, track.path) }
             },
         )
     }
 
     private fun start(item: PlayItem) {
+        started++
+        saveFolder()
         (item.stream ?: item.file)?.let { (application as NyxaraApp).streamServer.resetStats(it) }
         val read = item.stream ?: item.file
         val remote = read?.let { app.nas?.hostOf(it) }?.let(::isTailnet) == true
@@ -454,17 +492,17 @@ class PlayerActivity : ComponentActivity() {
         player.play(toMpvPath(item.url), item.subtitles, item.start, online = online, remote = remote)
     }
 
-    /** The queue index already measured: one measure per file. */
+    /** The file already measured: one measure per file. */
     private var measured = -1
 
     /** Keeps what this file cost to open, seek and play, for Réglages › Mesures de lecture. */
     private fun recordMeasure() {
         // Perso stays out of the measures: their titles would show there.
-        if (measured == index || perso != null) return
-        val item = queue.getOrNull(index) ?: return
+        if (measured == started || perso != null) return
+        val item = current ?: return
         val figures = player.figures()
         if (figures.openMs == null) return // never played: nothing to measure
-        measured = index
+        measured = started
         val app = application as NyxaraApp
         val read = item.stream ?: item.file
         val stats = read?.let { app.streamServer.statsFor(it) }
@@ -514,7 +552,7 @@ class PlayerActivity : ComponentActivity() {
         private var state = "idle"
 
         private fun send(endpoint: TraktEndpoint) {
-            val target = queue.getOrNull(index)?.trakt ?: return
+            val target = current?.trakt ?: return
             val duration = player.duration.value
             if (duration <= 0) return
             val percent = (player.position.value / duration * 100).coerceIn(0.0, 100.0)
@@ -554,19 +592,20 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun saveProgress() {
-        val file = queue.getOrNull(index)?.file ?: return
-        val request = perso
-        if (request == null) {
+        val file = current?.file ?: return
+        if (perso == null) {
             app.history.save(file, player.position.value, player.duration.value)
-            return
+        } else {
+            // Perso: its own history, never the library's nor Trakt's.
+            app.perso.save(file, player.position.value, player.duration.value)
         }
-        // Perso: its own history, never the library's nor Trakt's.
-        app.perso.save(file, player.position.value, player.duration.value)
-        persoOrder?.let { order ->
-            // The video queued after this one isn't played yet.
-            val upcoming = queue.drop(index + 1).mapNotNullTo(HashSet()) { it.file }
-            app.perso.saveFolder(request.folder, PersoFolderState(last = file, played = order.played.filter { it !in upcoming }))
-        }
+    }
+
+    /** What the Perso folder played: written when the video changes, not every 10 s (thousands of paths). */
+    private fun saveFolder() {
+        val request = perso?.takeIf { !it.only } ?: return
+        val queue = queue ?: return
+        app.perso.saveFolder(request.folder, PersoFolderState(last = queue.currentKey, played = queue.order.played))
     }
 
     override fun onDestroy() {
@@ -595,6 +634,9 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_PERSO = "perso"
         private const val ACTION_PIP_TOGGLE = "io.github.mkdevtests.umbra.PIP_TOGGLE"
         private const val PREFETCH_BEFORE_END = 90.0
+
+        /** ⏮ past this many seconds: back to the start of the video, not the one before. */
+        private const val RESTART_AFTER = 5.0
         private val QUEUE = ListSerializer(PlayItem.serializer())
 
         fun intent(context: Context, queue: List<PlayItem>): Intent =
@@ -690,17 +732,22 @@ private const val TAIL_SECONDS = 20
 private fun PlayerScreen(
     player: MpvPlayer,
     item: PlayItem,
-    next: PlayItem?,
+    queue: PlayerQueue,
     settings: Settings,
     inPip: Boolean,
     onlineHook: OnlineSubtitlesHook?,
     onNext: () -> Unit,
     onPip: () -> Unit,
     onBack: () -> Unit,
-    /** A Perso video: no next-episode countdown, the next one starts at once; previous and next buttons. */
-    perso: Boolean = false,
-    onPrevious: (() -> Unit)? = null,
+    onPrevious: () -> Unit,
+    /** A video of the queue panel now; true: from its start. */
+    onJump: (String, Boolean) -> Unit,
 ) {
+    // A Perso video: no next-episode countdown, the next one starts at once.
+    val perso = queue.perso
+    val next = queue.upNext
+    // Previous, next, shuffle, repeat and the queue: only with more than one video.
+    val many = queue.size > 1
     val position by player.position.collectAsState()
     val duration by player.duration.collectAsState()
     val paused by player.paused.collectAsState()
@@ -714,6 +761,7 @@ private fun PlayerScreen(
 
     var controlsVisible by remember { mutableStateOf(true) }
     var panelOpen by remember { mutableStateOf(false) }
+    var queueOpen by remember { mutableStateOf(false) }
     var speedMenu by remember { mutableStateOf(false) }
     var flash by remember { mutableStateOf<SeekFlash?>(null) }
     // A swipe across the picture under way: the time it would land on.
@@ -776,8 +824,8 @@ private fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(controlsVisible, paused, panelOpen, speedMenu, swipeTarget) {
-        if (controlsVisible && !paused && !panelOpen && !speedMenu && swipeTarget == null) {
+    LaunchedEffect(controlsVisible, paused, panelOpen, queueOpen, speedMenu, swipeTarget) {
+        if (controlsVisible && !paused && !panelOpen && !queueOpen && !speedMenu && swipeTarget == null) {
             delay(4_000)
             controlsVisible = false
         }
@@ -809,7 +857,7 @@ private fun PlayerScreen(
 
     // The remote (Android TV) or a keyboard: ⏪ ⏩ and pause without the controls, the controls on any other key.
     val keys = remember { FocusRequester() }
-    LaunchedEffect(controlsVisible, panelOpen) { if (!controlsVisible && !panelOpen) runCatching { keys.requestFocus() } }
+    LaunchedEffect(controlsVisible, panelOpen, queueOpen) { if (!controlsVisible && !panelOpen && !queueOpen) runCatching { keys.requestFocus() } }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -823,17 +871,23 @@ private fun PlayerScreen(
                     Key.MediaPause -> { if (!player.paused.value) player.togglePause(); true }
                     Key.MediaFastForward -> { jump(REMOTE_LONG_JUMP); true }
                     Key.MediaRewind -> { jump(-REMOTE_LONG_JUMP); true }
-                    Key.DirectionLeft -> if (!controlsVisible && !panelOpen) { jump(-SHORT_JUMP); true } else false
-                    Key.DirectionRight -> if (!controlsVisible && !panelOpen) { jump(SHORT_JUMP); true } else false
-                    Key.DirectionCenter, Key.Enter -> if (!controlsVisible && !panelOpen) { player.togglePause(); controlsVisible = true; true } else false
-                    Key.DirectionUp, Key.DirectionDown, Key.Menu -> if (!controlsVisible && !panelOpen) { controlsVisible = true; true } else false
+                    Key.DirectionLeft -> if (!controlsVisible && !panelOpen && !queueOpen) { jump(-SHORT_JUMP); true } else false
+                    Key.DirectionRight -> if (!controlsVisible && !panelOpen && !queueOpen) { jump(SHORT_JUMP); true } else false
+                    Key.DirectionCenter, Key.Enter -> if (!controlsVisible && !panelOpen && !queueOpen) { player.togglePause(); controlsVisible = true; true } else false
+                    Key.DirectionUp, Key.DirectionDown, Key.Menu -> if (!controlsVisible && !panelOpen && !queueOpen) { controlsVisible = true; true } else false
                     else -> false
                 }
             }
             .focusable()
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { if (panelOpen) panelOpen = false else controlsVisible = !controlsVisible },
+                    onTap = {
+                        when {
+                            panelOpen -> panelOpen = false
+                            queueOpen -> queueOpen = false
+                            else -> controlsVisible = !controlsVisible
+                        }
+                    },
                     // Double tap on a side: jump back or ahead; in the middle: pause.
                     onDoubleTap = { offset ->
                         when {
@@ -853,7 +907,7 @@ private fun PlayerScreen(
                         from = player.position.value
                         dragged = 0f
                         // Not while the track panel is open: its rows are under the finger.
-                        swipeTarget = from.takeIf { !panelOpen }
+                        swipeTarget = from.takeIf { !panelOpen && !queueOpen }
                     },
                     onDragEnd = {
                         swipeTarget?.let { target -> if (abs(target - from) >= 1) player.seekTo(target) }
@@ -942,6 +996,7 @@ private fun PlayerScreen(
                     horizontalArrangement = Arrangement.spacedBy(40.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (many) SkipButton(forward = false, onClick = onPrevious)
                     SeekButton(-1, onJump = ::jump, onHold = ::holdJump)
                     Surface(
                         onClick = { player.togglePause() },
@@ -954,6 +1009,7 @@ private fun PlayerScreen(
                         }
                     }
                     SeekButton(1, onJump = ::jump, onHold = ::holdJump)
+                    if (many) SkipButton(forward = true, enabled = next != null || queue.stopAfter, onClick = onNext)
                 }
 
                 Column(
@@ -979,7 +1035,7 @@ private fun PlayerScreen(
                         Text("−" + formatTime(duration - shown), color = Color.White, fontSize = 13.sp)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Pill("Audio et sous-titres", active = panelOpen) { panelOpen = !panelOpen }
+                        Pill("Audio et sous-titres", active = panelOpen) { queueOpen = false; panelOpen = !panelOpen }
                         Box {
                             Pill("Vitesse ${formatSpeed(speed)}", active = speed != 1.0) { speedMenu = true }
                             DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
@@ -996,8 +1052,13 @@ private fun PlayerScreen(
                         }
                         Pill(if (fill) "Format : remplir" else "Format : entier", active = fill) { player.toggleFill() }
                         Spacer(Modifier.weight(1f))
-                        if (onPrevious != null) Pill("‹ Précédente", active = false, onClick = onPrevious)
-                        if (next != null) Pill(if (perso) "Suivante ›" else "Épisode suivant ›", active = false, onClick = onNext)
+                        if (many) {
+                            // Read the version: the buttons follow the queue's changes.
+                            queue.version
+                            Pill("Aléatoire", active = queue.shuffle, onClick = queue::toggleShuffle)
+                            Pill("Répéter : ${queue.repeat.label}", active = queue.repeat != Repeat.None, onClick = queue::cycleRepeat)
+                            Pill("File d'attente · ${queue.size}", active = queueOpen) { panelOpen = false; queueOpen = !queueOpen }
+                        }
                     }
                 }
             }
@@ -1010,6 +1071,15 @@ private fun PlayerScreen(
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
             TrackPanel(player, settings, online) { choosing = true; online?.load() }
+        }
+
+        AnimatedVisibility(
+            visible = queueOpen,
+            enter = slideInHorizontally { it },
+            exit = slideOutHorizontally { it },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            QueuePanel(queue, position, duration, onJump = onJump, onClose = { queueOpen = false })
         }
 
         // What happened online: added (in sync? the next one), searching, a failure, or an offer.
@@ -1042,7 +1112,7 @@ private fun PlayerScreen(
         // The next episode: at the credits, in the last seconds, or at the end.
         val credits = skip?.kind == ChapterKind.Credits
         val tail = !hasCredits(chapters, duration) && duration > 300 && position > 0 && duration - position <= TAIL_SECONDS
-        if (!perso && next != null && !nextCancelled && (ended || (settings.nextEpisodeCountdown && (credits || tail)))) {
+        if (!perso && next != null && queue.repeat != Repeat.One && !nextCancelled && (ended || (settings.nextEpisodeCountdown && (credits || tail)))) {
             NextUp(
                 next = next,
                 seconds = when {
@@ -1223,6 +1293,19 @@ private fun TrackRow(label: String, detail: String?, selected: Boolean, onClick:
             if (!detail.isNullOrEmpty()) Text(detail, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
         }
         if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+    }
+}
+
+/** ⏮ / ⏭ on each side of the jumps. */
+@Composable
+private fun SkipButton(forward: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(56.dp)) {
+        Icon(
+            if (forward) NyxaraIcons.SkipNext else NyxaraIcons.SkipPrevious,
+            contentDescription = if (forward) "Vidéo suivante" else "Vidéo précédente",
+            tint = Color.White.copy(alpha = if (enabled) 1f else 0.35f),
+            modifier = Modifier.size(34.dp),
+        )
     }
 }
 

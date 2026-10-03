@@ -240,17 +240,23 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             val trakt = show.tmdbId?.takeIf { item.hasMetadata }?.let { TraktTarget(showTmdb = it, season = item.season, episode = item.number, label = "${show.title} $code") }
             val other = played.file.takeIf { item.file == episode.file && it != episode.file }
             nyxara.downloads.localFile(item.file)?.takeIf { version == null || item.file != episode.file }?.let { local ->
-                return@map PlayItem(local.local, show.title, listOfNotNull(code, item.title).joinToString(" · "), local.localSubtitles, item.file, start, trakt)
+                return@map PlayItem(
+                    local.local, show.title, listOfNotNull(code, item.title).joinToString(" · "), local.localSubtitles, item.file, start, trakt,
+                    image = item.still, group = seasonLabel(item.season), minutes = item.runtime,
+                )
             }
             PlayItem(
                 url(other ?: item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "),
                 if (other == null) item.subtitles.map(::url) else emptyList(), item.file, start, trakt, stream = other,
+                image = item.still, group = seasonLabel(item.season), minutes = item.runtime,
             )
         }
         return PlayerActivity.intent(getApplication(), queue)
     }
 
     private fun url(file: String) = nyxara.playUrl(file)
+
+    private fun seasonLabel(season: Int) = if (season == 0) "Épisodes spéciaux" else "Saison $season"
 
     /** A few seconds before the stop, to pick up the thread. */
     private fun startOf(file: String, fromStart: Boolean): Double {

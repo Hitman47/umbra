@@ -1,7 +1,7 @@
 package io.github.mkdevtests.umbra.perso
 
 import kotlinx.serialization.Serializable
-import kotlin.random.Random
+import io.github.mkdevtests.umbra.player.PlayOrder
 
 /** Where a Perso video stopped: its own history, never the library's nor Trakt's. */
 @Serializable
@@ -20,67 +20,14 @@ data class PersoFolderState(
 )
 
 /**
- * The order a Perso folder plays in, forever: in name order, back to the
- * first after the last; or shuffled, each video once per round ([played]
- * carries the round over from one session to the next), a new round when all
- * are played, never the same video twice in a row.
- */
-class PersoOrder(
-    private val files: List<String>,
-    private val shuffle: Boolean,
-    played: Collection<String> = emptyList(),
-    private val random: Random = Random.Default,
-) {
-    private val known = files.toHashSet()
-
-    /** The current round's videos, in the order played. */
-    val played: List<String> get() = round.toList()
-    private val round = played.filterTo(LinkedHashSet()) { it in known }
-    private var pending = ArrayDeque<String>()
-    private var last: String? = null
-
-    init {
-        require(files.isNotEmpty()) { "no video" }
-        if (shuffle) pending = ArrayDeque(files.filter { it !in round }.shuffled(random))
-    }
-
-    /** [file] is playing: the order goes on from it. */
-    fun playing(file: String) {
-        last = file
-        if (shuffle) {
-            pending.remove(file)
-            round += file
-        }
-    }
-
-    /** The video after the last one played. */
-    fun next(): String {
-        val file = if (shuffle) nextShuffled() else files[(files.indexOf(last) + 1) % files.size]
-        playing(file)
-        return file
-    }
-
-    private fun nextShuffled(): String {
-        if (pending.isEmpty()) {
-            round.clear()
-            val fresh = files.shuffled(random).toMutableList()
-            // The new round doesn't open with the video that closed the last one.
-            if (fresh.size > 1 && fresh.first() == last) fresh.add(fresh.removeAt(0))
-            pending = ArrayDeque(fresh)
-        }
-        return pending.removeFirst()
-    }
-}
-
-/**
  * The video a Perso folder starts with: the one asked, else the last one
  * played if it stopped in the middle, else in name order the one after it
  * (the first without any), else a shuffled one.
  */
-fun firstOf(order: PersoOrder, files: List<String>, shuffle: Boolean, asked: String?, state: PersoFolderState, progress: (String) -> PersoProgress?): String {
-    val last = state.last?.takeIf { it in files }
-    val start = asked?.takeIf { it in files } ?: last?.takeIf { progress(it)?.inProgress == true }
+fun firstOf(order: PlayOrder, asked: String?, state: PersoFolderState, progress: (String) -> PersoProgress?): String {
+    val last = state.last?.takeIf(order::contains)
+    val start = asked?.takeIf(order::contains) ?: last?.takeIf { progress(it)?.inProgress == true }
     if (start != null) return start.also(order::playing)
-    if (!shuffle && last != null) order.playing(last)
-    return order.next()
+    if (!order.shuffle && last != null) order.playing(last)
+    return checkNotNull(order.next())
 }

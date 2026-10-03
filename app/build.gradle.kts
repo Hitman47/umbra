@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val nyxaraVersion = "0.11.1"
+val nyxaraVersion = "0.12.0"
 
 base {
     // APK names: nyxara-debug.apk, nyxara-release-unsigned.apk

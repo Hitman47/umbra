@@ -20,7 +20,15 @@ data class PlayItem(
     val trakt: TraktTarget? = null,
     /** The NAS file actually read when it isn't [file]: another version of the title, whose progress stays [file]'s. */
     val stream: String? = null,
-)
+    /** The episode's still (TMDB path), for the queue panel. */
+    val image: String? = null,
+    /** Its heading in the queue panel: "Saison 2". */
+    val group: String? = null,
+    val minutes: Int? = null,
+) {
+    /** Its key in the queue: the NAS file, else the URL (a file of the device). */
+    val key get() = file ?: url
+}
 
 /** One audio or subtitle track of the playing file, as the side panel shows it. */
 data class PlayerTrack(
