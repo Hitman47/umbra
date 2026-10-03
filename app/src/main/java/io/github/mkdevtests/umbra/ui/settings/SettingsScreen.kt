@@ -1,6 +1,13 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -28,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.BuildConfig
@@ -164,6 +172,7 @@ private fun TraktSection(trakt: Trakt) {
                 Item("Synchronisation", if (status.syncing) status.syncingShows?.let { "Séries : $it" } ?: "En cours…" else "Dernière : $last") {
                     TextButton(onClick = { trakt.sync(force = true) }, enabled = !status.syncing) { Text("Synchroniser") }
                 }
+                BatteryItem()
                 Item("Envoyer ce que je regarde", "Vu à 80 % : ajouté à l'historique Trakt. Avant : point de reprise.") {
                     Switch(checked = status.scrobble, onCheckedChange = trakt::setScrobble)
                 }
@@ -173,6 +182,24 @@ private fun TraktSection(trakt: Trakt) {
             }
         }
         status.error?.let { Item("Erreur", it) }
+    }
+}
+
+/** Battery saver cuts Umbra's network in the background: offers the system dialog that exempts it. */
+@SuppressLint("BatteryLife")
+@Composable
+private fun ColumnScope.BatteryItem() {
+    val context = LocalContext.current
+    val power = remember { context.getSystemService(PowerManager::class.java) }
+    fun exempt() = power?.isIgnoringBatteryOptimizations(context.packageName) != false
+    var exempted by remember { mutableStateOf(exempt()) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { exempted = exempt() }
+    if (exempted) return
+    Item("Économie d'énergie", "Elle peut couper Trakt quand Umbra passe en arrière-plan (quitter un épisode avec Accueil). Autorise Umbra à rester connecté.") {
+        TextButton(onClick = {
+            val request = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
+            runCatching { ask.launch(request) }.onFailure { ask.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        }) { Text("Autoriser ›") }
     }
 }
 

@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Knows when Android gives the network back (battery saver blocks it in the background). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Settings › Trakt offers the system dialog that exempts Umbra from battery saver. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Updates from the GitHub releases (Android asks the user once). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

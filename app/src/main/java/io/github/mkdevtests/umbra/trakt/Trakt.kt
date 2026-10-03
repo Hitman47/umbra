@@ -1,6 +1,8 @@
 package io.github.mkdevtests.umbra.trakt
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.util.Log
 import androidx.core.content.edit
 import io.github.mkdevtests.umbra.nas.toUserMessage
@@ -14,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -93,6 +96,8 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     private val scrobbles = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private val showIds = HashMap<Int, Int?>()
     private val episodeIds = HashMap<String, Int?>()
+    /** False while Android blocks Umbra's network: no network, or battery saver with Umbra in the background. */
+    private val online = MutableStateFlow(true)
 
     private val _status = MutableStateFlow(
         TraktStatus(
@@ -112,9 +117,10 @@ class Trakt(private val context: Context, private val api: TraktApi) {
             runCatching { if (cacheFile.exists()) _data.value = json.decodeFromString(TraktData.serializer(), cacheFile.readText()) }
                 .onFailure { Log.w(TAG, "trakt cache unreadable", it) }
         }
+        watchNetwork()
         scope.launch {
             for (send in scrobbles) {
-                // The network can drop for a few seconds (VPN DNS): retry, in order, before giving up.
+                // Without network, wait until Android gives it back, then retry, in order.
                 for (attempt in 1..SCROBBLE_ATTEMPTS) {
                     val result = runCatching { send() }
                     val error = result.exceptionOrNull() ?: break
@@ -123,10 +129,35 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                         Log.w(TAG, "scrobble failed: ${error.message}")
                         break
                     }
-                    delay(5_000L * attempt)
+                    delay(3_000L * attempt)
+                    online.first { it }
                 }
             }
         }
+    }
+
+    /** Follows the default network; when it comes back usable, a sync that failed meanwhile runs again. */
+    private fun watchNetwork() {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val usable = HashMap<Network, Boolean>()
+        fun update(network: Network, value: Boolean?) {
+            synchronized(usable) {
+                if (value == null) usable.remove(network) else usable[network] = value
+                val now = usable.values.any { it }
+                if (now && !online.value) {
+                    Log.i(TAG, "network back")
+                    if (_status.value.error != null) sync()
+                }
+                online.value = now
+            }
+        }
+        runCatching {
+            connectivity.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onBlockedStatusChanged(network: Network, blocked: Boolean) = update(network, !blocked)
+                override fun onAvailable(network: Network) = update(network, usable[network] ?: true)
+                override fun onLost(network: Network) = update(network, null)
+            })
+        }.onFailure { Log.w(TAG, "network not followed", it) }
     }
 
     /** Starts the device code flow: the code to enter shows in [status] until the user approves it. */
