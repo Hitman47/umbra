@@ -1,5 +1,5 @@
 // Measures, on a PC, the SMB reading of Nyxara with its own code: which part
-// limits the rate. Run: ./gradlew -p scripts/smb-bench run --args="..." (see README.md).
+// limits the rate. Run: ./gradlew -p scripts/smb-bench run, settings in bench.txt (see SmbBench.kt).
 plugins {
     kotlin("jvm") version "2.4.10"
     kotlin("plugin.serialization") version "2.4.10"

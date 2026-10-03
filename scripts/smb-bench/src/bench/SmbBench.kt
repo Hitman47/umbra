@@ -32,11 +32,30 @@ import java.util.concurrent.atomic.AtomicLong
  * Arguments: host share path-in-share user password [megabytes]
  *   e.g. 192.168.1.131 Films "Dune (2021)\Dune.mkv" mathieu secret 256
  */
-fun main(args: Array<String>) {
+/** Where the arguments can be written instead, away from the shell's quoting (Windows paths, spaces, passwords). */
+private const val SETTINGS = "bench.txt"
+
+/** bench.txt: "host=…", "share=…", "path=…", "user=…", "password=…", "megabytes=…", one per line; backslashes kept as they are. */
+private fun settingsFile(): Array<String>? {
+    val file = java.io.File(SETTINGS).takeIf { it.exists() } ?: return null
+    val values = file.readLines(Charsets.UTF_8)
+        .map { it.trim().removePrefix("\uFEFF") }
+        .filter { '=' in it && !it.startsWith("#") }
+        .associate { it.substringBefore('=').trim().lowercase() to it.substringAfter('=').trim() }
+    return listOf("host", "share", "path", "user", "password", "megabytes").map { values[it].orEmpty() }.toTypedArray()
+}
+
+fun main(cli: Array<String>) {
     System.setOut(java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8"))
-    if (args.size < 5) {
-        println("Usage : host partage chemin utilisateur motdepasse [Mo]")
-        println("  ex. : 192.168.1.131 Films \"Dune (2021)\\Dune.mkv\" mathieu secret 256")
+    val args = cli.takeIf { it.size >= 5 } ?: settingsFile()
+    if (args == null || args.take(5).any { it.isEmpty() }) {
+        println("Écris les réglages dans scripts/smb-bench/$SETTINGS (une ligne chacun), puis relance : ./gradlew -p scripts/smb-bench run")
+        println("  host=192.168.1.131")
+        println("  share=Films")
+        println("  path=Dune (2021)\\Dune.mkv")
+        println("  user=mathieu")
+        println("  password=secret")
+        println("  megabytes=256")
         return
     }
     val (host, share, path, user, password) = args

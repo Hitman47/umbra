@@ -27,3 +27,4 @@ Thumbs.db
 # Local tools
 .claude/
 scripts/protocol_bench_results.json
+scripts/smb-bench/bench.txt
