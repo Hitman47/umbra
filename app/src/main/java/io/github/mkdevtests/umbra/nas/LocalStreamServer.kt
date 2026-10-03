@@ -67,6 +67,28 @@ class LocalStreamServer(
         return "http://$HOST:$listeningPort/$IMAGES/$imageSecret/${URLEncoder.encode(path, "UTF-8").replace("+", "%20")}"
     }
 
+    /** Pictures fetched elsewhere than the NAS, by key (see [remoteImageUrl]); null: none. */
+    @Volatile
+    var remoteImages: ((String) -> ByteArray?)? = null
+
+    /** A stable URL for the picture of [key] from [remoteImages]: the image cache keeps it, whatever address served it. */
+    fun remoteImageUrl(key: String): String {
+        synchronized(this) { if (!isAlive) start(SOCKET_READ_TIMEOUT, true) }
+        return "http://$HOST:$listeningPort/$REMOTE_IMAGES/$imageSecret/${URLEncoder.encode(key, "UTF-8").replace("+", "%20")}"
+    }
+
+    private fun serveRemoteImage(encoded: String): Response {
+        val bytes = try {
+            remoteImages?.invoke(URLDecoder.decode(encoded, "UTF-8"))
+        } catch (e: Exception) {
+            Log.w(TAG, "remote image", e)
+            null
+        } ?: return text(Response.Status.NOT_FOUND, "No image")
+        return newFixedLengthResponse(Response.Status.OK, "image/webp", bytes.inputStream(), bytes.size.toLong()).apply {
+            addHeader("Cache-Control", "max-age=2592000")
+        }
+    }
+
     private fun serveImage(encoded: String): Response {
         val path = URLDecoder.decode(encoded, "UTF-8")
         if (!isImageName(path)) return text(Response.Status.FORBIDDEN, "Not an image")
@@ -139,6 +161,9 @@ class LocalStreamServer(
         if (parts.size == 3 && parts[0] == IMAGES) {
             return if (parts[1] == imageSecret) serveImage(parts[2]) else text(Response.Status.NOT_FOUND, "Unknown image")
         }
+        if (parts.size == 3 && parts[0] == REMOTE_IMAGES) {
+            return if (parts[1] == imageSecret) serveRemoteImage(parts[2]) else text(Response.Status.NOT_FOUND, "Unknown image")
+        }
         val token = session.uri.trimStart('/').substringBefore('/')
         val target = files[token] ?: return text(Response.Status.NOT_FOUND, "Unknown file")
 
@@ -198,6 +223,7 @@ class LocalStreamServer(
         private const val TAG = "LocalStreamServer"
         private const val HOST = "127.0.0.1"
         private const val IMAGES = "img"
+        private const val REMOTE_IMAGES = "rimg"
         private const val MAX_IMAGE = 16L shl 20
         private const val HEAD_BYTES = 2 shl 20
         private const val MAX_HEADS = 2

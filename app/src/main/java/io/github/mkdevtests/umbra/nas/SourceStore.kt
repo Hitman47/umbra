@@ -82,7 +82,7 @@ class SourceStore(context: Context) {
 }
 
 /** Secrets encrypted with an AES key that lives in the Android Keystore and never leaves it. */
-internal object Secrets {
+object Secrets {
     private fun key(): SecretKey {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as SecretKey?)?.let { return it }
