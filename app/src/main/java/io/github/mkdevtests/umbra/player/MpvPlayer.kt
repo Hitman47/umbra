@@ -30,6 +30,7 @@ import java.util.Locale
  * Audio and subtitle tracks follow the user's [settings] when a file opens.
  */
 class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.EventObserver, SurfaceHolder.Callback {
+    private val appContext = context.applicationContext
 
     private val mpv = MPVLib.create(context.applicationContext)
         ?: error("libmpv could not be created")
@@ -65,6 +66,14 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     /** The file's chapters: intro and credits are offered to skip. */
     private val _chapters = MutableStateFlow<List<Chapter>>(emptyList())
     val chapters: StateFlow<List<Chapter>> = _chapters.asStateFlow()
+
+    private val _nightAudio = MutableStateFlow(false)
+    /** Dialogue louder, explosions softer (a compressor on the sound). */
+    val nightAudio: StateFlow<Boolean> = _nightAudio.asStateFlow()
+
+    private val _animeUpscale = MutableStateFlow(false)
+    /** Anime4K shaders on the picture. */
+    val animeUpscale: StateFlow<Boolean> = _animeUpscale.asStateFlow()
 
     private val _speed = MutableStateFlow(1.0)
     val speed: StateFlow<Double> = _speed.asStateFlow()
@@ -137,6 +146,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.setOptionString("force-window", "no")
         mpv.setOptionString("idle", "once")
 
+        if (settings.nightAudio) setNightAudio(true)
+        if (settings.animeUpscale) setAnimeUpscale(true)
+
         mpv.addObserver(this)
         mpv.observeProperty("time-pos", MpvFormat.MPV_FORMAT_DOUBLE)
         mpv.observeProperty("duration", MpvFormat.MPV_FORMAT_DOUBLE)
@@ -152,7 +164,12 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     }
 
     /** Plays [url] from [start] seconds with extra subtitle files: now, or as soon as a Surface is available. */
-    fun play(url: String, subtitles: List<String> = emptyList(), start: Double = 0.0, online: List<OnlineTrack> = emptyList()) {
+    fun play(url: String, subtitles: List<String> = emptyList(), start: Double = 0.0, online: List<OnlineTrack> = emptyList(), remote: Boolean = false) {
+        // Through Tailscale: a deeper cache, and a few seconds stored before the picture starts, against the network's ups and downs.
+        mpv.setPropertyString("demuxer-max-bytes", if (remote) "256MiB" else "64MiB")
+        mpv.setPropertyString("demuxer-max-back-bytes", if (remote) "64MiB" else "32MiB")
+        mpv.setPropertyString("cache-pause-initial", if (remote) "yes" else "no")
+        mpv.setPropertyString("cache-pause-wait", if (remote) "3" else "1")
         externalSubtitles = subtitles
         onlineSubtitles = online
         _ended.value = false
@@ -248,6 +265,29 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         val width = mpv.getPropertyString("video-params/dw")?.toIntOrNull() ?: return null
         val height = mpv.getPropertyString("video-params/dh")?.toIntOrNull() ?: return null
         return (width to height).takeIf { width > 0 && height > 0 }
+    }
+
+    fun setNightAudio(on: Boolean) {
+        mpv.command(arrayOf("af", "remove", "@night"))
+        if (on) mpv.command(arrayOf("af", "add", "@night:lavfi=[$NIGHT_FILTER]"))
+        _nightAudio.value = on
+    }
+
+    /** Anime4K (MIT, bundled in the assets): restores and doubles the lines of a drawn picture, on the GPU. */
+    fun setAnimeUpscale(on: Boolean) {
+        val shaders = if (on) anime4k().joinToString(":") else ""
+        runCatching { mpv.setPropertyString("glsl-shaders", shaders) }.onFailure { Log.w(TAG, "shaders", it) }
+        _animeUpscale.value = on
+    }
+
+    /** The shader files, copied once from the assets to where mpv can read them. */
+    private fun anime4k(): List<String> {
+        val folder = appContext.filesDir.resolve("anime4k").apply { mkdirs() }
+        return ANIME4K.map { name ->
+            val file = folder.resolve(name)
+            if (!file.exists()) appContext.assets.open("anime4k/$name").use { input -> file.outputStream().use { input.copyTo(it) } }
+            file.absolutePath
+        }
     }
 
     val isPlaying get() = !_paused.value && !_ended.value && _duration.value > 0
@@ -474,6 +514,12 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         const val PLAYBACK_RESTART = 21
 
         const val MIN_STALL_MS = 300L
+
+        /** A gentle compressor, then the level brought back up: quiet lines heard, loud scenes tamed. */
+        const val NIGHT_FILTER = "acompressor=threshold=0.05:ratio=4:attack=20:release=250:makeup=3"
+
+        /** Anime4K's light "S" chain: clamp highlights, restore lines, double the size. */
+        val ANIME4K = listOf("Anime4K_Clamp_Highlights.glsl", "Anime4K_Restore_CNN_S.glsl", "Anime4K_Upscale_CNN_x2_S.glsl")
 
         fun languageName(tag: String): String? {
             val name = Locale.forLanguageTag(tag).getDisplayLanguage(Locale.FRENCH)

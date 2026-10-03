@@ -85,6 +85,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.mkdevtests.umbra.NyxaraApp
+import io.github.mkdevtests.umbra.nas.isTailnet
 import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
 import io.github.mkdevtests.umbra.settings.Language
 import io.github.mkdevtests.umbra.subtitles.OnlineSubtitle
@@ -168,6 +169,19 @@ class PlayerActivity : ComponentActivity() {
                     if ((background || inPip) && index + 1 < queue.size) playNext()
                 }
             }
+        }
+        // The last minute and a half, or the credits: the next episode's start is read ahead, it opens at once.
+        lifecycleScope.launch {
+            var warmed = -1
+            combine(player.position, player.duration) { position, duration -> duration > 0 && duration - position < PREFETCH_BEFORE_END }
+                .distinctUntilChanged()
+                .collect { near ->
+                    val next = queue.getOrNull(index + 1)
+                    if (near && next != null && warmed != index) {
+                        warmed = index
+                        (next.stream ?: next.file)?.let { app.streamServer.prefetch(it) }
+                    }
+                }
         }
         // The picture-in-picture window follows the picture's shape and the play/pause state.
         lifecycleScope.launch {
@@ -327,7 +341,9 @@ class PlayerActivity : ComponentActivity() {
 
     private fun start(item: PlayItem) {
         (item.stream ?: item.file)?.let { (application as NyxaraApp).streamServer.resetStats(it) }
-        player.play(toMpvPath(item.url), item.subtitles, item.start, online = item.file?.let(app.subtitleMemory::of).orEmpty())
+        val read = item.stream ?: item.file
+        val remote = read?.let { app.nas?.hostOf(it) }?.let(::isTailnet) == true
+        player.play(toMpvPath(item.url), item.subtitles, item.start, online = item.file?.let(app.subtitleMemory::of).orEmpty(), remote = remote)
     }
 
     /** The queue index already measured: one measure per file. */
@@ -457,6 +473,7 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_QUEUE = "queue"
         private const val ACTION_PIP_TOGGLE = "io.github.mkdevtests.umbra.PIP_TOGGLE"
+        private const val PREFETCH_BEFORE_END = 90.0
         private val QUEUE = ListSerializer(PlayItem.serializer())
 
         fun intent(context: Context, queue: List<PlayItem>): Intent =
@@ -584,7 +601,10 @@ private fun PlayerScreen(
         val code = ONLINE_CODES[wanted]?.takeIf { it in online.languages } ?: return@LaunchedEffect
         val heard = audioTracks.firstOrNull { it.selected }?.language
         if (wanted.matches(heard)) return@LaunchedEffect
-        if (player.subtitleTracks.value.none { wanted.matches(it.language) }) offerOnline = code
+        if (player.subtitleTracks.value.none { wanted.matches(it.language) }) {
+            // Fetched by itself when asked (Réglages), else offered.
+            if (settings.autoOnlineSubtitles) online.best(code) else offerOnline = code
+        }
     }
     LaunchedEffect(online?.added) {
         if (online?.added != null) {
@@ -973,6 +993,12 @@ private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubt
             }
             TrackRow("Voir tous les choix…", quota(online.status.collectAsState().value), false, onClick = onChooseOnline)
         }
+
+        PanelTitle("Son et image")
+        val night by player.nightAudio.collectAsState()
+        val anime by player.animeUpscale.collectAsState()
+        TrackRow("Mode nuit", "Dialogues plus forts, explosions plus douces", night) { player.setNightAudio(!night) }
+        TrackRow("Amélioration anime (Anime4K)", "Traits plus nets sur les dessins animés ; plus de travail pour la tablette", anime) { player.setAnimeUpscale(!anime) }
 
         PanelTitle("Décalage sous-titres")
         DelayRow(delay, enabled = subtitlesOn) { player.shiftSubtitles(it) }

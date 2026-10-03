@@ -169,6 +169,8 @@ class SmbNas(override val source: NasSource) : NasClient {
             .withSecurityProvider(BCSecurityProvider())
             .withTimeout(15, TimeUnit.SECONDS)
             .withSoTimeout(30, TimeUnit.SECONDS)
+            // Up to 4 MiB per READ (the NAS may allow less): a 2 MiB block in one round trip through Tailscale.
+            .withReadBufferSize(4 shl 20)
             .build(),
     )
 
@@ -207,6 +209,11 @@ class SmbNas(override val source: NasSource) : NasClient {
     @Synchronized
     private fun invalidate(name: String) {
         links.remove(name)?.let { runCatching { it.client.close() } }
+    }
+
+    /** The network changed (Wi-Fi left, Tailscale up): the next connection chooses its address again. */
+    override fun onNetworkChanged() {
+        chosen = null
     }
 
     private companion object {

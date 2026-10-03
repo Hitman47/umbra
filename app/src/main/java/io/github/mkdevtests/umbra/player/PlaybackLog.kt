@@ -105,12 +105,7 @@ fun summarize(measures: List<PlaybackMeasure>): List<MeasureSummary> =
     }
 
 /** "Tailscale" for a NAS reached at its Tailscale address (100.64.0.0/10, *.ts.net), else "Local". */
-fun routeOf(host: String): String {
-    val name = host.substringBefore(':').trim().lowercase()
-    val octets = name.split('.').mapNotNull { it.toIntOrNull() }
-    val tailnet = octets.size == 4 && octets[0] == 100 && octets[1] in 64..127
-    return if (tailnet || name.endsWith(".ts.net")) "Tailscale" else "Local"
-}
+fun routeOf(host: String): String = if (io.github.mkdevtests.umbra.nas.isTailnet(host)) "Tailscale" else "Local"
 
 fun median(values: List<Long>): Long = values.sorted()[values.size / 2]
 

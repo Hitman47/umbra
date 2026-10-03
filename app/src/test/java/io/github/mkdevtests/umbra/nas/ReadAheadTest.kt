@@ -62,3 +62,42 @@ class ReadAheadTest {
         }
     }
 }
+
+/** Through Tailscale: several blocks asked at once, each round trip overlapping the others. */
+class ParallelReadTest {
+    /** A NAS 50 ms away: every read waits a round trip. */
+    private class FarFile(override val size: Long) : RemoteFile {
+        override fun read(buffer: ByteArray, fileOffset: Long, bufferOffset: Int, length: Int): Int {
+            if (fileOffset >= size) return -1
+            Thread.sleep(50)
+            val count = minOf(length.toLong(), size - fileOffset).toInt()
+            for (i in 0 until count) buffer[bufferOffset + i] = ((fileOffset + i) % 251).toByte()
+            return count
+        }
+
+        override fun close() {}
+    }
+
+    private fun timeToRead(plan: ReadPlan): Long {
+        val server = LocalStreamServer { null }
+        server.forcedPlan = plan
+        val url = server.urlFor("far", "c.mkv") { FarFile(40_000_000) }
+        try {
+            val started = System.nanoTime()
+            val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            connection.setRequestProperty("Range", "bytes=0-16777215")
+            val body = connection.inputStream.use { it.readBytes() }
+            org.junit.Assert.assertArrayEquals(ByteArray(16 shl 20) { (it % 251).toByte() }, body)
+            return (System.nanoTime() - started) / 1_000_000
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun severalBlocksInFlightAreFaster() {
+        val serial = timeToRead(ReadPlan(block = 1 shl 20, parallel = 1))
+        val parallel = timeToRead(ReadPlan(block = 2 shl 20, parallel = 4))
+        org.junit.Assert.assertTrue("serial $serial ms, parallel $parallel ms", parallel * 3 < serial)
+    }
+}

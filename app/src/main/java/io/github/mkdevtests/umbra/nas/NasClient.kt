@@ -28,6 +28,24 @@ interface NasClient : Closeable {
     /** The shares the NAS offers, or null when it won't say (the user types them). Throws if it can't be reached. */
     fun availableShares(): List<String>?
 
+    /** The device changed networks: choose the address again at the next connection. */
+    fun onNetworkChanged() {}
+
+    /** Port the NAS answers on, to tell home from away. */
+    val probePort: Int get() = 445
+
+    /**
+     * The home address answers: the device is at home. Always true for a NAS
+     * without a Tailscale address. Blocking (half a second at most).
+     */
+    fun atHome(): Boolean {
+        if (source.fallbackHost.isBlank()) return true
+        val host = source.host.trim()
+        return runCatching {
+            java.net.Socket().use { it.connect(java.net.InetSocketAddress(host.substringBefore(':'), host.substringAfter(':', "").toIntOrNull() ?: probePort), HOME_PROBE_MS) }
+        }.isSuccess
+    }
+
     companion object {
         fun of(source: NasSource): NasClient = when (source.protocol) {
             Protocol.Smb -> SmbNas(source)
@@ -43,12 +61,44 @@ interface NasClient : Closeable {
  */
 fun firstReachable(hosts: List<String>, port: Int, timeoutMs: Int = 1_500): String {
     if (hosts.size <= 1) return hosts.firstOrNull().orEmpty()
-    return hosts.firstOrNull { host ->
-        runCatching {
-            java.net.Socket().use { it.connect(java.net.InetSocketAddress(host.substringBefore(':'), host.substringAfter(':', "").toIntOrNull() ?: port), timeoutMs) }
-        }.isSuccess
-    } ?: hosts.first()
+    // Every address tried at once: away from home, the local one no longer costs its whole timeout first.
+    val answered = java.util.concurrent.LinkedBlockingQueue<String>()
+    hosts.forEach { host ->
+        kotlin.concurrent.thread(name = "probe", isDaemon = true) {
+            val ok = runCatching {
+                java.net.Socket().use { it.connect(java.net.InetSocketAddress(host.substringBefore(':'), host.substringAfter(':', "").toIntOrNull() ?: port), timeoutMs) }
+            }.isSuccess
+            answered.put(if (ok) host else "")
+        }
+    }
+    // The home address wins when it answers, even a little after the other: a LAN beats the tunnel.
+    var other: String? = null
+    var until = System.currentTimeMillis() + timeoutMs + 200
+    var pending = hosts.size
+    while (pending > 0) {
+        val host = answered.poll(maxOf(1, until - System.currentTimeMillis()), java.util.concurrent.TimeUnit.MILLISECONDS) ?: break
+        pending--
+        if (host.isEmpty()) continue
+        if (host == hosts.first()) return host
+        if (other == null) {
+            other = host
+            until = minOf(until, System.currentTimeMillis() + PREFER_HOME_MS)
+        }
+    }
+    return other ?: hosts.first()
 }
+
+private const val HOME_PROBE_MS = 600
+
+/** How long the home address may answer after the Tailscale one and still be chosen. */
+private const val PREFER_HOME_MS = 150L
 
 /** The NAS refuses this folder or file (rights): skipped by a scan, unlike a NAS that doesn't answer. */
 class RefusedException(message: String) : IOException(message)
+
+/** An address of the tailnet (100.64.0.0/10, or a MagicDNS name): the NAS is reached through Tailscale. */
+fun isTailnet(host: String): Boolean {
+    val name = host.substringBefore(':').trim().lowercase()
+    val octets = name.split('.').mapNotNull { it.toIntOrNull() }
+    return (octets.size == 4 && octets[0] == 100 && octets[1] in 64..127) || name.endsWith(".ts.net")
+}

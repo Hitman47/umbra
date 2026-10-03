@@ -62,6 +62,12 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
         return nas.directUrl(share + path.substring(root.length))
     }
 
+    /** Every NAS answers at its home address (blocking). */
+    fun atHome(): Boolean = connections.all { it.atHome() }
+
+    /** Wi-Fi left, Tailscale up: every NAS chooses its address again. */
+    fun onNetworkChanged() = connections.forEach { it.onNetworkChanged() }
+
     override fun close() = connections.forEach { it.close() }
 
     private fun route(root: String) = byRoot[root.lowercase()] ?: throw IOException("Partage inconnu : $root")

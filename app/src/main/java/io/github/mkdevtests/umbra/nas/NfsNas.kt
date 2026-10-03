@@ -25,6 +25,8 @@ class NfsNas(override val source: NasSource) : NasClient {
 
     override val currentHost: String get() = address ?: source.host
 
+    override val probePort get() = NFS_PORT
+
     /** Mounted at the address that answers (local, else Tailscale); forgotten after a failure, to choose again. */
     private fun mount(export: String): Nfs3 = synchronized(mounts) {
         mounts.getOrPut(export) {
@@ -89,6 +91,11 @@ class NfsNas(override val source: NasSource) : NasClient {
     override fun availableShares(): List<String>? = NfsExports.list(source.host.trim()).sorted()
 
     override fun close() = synchronized(mounts) { mounts.clear() }
+
+    override fun onNetworkChanged() {
+        synchronized(mounts) { mounts.clear() }
+        address = null
+    }
 
     private class NfsFile(private val file: Nfs3File) : RemoteFile {
         override val size: Long by lazy { file.lengthEx() }

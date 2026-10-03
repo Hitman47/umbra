@@ -38,6 +38,16 @@ data class Settings(
     val pictureInPicture: Boolean = true,
     /** Screen off or in another app without the small window: the sound goes on. */
     val backgroundAudio: Boolean = false,
+    /** Away from home (Tailscale, mobile data): the version up to 1080p rather than a 4K one. */
+    val lighterAway: Boolean = true,
+    /** Subtitles fetched online by themselves when the file has none in the profile's language. */
+    val autoOnlineSubtitles: Boolean = false,
+    /** Louder dialogue, softer explosions: for late evenings. */
+    val nightAudio: Boolean = false,
+    /** Anime4K shaders on the picture: sharper lines for anime, more work for the GPU. */
+    val animeUpscale: Boolean = false,
+    /** Scan at launch away from home too: through Tailscale it is slower. */
+    val scanAway: Boolean = false,
     /** Languages searched for subtitles online (ISO 639-1), in this order. */
     val onlineSubtitleLanguages: List<String> = listOf("fr", "en"),
 )
@@ -65,6 +75,11 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_PIP, updated.pictureInPicture)
             putBoolean(KEY_BACKGROUND, updated.backgroundAudio)
             putString(KEY_ONLINE_LANGUAGES, updated.onlineSubtitleLanguages.joinToString(","))
+            putBoolean(KEY_LIGHTER_AWAY, updated.lighterAway)
+            putBoolean(KEY_AUTO_ONLINE, updated.autoOnlineSubtitles)
+            putBoolean(KEY_NIGHT_AUDIO, updated.nightAudio)
+            putBoolean(KEY_ANIME_UPSCALE, updated.animeUpscale)
+            putBoolean(KEY_SCAN_AWAY, updated.scanAway)
         }
     }
 
@@ -91,6 +106,11 @@ class SettingsStore(context: Context) {
             backgroundAudio = prefs.getBoolean(KEY_BACKGROUND, defaults.backgroundAudio),
             onlineSubtitleLanguages = prefs.getString(KEY_ONLINE_LANGUAGES, null)?.split(',')?.filter { it in SUBTITLE_LANGUAGES }
                 ?: defaults.onlineSubtitleLanguages,
+            lighterAway = prefs.getBoolean(KEY_LIGHTER_AWAY, defaults.lighterAway),
+            autoOnlineSubtitles = prefs.getBoolean(KEY_AUTO_ONLINE, defaults.autoOnlineSubtitles),
+            nightAudio = prefs.getBoolean(KEY_NIGHT_AUDIO, defaults.nightAudio),
+            animeUpscale = prefs.getBoolean(KEY_ANIME_UPSCALE, defaults.animeUpscale),
+            scanAway = prefs.getBoolean(KEY_SCAN_AWAY, defaults.scanAway),
         )
     }
 
@@ -105,6 +125,11 @@ class SettingsStore(context: Context) {
         const val KEY_PIP = "picture_in_picture"
         const val KEY_BACKGROUND = "background_audio"
         const val KEY_ONLINE_LANGUAGES = "online_subtitle_languages"
+        const val KEY_LIGHTER_AWAY = "lighter_away"
+        const val KEY_AUTO_ONLINE = "auto_online_subtitles"
+        const val KEY_NIGHT_AUDIO = "night_audio"
+        const val KEY_ANIME_UPSCALE = "anime_upscale"
+        const val KEY_SCAN_AWAY = "scan_away"
         const val NONE = "none"
     }
 }

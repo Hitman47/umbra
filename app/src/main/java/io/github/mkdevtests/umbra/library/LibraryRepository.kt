@@ -89,7 +89,9 @@ class LibraryRepository(private val app: NyxaraApp) {
             loadJob.join()
             val nas = app.nas ?: return@launch
             val stale = _library.value.source != keyOf(nas.sources) || _library.value.scannedAt == 0L
-            if (stale || app.settings.settings.value.rescanAtLaunch) startScan()
+            val settings = app.settings.settings.value
+            // Away from home, the whole NAS through Tailscale: only when asked (Réglages), or when there is no library yet.
+            if (stale || (settings.rescanAtLaunch && (settings.scanAway || nas.atHome()))) startScan()
         }
     }
 

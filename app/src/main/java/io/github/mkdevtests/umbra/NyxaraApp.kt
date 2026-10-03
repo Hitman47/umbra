@@ -22,6 +22,7 @@ import io.github.mkdevtests.umbra.update.Updater
 import io.github.mkdevtests.umbra.trakt.Trakt
 import io.github.mkdevtests.umbra.trakt.TraktApi
 import io.github.mkdevtests.umbra.media.MediaInfoStore
+import io.github.mkdevtests.umbra.nas.measureNetwork
 import io.github.mkdevtests.umbra.subtitles.OpenSubtitles
 import io.github.mkdevtests.umbra.subtitles.SubtitleMemory
 import kotlinx.coroutines.CoroutineScope
@@ -94,7 +95,47 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(NasClient::of)) }
         _sourceList.value = nas?.sources.orEmpty()
         LocalImages.url = { path -> streamServer.imageUrl(path) }
+        watchNetwork()
         updater.check()
+    }
+
+    /**
+     * Away from home: the NAS of [path] answers through Tailscale, or the
+     * device is on mobile data. Lighter versions and a deeper cache then.
+     */
+    fun isAway(path: String? = null): Boolean {
+        val host = path?.let { nas?.hostOf(it) } ?: nas?.connections?.firstOrNull()?.currentHost
+        if (host != null && io.github.mkdevtests.umbra.nas.isTailnet(host)) return true
+        val connectivity = getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
+        return caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)
+    }
+
+    /** Reads a big film of the library as playback would: round trip, rate, and what they allow. */
+    suspend fun testNetwork(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val router = nas ?: return@withContext "Aucun NAS configuré."
+        val movie = library.library.value.movies.maxByOrNull { it.fileSize } ?: return@withContext "Aucun film dans la bibliothèque pour le test."
+        runCatching {
+            val report = measureNetwork(router, movie.file, streamServer.urlFor(movie.file))
+            "${report.summary}. ${report.verdict}"
+        }.getOrElse { "Test impossible : ${it.message ?: it}" }
+    }
+
+    /** The address of each NAS is chosen again as soon as the device changes networks, not at the next failure. */
+    private fun watchNetwork() {
+        val connectivity = getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        connectivity.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+            private var last: android.net.Network? = null
+
+            override fun onAvailable(network: android.net.Network) {
+                if (last != null && last != network) nas?.onNetworkChanged()
+                last = network
+            }
+
+            override fun onLost(network: android.net.Network) {
+                nas?.onNetworkChanged()
+            }
+        })
     }
 
     /** Posters and backdrops are fetched from TMDB once, then kept on disk up to 1 GB. */

@@ -91,3 +91,25 @@ fun formatSize(bytes: Long): String = when {
     bytes >= 1L shl 30 -> String.format(Locale.FRANCE, "%.1f Go", bytes / (1L shl 30).toDouble())
     else -> "${bytes / (1L shl 20)} Mo"
 }
+
+/** Lines of picture the file's name tells: "2160p" or "4K" → 2160, "1080p" → 1080; null when it doesn't say. */
+fun nameHeight(file: String): Int? {
+    val name = file.substringAfterLast('\\')
+    return when (TAGS.firstOrNull { it.first.containsMatchIn(name) }?.second) {
+        "4K" -> 2160
+        "1080p" -> 1080
+        "720p" -> 720
+        "SD" -> 480
+        else -> null
+    }
+}
+
+/**
+ * The version to play away from home: the best one up to 1080p ([heightOf]
+ * from the file's header or name), else the smallest. A 4K remux needs more
+ * than most home connections send.
+ */
+fun lightVersion(versions: List<Version>, heightOf: (Version) -> Int?): Version =
+    versions.filter { (heightOf(it) ?: Int.MAX_VALUE) <= AWAY_MAX_HEIGHT }.maxByOrNull { it.size } ?: versions.minBy { it.size }
+
+private const val AWAY_MAX_HEIGHT = 1080

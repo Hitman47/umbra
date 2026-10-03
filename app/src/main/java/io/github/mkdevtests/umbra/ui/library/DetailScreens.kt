@@ -105,7 +105,7 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
     var extras by remember(movie.file) { mutableStateOf<Extras?>(null) }
     LaunchedEffect(movie.file) { extras = viewModel.extras(movie) }
     val versions = remember(movie) { movie.versions }
-    var version by remember(movie) { mutableStateOf(viewModel.preferredVersion(movie.file, versions)) }
+    var version by remember(movie) { mutableStateOf(viewModel.versionFor(movie.file, versions)) }
     val history by viewModel.history.collectAsState()
     val progress = history[movie.file]
     val hidden by viewModel.hidden.collectAsState()
@@ -281,7 +281,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
             title = { Text("S%02dE%02d · quelle version ?".format(episode.season, episode.number)) },
             text = {
                 LaunchedEffect(versions) { viewModel.requestMediaInfo(versions.map { it.file to it.size }) }
-                VersionList(versions, viewModel.preferredVersion(episode.file, versions), viewModel::sourceLabel, padding = 0.dp, infos = infos) { chosen ->
+                VersionList(versions, viewModel.versionFor(episode.file, versions), viewModel::sourceLabel, padding = 0.dp, infos = infos) { chosen ->
                     picking = null
                     viewModel.chooseVersion(episode.file, chosen)
                     context.startActivity(viewModel.playIntent(show, episode, version = chosen))

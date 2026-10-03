@@ -92,6 +92,42 @@ class LocalStreamServer(
         }
     }
 
+    /** The first bytes of the files about to play (next episode), read ahead: key → bytes. */
+    private val heads = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, ByteArray>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > MAX_HEADS
+    })
+
+    /** Reads the start of [path] now, and keeps a handle on it: the player opens it without waiting on the NAS. */
+    fun prefetch(path: String) {
+        if (path in heads) return
+        thread(name = "nas-prefetch", isDaemon = true) {
+            val pool = pools.getOrPut(path) { HandlePool { (nas() ?: throw java.io.IOException("Aucun NAS configuré")).open(path) } }
+            runCatching {
+                val (file, _) = pool.acquire()
+                try {
+                    val bytes = ByteArray(minOf(HEAD_BYTES.toLong(), file.size).toInt())
+                    var filled = 0
+                    while (filled < bytes.size) {
+                        val count = file.read(bytes, filled.toLong(), filled, bytes.size - filled)
+                        if (count <= 0) break
+                        filled += count
+                    }
+                    heads[path] = bytes.copyOf(filled)
+                    pool.release(file)
+                } catch (e: Exception) {
+                    pool.discard(file)
+                    throw e
+                }
+            }.onFailure { Log.w(TAG, "prefetch $path", it) }
+        }
+    }
+
+    /** Set by tests: the plan of every request. */
+    internal var forcedPlan: ReadPlan? = null
+
+    /** Through Tailscale: bigger blocks, more of them at once. */
+    private fun plan(key: String): ReadPlan = forcedPlan ?: if (nas()?.hostOf(key.substringAfter("nfs:"))?.let(::isTailnet) == true) ReadPlan.REMOTE else ReadPlan.LOCAL
+
     /** Closes the handles kept open, when the player goes away. */
     fun closeIdle() {
         pools.values.forEach { it.closeAll() }
@@ -134,7 +170,16 @@ class LocalStreamServer(
         val length = end - start + 1
         val partial = session.headers.containsKey("range")
 
-        val body = ReadAheadStream(file, target.pool, start, length, stat)
+        // The start read ahead (next episode): served from memory, the rest from the NAS.
+        val head = heads[target.key]?.takeIf { start < it.size }
+        val body = if (head == null) {
+            ReadAheadStream(file, target.pool, start, length, stat, plan(target.key))
+        } else {
+            val part = minOf(length, head.size - start).toInt()
+            val rest = length - part
+            val tail = if (rest > 0) ReadAheadStream(file, target.pool, start + part, rest, stat, plan(target.key)) else ByteArray(0).inputStream().also { target.pool.release(file) }
+            java.io.SequenceInputStream(java.io.ByteArrayInputStream(head, start.toInt(), part), tail)
+        }
         return newFixedLengthResponse(
             if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK,
             mimeType(target.name),
@@ -154,6 +199,8 @@ class LocalStreamServer(
         private const val HOST = "127.0.0.1"
         private const val IMAGES = "img"
         private const val MAX_IMAGE = 16L shl 20
+        private const val HEAD_BYTES = 2 shl 20
+        private const val MAX_HEADS = 2
 
         /** Port tried first, so that image URLs (and their cache) stay the same from one launch to the next. */
         private const val PREFERRED_PORT = 47913
@@ -245,67 +292,108 @@ class StreamStats {
 }
 
 /**
- * Reads [length] bytes of a NAS file from [offset] on its own thread, a few
- * blocks ahead of the player: the NAS works while the previous block is sent.
- * The first block is small, so that the player gets its first bytes at once
- * (it asks for a new range at each seek and while it opens a file).
- * The handle goes back to [pool] once the reading thread is done with it.
+ * How a request is read from the NAS: blocks of [block] bytes, [parallel]
+ * of them asked at once. One read at a time waits a round trip per block,
+ * which costs little at home but caps the rate through Tailscale (1 MiB per
+ * 40 ms ≈ 200 Mbit/s, per 150 ms ≈ 50): several in flight multiply it.
+ */
+data class ReadPlan(val block: Int, val parallel: Int) {
+    companion object {
+        /** At home a round trip costs a millisecond: one read at a time, as measured fine. */
+        val LOCAL = ReadPlan(block = 1 shl 20, parallel = 1)
+        val REMOTE = ReadPlan(block = 2 shl 20, parallel = 4)
+    }
+}
+
+/**
+ * Reads [length] bytes of a NAS file from [offset], [plan]'s blocks fetched
+ * by several threads at once, each with its own handle ([first], then
+ * handles from [pool]), and handed to the player in order. The first block
+ * is small, so that the player gets its first bytes at once (it asks for a
+ * new range at each seek and while it opens a file). Handles go back to
+ * [pool] when their thread is done.
  */
 private class ReadAheadStream(
-    private val file: RemoteFile,
+    first: RemoteFile,
     private val pool: HandlePool,
     private val offset: Long,
     private val length: Long,
     private val stats: StreamStats,
+    private val plan: ReadPlan,
 ) : InputStream() {
-    private val blocks = ArrayBlockingQueue<Any>(AHEAD)
+    private val lock = Object()
+    private val results = HashMap<Int, Any>()
+    /** Blocks to read; lowered when the file ends early. */
+    @Volatile private var count = blockCount()
+    private var claimed = 0
+    private var consumed = 0
     @Volatile private var stopped = false
     private var current: ByteArray? = null
     private var position = 0
-    private var ended = false
 
     init {
-        thread(name = "nas-read", isDaemon = true) { fill() }
+        repeat(plan.parallel.coerceAtMost(count)) { worker ->
+            thread(name = "nas-read-$worker", isDaemon = true) { work(if (worker == 0) first else null) }
+        }
+        if (count == 0) pool.release(first)
     }
 
-    private fun fill() {
+    private fun blockCount(): Int = when {
+        length <= 0 -> 0
+        length <= FIRST_BLOCK -> 1
+        else -> 1 + ((length - FIRST_BLOCK + plan.block - 1) / plan.block).toInt()
+    }
+
+    private fun startOf(index: Int): Long = if (index == 0) 0 else FIRST_BLOCK + (index - 1).toLong() * plan.block
+
+    private fun sizeOf(index: Int): Int = minOf(if (index == 0) FIRST_BLOCK.toLong() else plan.block.toLong(), length - startOf(index)).toInt()
+
+    /** The next block to fetch, waiting while enough are ready ahead of the player; -1: nothing left. */
+    private fun claim(): Int = synchronized(lock) {
+        while (!stopped && claimed < count && claimed - consumed >= plan.parallel * 2) lock.wait(100)
+        if (stopped || claimed >= count) -1 else claimed++
+    }
+
+    private fun work(own: RemoteFile?) {
+        var file = own
         var failed = false
         try {
-            var next = offset
-            var remaining = length
-            var block = FIRST_BLOCK
-            while (remaining > 0 && !stopped) {
-                val size = minOf(block.toLong(), remaining).toInt()
-                val buffer = ByteArray(size)
-                val started = System.nanoTime()
-                var filled = 0
-                while (filled < size) {
-                    val count = file.read(buffer, next + filled, filled, size - filled)
-                    if (count <= 0) break
-                    filled += count
+            while (true) {
+                val index = claim()
+                if (index < 0) break
+                val handle = file ?: pool.acquire().first.also { file = it }
+                val result: Any = try {
+                    read(handle, index)
+                } catch (e: Throwable) {
+                    failed = true
+                    e
                 }
-                if (filled == 0) break
-                stats.read(filled, System.nanoTime() - started)
-                put(if (filled == size) buffer else buffer.copyOf(filled))
-                next += filled
-                remaining -= filled
-                if (filled < size) break // end of the file
-                block = BLOCK
+                synchronized(lock) {
+                    results[index] = result
+                    // A short block: the file ends there.
+                    if (result is Throwable || (result as ByteArray).size < sizeOf(index)) count = minOf(count, index + 1)
+                    lock.notifyAll()
+                }
+                if (failed) break
             }
-            put(END)
-        } catch (e: Throwable) {
-            failed = true
-            put(e)
         } finally {
-            if (failed) pool.discard(file) else pool.release(file)
+            file?.let { if (failed) pool.discard(it) else pool.release(it) }
         }
     }
 
-    /** Waits for room, unless the player went away. */
-    private fun put(item: Any) {
-        while (!stopped) {
-            if (blocks.offer(item, 100, TimeUnit.MILLISECONDS)) return
+    private fun read(file: RemoteFile, index: Int): ByteArray {
+        val size = sizeOf(index)
+        val buffer = ByteArray(size)
+        val at = offset + startOf(index)
+        val started = System.nanoTime()
+        var filled = 0
+        while (filled < size && !stopped) {
+            val read = file.read(buffer, at + filled, filled, size - filled)
+            if (read <= 0) break
+            filled += read
         }
+        stats.read(filled, System.nanoTime() - started)
+        return if (filled == size) buffer else buffer.copyOf(filled)
     }
 
     override fun read(): Int {
@@ -314,21 +402,23 @@ private class ReadAheadStream(
     }
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
-        if (ended) return -1
         var block = current
         if (block == null || position >= block.size) {
-            when (val item = blocks.take()) {
-                END -> {
-                    ended = true
-                    return -1
+            val item = synchronized(lock) {
+                if (block != null) {
+                    consumed++
+                    lock.notifyAll()
                 }
-                is Throwable -> throw (item as? java.io.IOException ?: java.io.IOException(item))
-                else -> {
-                    block = item as ByteArray
-                    current = block
-                    position = 0
-                }
+                current = null
+                while (consumed < count && results[consumed] == null && !stopped) lock.wait(100)
+                if (consumed >= count || stopped) return -1
+                results.remove(consumed)
             }
+            if (item is Throwable) throw (item as? java.io.IOException ?: java.io.IOException(item))
+            block = item as ByteArray
+            if (block.isEmpty()) return -1
+            current = block
+            position = 0
         }
         val count = minOf(len, block.size - position)
         System.arraycopy(block, position, b, off, count)
@@ -340,15 +430,14 @@ private class ReadAheadStream(
 
     override fun close() {
         stopped = true
-        blocks.clear()
+        synchronized(lock) {
+            results.clear()
+            lock.notifyAll()
+        }
     }
 
     private companion object {
-        val END = Any()
-
-        /** Small, to answer fast; then [BLOCK] bytes per NAS read, [AHEAD] blocks ahead at most. */
+        /** Small, to answer fast. */
         const val FIRST_BLOCK = 128 * 1024
-        const val BLOCK = 1 shl 20
-        const val AHEAD = 4
     }
 }

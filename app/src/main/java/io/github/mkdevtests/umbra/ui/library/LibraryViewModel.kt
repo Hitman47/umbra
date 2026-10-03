@@ -14,6 +14,8 @@ import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.Version
 import io.github.mkdevtests.umbra.library.versions
 import io.github.mkdevtests.umbra.library.versionsOf
+import io.github.mkdevtests.umbra.library.lightVersion
+import io.github.mkdevtests.umbra.library.nameHeight
 import io.github.mkdevtests.umbra.player.PlayItem
 import io.github.mkdevtests.umbra.player.PlayerActivity
 import io.github.mkdevtests.umbra.history.hideKey
@@ -152,6 +154,14 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun chooseVersion(key: String, version: Version) = versionChoices.edit().putString(key, version.file).apply()
 
+    /** The version to play now: up to 1080p away from home (Réglages), else the one chosen last. */
+    fun versionFor(key: String, versions: List<Version>): Version {
+        if (versions.size > 1 && nyxara.settings.settings.value.lighterAway && nyxara.isAway(key)) {
+            return lightVersion(versions) { version -> mediaInfo.value[version.file]?.video?.height ?: nameHeight(version.file) }
+        }
+        return preferredVersion(key, versions)
+    }
+
     /** The NAS's name of a file, to tell versions on two NAS apart. */
     fun sourceLabel(file: String): String? = nyxara.nas?.sourceOf(file)?.label
 
@@ -160,7 +170,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
      * chosen (the last one by default). Progress is kept on the film, whatever the version.
      */
     fun playIntent(movie: Movie, fromStart: Boolean = false, version: Version? = null): Intent {
-        val played = version ?: preferredVersion(movie.file, movie.versions)
+        val played = version ?: versionFor(movie.file, movie.versions)
         val own = played.file == movie.file
         return PlayerActivity.intent(
             getApplication(),
@@ -181,7 +191,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Plays [episode], then the following ones (specials only after a special); each resumes where it stopped. */
     fun playIntent(show: Show, episode: Episode, fromStart: Boolean = false, version: Version? = null): Intent {
-        val played = version ?: preferredVersion(episode.file, show.versionsOf(episode))
+        val played = version ?: versionFor(episode.file, show.versionsOf(episode))
         val episodes = show.seasons.sortedBy { it.number }
             .filter { episode.season == 0 || it.number > 0 }
             .flatMap { it.episodes }

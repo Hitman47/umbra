@@ -53,7 +53,7 @@ class HandlePool(private val open: () -> RemoteFile) {
 
     private companion object {
         const val IDLE_MS = 60_000L
-        const val MAX_IDLE = 4
+        const val MAX_IDLE = 8
 
         val EMPTY = object : RemoteFile {
             override val size = 0L
