@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -44,6 +47,7 @@ import io.github.mkdevtests.umbra.library.SearchFilters
 import io.github.mkdevtests.umbra.library.SearchKind
 import io.github.mkdevtests.umbra.library.decadeLabel
 import io.github.mkdevtests.umbra.library.decadesOf
+import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.library.genresOf
 import kotlinx.coroutines.delay
 
@@ -93,12 +97,16 @@ fun SearchScreen(
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+            leadingIcon = { Icon(NyxaraIcons.Search, contentDescription = null) },
             trailingIcon = {
                 Row {
-                    if (query.isNotEmpty()) TextButton(onClick = { viewModel.searchQuery.value = "" }) { Text("✕") }
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.searchQuery.value = "" }) { Icon(NyxaraIcons.Close, contentDescription = "Effacer") }
+                    }
                     TextButton(onClick = startDictation) { Text("🎤") }
                 }
             },
+            shape = RoundedCornerShape(50),
             modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp),
         )
         ChipRow {

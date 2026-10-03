@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build, sign, install and launch the Umbra release APK from the current branch.
-# Usage: ./scripts/build-umbra-release.sh [--clean] [--no-install]
+# Build, sign, install and launch the Nyxara release APK from the current branch.
+# Usage: ./scripts/build-nyxara-release.sh [--clean] [--no-install]
 #
 # Run from Git Bash (or WSL). Package: io.github.mkdevtests.umbra.
 #
@@ -87,13 +87,13 @@ if [[ $CLEAN == 1 ]]; then
     ./gradlew :app:clean
 fi
 
-echo "==> Building Umbra release APK"
+echo "==> Building Nyxara release APK"
 ./gradlew :app:assembleRelease
 
 OUT="app/build/outputs/apk/release"
-UNSIGNED="$OUT/umbra-release-unsigned.apk"
-ALIGNED="$OUT/umbra-release-aligned.apk"
-SIGNED="$OUT/umbra-release.apk"
+UNSIGNED="$OUT/nyxara-release-unsigned.apk"
+ALIGNED="$OUT/nyxara-release-aligned.apk"
+SIGNED="$OUT/nyxara-release.apk"
 [[ -f "$UNSIGNED" ]] || { echo "Unsigned APK not found: $UNSIGNED"; exit 1; }
 
 echo "==> Aligning"

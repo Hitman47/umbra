@@ -16,11 +16,11 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val umbraVersion = "0.3.1"
+val nyxaraVersion = "0.4.0"
 
 base {
-    // APK names: umbra-debug.apk, umbra-release-unsigned.apk
-    archivesName.set("umbra")
+    // APK names: nyxara-debug.apk, nyxara-release-unsigned.apk
+    archivesName.set("nyxara")
 }
 
 android {
@@ -31,9 +31,9 @@ android {
         applicationId = "io.github.mkdevtests.umbra"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionName = umbraVersion
+        versionName = nyxaraVersion
         // 0.2.0 -> 200, 1.12.3 -> 11203: always increasing, as Android requires.
-        versionCode = umbraVersion.split(".").map(String::toInt).let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
+        versionCode = nyxaraVersion.split(".").map(String::toInt).let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
 
         buildConfigField("String", "TMDB_TOKEN", localProperty("tmdb.token"))
         buildConfigField("String", "THETVDB_TOKEN", localProperty("thetvdb.token"))
@@ -50,15 +50,15 @@ android {
             // Debug and release side by side on the same device.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            resValue("string", "app_name", "Umbra Debug")
+            resValue("string", "app_name", "Nyxara Debug")
             // Releases install as io.github.mkdevtests.umbra: not an update of this build.
             buildConfigField("boolean", "UPDATES", "false")
         }
         release {
-            // Signed by scripts/build-umbra-release.sh (zipalign + apksigner).
+            // Signed by scripts/build-nyxara-release.sh (zipalign + apksigner).
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            resValue("string", "app_name", "Umbra")
+            resValue("string", "app_name", "Nyxara")
             buildConfigField("boolean", "UPDATES", "true")
         }
     }
@@ -66,6 +66,11 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    packaging {
+        // Netty 3 (NFS client) ships these in every jar.
+        resources.excludes += listOf("META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties", "META-INF/DEPENDENCIES")
     }
 
     buildFeatures {
@@ -102,6 +107,7 @@ dependencies {
     implementation(libs.smbj)
     implementation(libs.dcerpc)
     implementation(libs.nanohttpd)
+    implementation(libs.nfsclient)
 
     // Metadata (TMDB) and artwork.
     implementation(libs.okhttp)

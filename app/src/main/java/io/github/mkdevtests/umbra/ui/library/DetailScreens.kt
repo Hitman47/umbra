@@ -27,6 +27,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.collectAsState
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,6 +62,11 @@ import io.github.mkdevtests.umbra.library.Related
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.Tmdb
+import io.github.mkdevtests.umbra.ui.theme.GlassButton
+import io.github.mkdevtests.umbra.ui.theme.GlassIconButton
+import io.github.mkdevtests.umbra.ui.theme.GlowButton
+import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
+import io.github.mkdevtests.umbra.ui.theme.Tag
 import java.util.Locale
 
 /** Where a page leads: another title of the library, or the search for a person. */
@@ -91,15 +97,14 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
             ) {
                 if (progress?.inProgress == true) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { context.startActivity(viewModel.playIntent(movie)) }) {
-                            Text("▶  Reprendre · il reste ${formatRuntime((progress.remaining / 60).toInt().coerceAtLeast(1))}")
-                        }
-                        OutlinedButton(onClick = { context.startActivity(viewModel.playIntent(movie, fromStart = true)) }) { Text("Depuis le début") }
+                        GlowButton(
+                            "Reprendre · il reste ${formatRuntime((progress.remaining / 60).toInt().coerceAtLeast(1))}",
+                            onClick = { context.startActivity(viewModel.playIntent(movie)) },
+                        )
+                        GlassButton("Depuis le début", onClick = { context.startActivity(viewModel.playIntent(movie, fromStart = true)) })
                     }
                 } else {
-                    Button(onClick = { context.startActivity(viewModel.playIntent(movie)) }) {
-                        Text(if (progress?.watched == true) "▶  Revoir" else "▶  Lecture")
-                    }
+                    GlowButton(if (progress?.watched == true) "Revoir" else "Lecture", onClick = { context.startActivity(viewModel.playIntent(movie)) })
                 }
                 HideButton(isHidden) { viewModel.setHidden(movie, !isHidden) }
             }
@@ -144,12 +149,10 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                 val next = resume?.episode ?: show.regularEpisodes().firstOrNull() ?: season?.episodes?.firstOrNull()
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (next != null) {
-                        Button(onClick = { context.startActivity(viewModel.playIntent(show, next)) }) {
-                            val code = "S%02dE%02d".format(next.season, next.number)
-                            Text(if (resume?.progress != null) "▶  Reprendre $code" else "▶  $code")
-                        }
+                        val code = "S%02dE%02d".format(next.season, next.number)
+                        GlowButton(if (resume?.progress != null) "Reprendre $code" else "Lecture $code", onClick = { context.startActivity(viewModel.playIntent(show, next)) })
                     }
-                    OutlinedButton(onClick = onFixMatch) { Text("Corriger le matching") }
+                    GlassButton("Corriger", onClick = onFixMatch, icon = NyxaraIcons.Edit)
                 }
                 HideButton(isHidden) { viewModel.setHidden(show, !isHidden) }
             }
@@ -196,7 +199,7 @@ private fun ExtrasRows(extras: Extras, links: DetailLinks) {
 
 @Composable
 private fun RowTitle(title: String) {
-    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 8.dp))
+    io.github.mkdevtests.umbra.ui.theme.SectionHeader(title, modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 10.dp))
 }
 
 /** People in a row; a touch searches the library for them. */
@@ -277,7 +280,10 @@ private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks) 
 /** Hides the title from the lists, or shows it again. */
 @Composable
 private fun HideButton(hidden: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick) { Text(if (hidden) "Ne plus masquer" else "Masquer ce titre") }
+    TextButton(onClick = onClick) {
+        Icon(if (hidden) NyxaraIcons.Show else NyxaraIcons.Hide, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(if (hidden) "  Ne plus masquer" else "  Masquer ce titre")
+    }
 }
 
 /** "Réalisation : Denis Villeneuve", "Avec : Timothée Chalamet, Zendaya…". */
@@ -328,13 +334,7 @@ private fun episodesOwned(show: Show, season: Int, owned: Int): String {
 private fun DetailHeader(backdrop: String?, onBack: () -> Unit) {
     Box {
         Backdrop(backdrop)
-        TextButton(
-            onClick = onBack,
-            modifier = Modifier
-                .safeDrawingPadding()
-                .padding(8.dp)
-                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(50)),
-        ) { Text("← Retour", color = Color.White) }
+        GlassIconButton(NyxaraIcons.Back, "Retour", onBack, modifier = Modifier.safeDrawingPadding().padding(12.dp))
     }
 }
 
@@ -358,9 +358,9 @@ private fun TitleBlock(
             if (originalTitle != null && originalTitle != title) {
                 Text(originalTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium)
+            Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (genres.isNotEmpty()) {
-                Text(genres.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { genres.take(3).forEach { Tag(it) } }
             }
             Column(modifier = Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { action() }
         }

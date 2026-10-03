@@ -68,6 +68,18 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     @Volatile private var loadAt = 0L
     @Volatile private var firstFrameAt = 0L
     @Volatile private var openMs: Long? = null
+    @Volatile private var loadedMs: Long? = null
+    @Volatile private var started = false
+
+    /** The file failed to open (bad address, refused account, unreadable): mpv gave up before any picture. */
+    @Volatile var openFailed = false
+        private set
+
+    /** The first frame is shown. */
+    val isOpen get() = openMs != null
+
+    /** A seek is under way. */
+    val isSeeking get() = seekAt != 0L
     @Volatile private var seekAt = 0L
     private val seeks = java.util.Collections.synchronizedList(mutableListOf<Long>())
     @Volatile private var stallAt = 0L
@@ -107,6 +119,10 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.setOptionString("sub-font", "Roboto")
         mpv.setOptionString("sub-scale", settings.subtitleSize.scale.toString())
 
+        // Faster opening: ffmpeg probes 5 s of packets by default, 1 s is plenty for MKV/MP4.
+        mpv.setOptionString("demuxer-lavf-analyzeduration", "1")
+        // A connection cut mid-file (Wi-Fi roaming, NAS reconnect) resumes where it stopped.
+        mpv.setOptionString("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=4")
         mpv.setOptionString("cache", "yes")
         mpv.setOptionString("demuxer-max-bytes", "64MiB")
         mpv.setOptionString("demuxer-max-back-bytes", "32MiB")
@@ -142,6 +158,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         loadAt = SystemClock.elapsedRealtime()
         firstFrameAt = 0L
         openMs = null
+        loadedMs = null
+        started = false
+        openFailed = false
         seekAt = 0L
         seeks.clear()
         stallAt = 0L
@@ -159,9 +178,10 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
     fun pause() = mpv.setPropertyBoolean("pause", true)
 
+    /** To the keyframe nearest [seconds]: no decoding from the keyframe up to the exact time, which costs seconds in software decoding. */
     fun seekTo(seconds: Double) {
         markSeek()
-        mpv.command(arrayOf("seek", seconds.toString(), "absolute"))
+        mpv.command(arrayOf("seek", seconds.toString(), "absolute+keyframes"))
     }
 
     fun seekBy(seconds: Int) {
@@ -180,11 +200,13 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         val video = listOfNotNull(
             p("video-format"),
             p("video-params/w")?.let { w -> p("video-params/h")?.let { h -> "${w}x$h" } },
+            p("video-params/pixelformat"),
             p("hwdec-current")?.takeIf { it != "no" } ?: "logiciel",
         ).joinToString(" ")
         val now = SystemClock.elapsedRealtime()
         return PlayerFigures(
             openMs = openMs,
+            loadedMs = loadedMs,
             seeksMs = seeks.toList(),
             stalls = stalls,
             stalledMs = stalledMs + (if (stallAt != 0L) now - stallAt else 0L),
@@ -290,8 +312,11 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         if (waiting) {
             if (openMs != null && seekAt == 0L && stallAt == 0L) stallAt = now
         } else if (stallAt != 0L) {
-            stalls++
-            stalledMs += now - stallAt
+            // A blink of the cache indicator isn't a stall the viewer sees.
+            if (now - stallAt >= MIN_STALL_MS) {
+                stalls++
+                stalledMs += now - stallAt
+            }
             stallAt = 0L
         }
     }
@@ -310,12 +335,18 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 }
             }
             MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> {
+                if (loadedMs == null) loadedMs = SystemClock.elapsedRealtime() - loadAt
                 // mpv only finds subtitles next to local files: add the NAS ones by hand.
                 externalSubtitles.forEach { mpv.command(arrayOf("sub-add", it, "auto")) }
                 selectTracks()
                 publishTracks()
             }
-            MPVLib.MpvEvent.MPV_EVENT_END_FILE -> Log.i(TAG, "end of file")
+            // After the end of the file replaced, if any: this file's own events follow.
+            START_FILE -> started = true
+            MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
+                if (started && openMs == null) openFailed = true
+                Log.i(TAG, "end of file")
+            }
         }
     }
 
@@ -400,6 +431,11 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
         /** MPV_EVENT_PLAYBACK_RESTART in mpv's client.h. */
         const val PLAYBACK_RESTART = 21
+
+        /** MPV_EVENT_START_FILE. */
+        const val START_FILE = 6
+
+        const val MIN_STALL_MS = 300L
 
         fun languageName(tag: String): String? {
             val name = Locale.forLanguageTag(tag).getDisplayLanguage(Locale.FRENCH)

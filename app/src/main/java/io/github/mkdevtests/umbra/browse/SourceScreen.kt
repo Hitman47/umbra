@@ -37,6 +37,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.ui.theme.NyxaraLogo
 import kotlinx.coroutines.launch
 
 private enum class SetupStep { Login, Shares }
@@ -114,7 +115,7 @@ fun SourceScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Umbra", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
+        NyxaraLogo(size = 40.dp, modifier = Modifier.padding(bottom = 12.dp))
         val width = Modifier.widthIn(max = 520.dp).fillMaxWidth()
 
         when (step) {
@@ -171,7 +172,7 @@ fun SourceScreen(
                     if (manual) {
                         "Ce NAS ne donne pas la liste de ses partages : ajoute leur nom tel qu'il apparaît dans ZimaOS."
                     } else {
-                        "Umbra trouve tout seul les films et les épisodes, quel que soit le rangement des dossiers."
+                        "Nyxara trouve tout seul les films et les épisodes, quel que soit le rangement des dossiers."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

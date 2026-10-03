@@ -1,6 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,10 +19,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import io.github.mkdevtests.umbra.library.Tmdb
 
-val PosterShape = RoundedCornerShape(10.dp)
+val PosterShape = RoundedCornerShape(14.dp)
 
 /** 2:3 poster; shows the title on a plain card when TMDB has no artwork. */
 @Composable
@@ -30,7 +32,8 @@ fun Poster(path: String?, title: String, modifier: Modifier = Modifier, size: St
         modifier = modifier
             .aspectRatio(2f / 3f)
             .clip(PosterShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.surfaceContainer)))
+            .border(1.dp, Color.White.copy(alpha = 0.06f), PosterShape),
         contentAlignment = Alignment.Center,
     ) {
         if (path == null) {
@@ -74,16 +77,17 @@ fun formatRuntime(minutes: Int?): String? = minutes?.let { if (it >= 60) "${it /
 
 fun formatRating(rating: Double?): String? = rating?.let { "★ %.1f".format(it) }
 
-/** A small label over artwork, like "✓ Vu". */
+/** A small label over artwork, like "✓ Vu" (glowing) or "3/10". */
 @Composable
 fun CornerBadge(text: String, modifier: Modifier = Modifier) {
+    val done = text.startsWith("✓")
     Text(
         text,
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.sp),
         color = Color.White,
         modifier = modifier
             .padding(6.dp)
-            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50))
+            .background(if (done) io.github.mkdevtests.umbra.ui.theme.Night.Glow else Brush.linearGradient(listOf(Color.Black.copy(alpha = 0.65f), Color.Black.copy(alpha = 0.65f))), RoundedCornerShape(50))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }

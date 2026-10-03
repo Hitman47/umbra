@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "umbra"
+rootProject.name = "nyxara"
 include(":app")

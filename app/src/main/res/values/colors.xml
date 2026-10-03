@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="umbra_black">#FF0B0B0F</color>
-    <color name="umbra_violet">#FF8B7CF6</color>
+    <!-- Nyx's night: see ui/theme/Theme.kt. -->
+    <color name="night_sky">#FF09080F</color>
+    <color name="night_violet">#FFA78BFA</color>
 </resources>

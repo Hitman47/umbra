@@ -19,48 +19,69 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) {
 
-    private val files = ConcurrentHashMap<String, String>()
+    /** A file served under a token: [key] names it in the stats ("Films\Dune.mkv", "nfs:Films\Dune.mkv"). */
+    private class Target(val key: String, val name: String, val pool: HandlePool)
 
-    /** What reading each NAS file cost, for the playback measures. */
+    private val files = ConcurrentHashMap<String, Target>()
+
+    /** One pool per file, shared by its tokens: a file played again reuses its handles. */
+    private val pools = ConcurrentHashMap<String, HandlePool>()
+
+    /** What reading each file cost, for the playback measures. */
     private val stats = ConcurrentHashMap<String, StreamStats>()
 
-    /** Reading figures of [path] since [resetStats]; null if it wasn't read. */
-    fun statsFor(path: String): StreamStats? = stats[path]
+    /** Reading figures of [key] since [resetStats]; null if it wasn't read. */
+    fun statsFor(key: String): StreamStats? = stats[key]
 
-    fun resetStats(path: String) {
-        stats.remove(path)
+    fun resetStats(key: String) {
+        stats.remove(key)
     }
 
-    /** Returns the URL mpv should open for the NAS file at [path]. */
+    /** Returns the URL mpv should open for the NAS file at [path], read through the configured sources (SMB). */
+    fun urlFor(path: String): String = urlFor(path, path.substringAfterLast('\\')) {
+        (nas() ?: throw java.io.IOException("Aucun NAS configuré")).open(path)
+    }
+
+    /** The URL of a file opened by [open] (another protocol), known in the stats as [key]. */
     @Synchronized
-    fun urlFor(path: String): String {
+    fun urlFor(key: String, name: String, open: () -> RemoteFile): String {
         if (!isAlive) start(SOCKET_READ_TIMEOUT, true)
         val token = UUID.randomUUID().toString().replace("-", "")
-        files[token] = path
+        files[token] = Target(key, name, pools.getOrPut(key) { HandlePool(open) })
         // The file name keeps its extension visible to mpv (format probing, window title).
-        return "http://$HOST:$listeningPort/$token/${Uri.encode(path.substringAfterLast('\\'))}"
+        return "http://$HOST:$listeningPort/$token/${Uri.encode(name)}"
+    }
+
+    /** Closes the handles kept open, when the player goes away. */
+    fun closeIdle() {
+        pools.values.forEach { it.closeAll() }
+        pools.clear()
     }
 
     override fun serve(session: IHTTPSession): Response {
         val token = session.uri.trimStart('/').substringBefore('/')
-        val path = files[token] ?: return text(Response.Status.NOT_FOUND, "Unknown file")
-        val router = nas() ?: return text(Response.Status.SERVICE_UNAVAILABLE, "No NAS configured")
+        val target = files[token] ?: return text(Response.Status.NOT_FOUND, "Unknown file")
 
-        val stat = stats.getOrPut(path) { StreamStats() }
+        val stat = stats.getOrPut(target.key) { StreamStats() }
         val opening = System.nanoTime()
-        val file = try {
-            router.open(path)
+        val (file, opened) = try {
+            target.pool.acquire()
         } catch (e: Exception) {
-            Log.w(TAG, "open $path failed", e)
+            Log.w(TAG, "open ${target.key} failed", e)
             return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
         }
-        stat.opened(System.nanoTime() - opening)
-        val size = file.size
+        if (opened) stat.opened(System.nanoTime() - opening) else stat.reused()
+        val size = try {
+            file.size
+        } catch (e: Exception) {
+            target.pool.discard(file)
+            return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
+        }
         stat.size = size
 
         val range = parseRange(session.headers["range"], size)
         if (range == null) {
-            file.close()
+            target.pool.release(file)
             return text(Response.Status.RANGE_NOT_SATISFIABLE, "Bad range").apply {
                 addHeader("Content-Range", "bytes */$size")
             }
@@ -69,10 +90,10 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
         val length = end - start + 1
         val partial = session.headers.containsKey("range")
 
-        val body = BufferedInputStream(SmbRangeStream(file, start, length, stat), READ_SIZE)
+        val body = BufferedInputStream(RangeStream(file, target.pool, start, length, stat), READ_SIZE)
         return newFixedLengthResponse(
             if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK,
-            mimeType(path),
+            mimeType(target.name),
             body,
             length,
         ).apply {
@@ -129,9 +150,17 @@ class StreamStats {
     private val bytes = AtomicLong()
     private val readNanos = AtomicLong()
 
+    private val openCount = AtomicLong()
+
     fun opened(nanos: Long) {
         requestCount.incrementAndGet()
+        openCount.incrementAndGet()
         openNanos.addAndGet(nanos)
+    }
+
+    /** A request served by a handle kept from an earlier one. */
+    fun reused() {
+        requestCount.incrementAndGet()
     }
 
     fun read(count: Int, nanos: Long) {
@@ -142,8 +171,11 @@ class StreamStats {
     /** Requests made by mpv: the first one, then one per seek or so. */
     val requests get() = requestCount.get().toInt()
 
-    /** Mean time to open the file on the NAS, per request. */
-    val openMs get() = if (requests > 0) openNanos.get() / requests / 1_000_000 else null
+    /** Times the file was opened on the NAS: the other requests reused a handle. */
+    val opens get() = openCount.get().toInt()
+
+    /** Mean time to open the file on the NAS. */
+    val openMs get() = if (opens > 0) openNanos.get() / opens / 1_000_000 else null
 
     /** What the NAS delivers while it is read, in Mbit/s (waits on mpv not counted). */
     val readMbps get() = readNanos.get().takeIf { it > 50_000_000 }?.let { bytes.get() * 8.0 / 1e6 / (it / 1e9) }
@@ -151,13 +183,16 @@ class StreamStats {
     val megabytes get() = bytes.get() / 1_000_000
 }
 
-/** Reads [length] bytes of an SMB file from [offset]; closing it closes the remote handle. */
-private class SmbRangeStream(
-    private val file: NasFile,
+/** Reads [length] bytes of a NAS file from [offset]; closing it gives the handle back to [pool]. */
+private class RangeStream(
+    private val file: RemoteFile,
+    private val pool: HandlePool,
     private var offset: Long,
     private var remaining: Long,
     private val stats: StreamStats,
 ) : InputStream() {
+    private var failed = false
+    private var closed = false
 
     override fun read(): Int {
         val one = ByteArray(1)
@@ -167,7 +202,12 @@ private class SmbRangeStream(
     override fun read(b: ByteArray, off: Int, len: Int): Int {
         if (remaining <= 0) return -1
         val started = System.nanoTime()
-        val count = file.read(b, offset, off, minOf(len.toLong(), remaining).toInt())
+        val count = try {
+            file.read(b, offset, off, minOf(len.toLong(), remaining).toInt())
+        } catch (e: Exception) {
+            failed = true
+            throw e
+        }
         if (count <= 0) return -1
         stats.read(count, System.nanoTime() - started)
         offset += count
@@ -175,5 +215,9 @@ private class SmbRangeStream(
         return count
     }
 
-    override fun close() = file.close()
+    override fun close() {
+        if (closed) return
+        closed = true
+        if (failed) pool.discard(file) else pool.release(file)
+    }
 }

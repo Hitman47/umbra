@@ -63,11 +63,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import io.github.mkdevtests.umbra.UmbraApp
+import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
 import io.github.mkdevtests.umbra.settings.Settings
 import io.github.mkdevtests.umbra.trakt.TraktEndpoint
-import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
+import io.github.mkdevtests.umbra.ui.theme.NyxaraTheme
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -76,8 +76,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import io.github.mkdevtests.umbra.bench.BENCH_SEEKS
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+
+/** How long a run of the protocol test waits for its first frame. */
+private const val BENCH_OPEN_TIMEOUT = 40_000L
 
 /** Full-screen player. Plays the queue in [EXTRA_QUEUE]: a film, or an episode and the ones after it. */
 class PlayerActivity : ComponentActivity() {
@@ -97,9 +102,10 @@ class PlayerActivity : ComponentActivity() {
 
         queue = intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }.orEmpty()
         if (queue.isEmpty()) return finish()
-        val settings = (application as UmbraApp).settings.settings.value
+        val settings = (application as NyxaraApp).settings.settings.value
         player = MpvPlayer(this, settings)
         start(queue[0])
+        if (queue[0].bench != null) runBench()
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
@@ -125,7 +131,7 @@ class PlayerActivity : ComponentActivity() {
         }
 
         setContent {
-            UmbraTheme {
+            NyxaraTheme {
                 PlayerScreen(
                     player = player,
                     item = queue[index],
@@ -154,31 +160,68 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun start(item: PlayItem) {
-        item.file?.let { (application as UmbraApp).streamServer.resetStats(it) }
+        item.file?.let { (application as NyxaraApp).streamServer.resetStats(it) }
         player.play(toMpvPath(item.url), item.subtitles, item.start)
     }
 
     /** The queue index already measured: one measure per file. */
     private var measured = -1
 
+    /**
+     * The protocol test: each run opens its file, seeks to the same places
+     * (a quarter, 60 %, a tenth of the duration), plays a few seconds and is
+     * measured; then the next run, and back to the app at the end.
+     */
+    private fun runBench() {
+        lifecycleScope.launch {
+            while (true) {
+                benchRun()
+                if (index + 1 >= queue.size) break
+                index++
+                start(queue[index])
+            }
+            finish()
+        }
+    }
+
+    private suspend fun benchRun() {
+        val opened = withTimeoutOrNull(BENCH_OPEN_TIMEOUT) { while (!player.isOpen && !player.openFailed) delay(100) }
+        if (opened == null || player.openFailed) {
+            recordMeasure(error = if (opened == null) "pas d'image après ${BENCH_OPEN_TIMEOUT / 1000} s" else "lecture impossible (adresse, compte ou droits)")
+            return
+        }
+        delay(3_000)
+        val duration = player.duration.value
+        for (fraction in BENCH_SEEKS) {
+            player.seekTo(duration * fraction)
+            withTimeoutOrNull(30_000) { while (player.isSeeking) delay(50) }
+            delay(2_500)
+        }
+        delay(4_000)
+        recordMeasure()
+    }
+
     /** Keeps what this file cost to open, seek and play, for Réglages › Mesures de lecture. */
-    private fun recordMeasure() {
+    private fun recordMeasure(error: String? = null) {
         if (measured == index) return
         val item = queue.getOrNull(index) ?: return
         val figures = player.figures()
-        if (figures.openMs == null) return // never played: nothing to measure
+        if (figures.openMs == null && error == null) return // never played: nothing to measure
         measured = index
-        val app = application as UmbraApp
-        val stats = item.file?.let { app.streamServer.statsFor(it) }
+        val app = application as NyxaraApp
+        val stats = (item.statsKey ?: item.file)?.let { app.streamServer.statsFor(it) }
         val source = item.file?.let { app.nas?.sourceOf(it) }
         app.measures.add(
             PlaybackMeasure(
                 at = System.currentTimeMillis(),
-                title = listOfNotNull(item.title, item.subtitle?.substringBefore(" · ")).joinToString(" "),
-                source = source?.label ?: "Appareil",
+                title = listOfNotNull(item.title, item.subtitle?.substringBefore(" · ")?.takeIf { item.bench == null }).joinToString(" "),
+                source = item.bench?.source ?: source?.label ?: "Appareil",
+                protocol = item.bench?.protocol ?: "SMB",
                 network = networkLabel(),
-                route = source?.host?.let(::routeOf) ?: "Local",
+                route = item.bench?.route ?: source?.host?.let(::routeOf) ?: "Local",
+                error = error,
                 openMs = figures.openMs,
+                loadedMs = figures.loadedMs,
                 seeksMs = figures.seeksMs,
                 stalls = figures.stalls,
                 stalledMs = figures.stalledMs,
@@ -186,6 +229,7 @@ class PlayerActivity : ComponentActivity() {
                 readMbps = stats?.readMbps,
                 nasOpenMs = stats?.openMs,
                 requests = stats?.requests ?: 0,
+                opens = stats?.opens ?: 0,
                 megabytes = stats?.megabytes ?: 0,
                 fileMbps = stats?.size?.takeIf { it > 0 && figures.duration > 0 }?.let { it * 8.0 / 1e6 / figures.duration },
                 video = figures.video,
@@ -217,7 +261,7 @@ class PlayerActivity : ComponentActivity() {
             val duration = player.duration.value
             if (duration <= 0) return
             val percent = (player.position.value / duration * 100).coerceIn(0.0, 100.0)
-            (application as UmbraApp).trakt.scrobble(endpoint, target, percent)
+            (application as NyxaraApp).trakt.scrobble(endpoint, target, percent)
         }
 
         fun start() {
@@ -254,13 +298,14 @@ class PlayerActivity : ComponentActivity() {
 
     private fun saveProgress() {
         val file = queue.getOrNull(index)?.file ?: return
-        (application as UmbraApp).history.save(file, player.position.value, player.duration.value)
+        (application as NyxaraApp).history.save(file, player.position.value, player.duration.value)
     }
 
     override fun onDestroy() {
         if (::player.isInitialized) {
             recordMeasure()
             player.release()
+            (application as NyxaraApp).streamServer.closeIdle()
         }
         super.onDestroy()
     }

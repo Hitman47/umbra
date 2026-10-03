@@ -4,9 +4,9 @@ import io.github.mkdevtests.umbra.history.Progress
 import io.github.mkdevtests.umbra.library.Library
 
 /**
- * The watch history the screens show: Umbra's own, completed by what Trakt
+ * The watch history the screens show: Nyxara's own, completed by what Trakt
  * says was watched or started elsewhere. For each file the latest wins.
- * Umbra's history itself is left untouched: Trakt only adds to the display.
+ * Nyxara's history itself is left untouched: Trakt only adds to the display.
  */
 fun withTrakt(library: Library, local: Map<String, Progress>, trakt: TraktData): Map<String, Progress> {
     if (trakt.watched.isEmpty() && trakt.playback.isEmpty()) return local

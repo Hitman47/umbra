@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
+import io.github.mkdevtests.umbra.bench.ProtocolBench
 import io.github.mkdevtests.umbra.library.LibraryRepository
 import io.github.mkdevtests.umbra.player.PlaybackLog
 import io.github.mkdevtests.umbra.nas.LocalStreamServer
@@ -28,7 +29,7 @@ import okio.Path.Companion.toOkioPath
 import kotlin.concurrent.thread
 
 /** Process-wide objects: the NAS sources, their connections, the stream server and the updater. */
-class UmbraApp : Application(), SingletonImageLoader.Factory {
+class NyxaraApp : Application(), SingletonImageLoader.Factory {
 
     val sources by lazy { SourceStore(this) }
 
@@ -50,6 +51,9 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     val updater by lazy { Updater(this, OkHttpClient()) }
 
+    /** The protocol test (Réglages › Lecture). */
+    val bench by lazy { ProtocolBench(this) }
+
     /** What the last playbacks cost to open, seek and play. */
     val measures by lazy { PlaybackLog(filesDir.resolve("playback-measures.json")) }
 
@@ -61,7 +65,7 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
     val matchFixes by lazy { MatchFixes(userData.matchFixes()) }
     val hidden by lazy { HiddenTitles(userData.hidden()) }
     val trakt by lazy {
-        Trakt(this, TraktApi(BuildConfig.TRAKT_CLIENT_ID, BuildConfig.TRAKT_CLIENT_SECRET, "Umbra/${BuildConfig.VERSION_NAME}", OkHttpClient()))
+        Trakt(this, TraktApi(BuildConfig.TRAKT_CLIENT_ID, BuildConfig.TRAKT_CLIENT_SECRET, "Nyxara/${BuildConfig.VERSION_NAME}", OkHttpClient()))
     }
 
     override fun onCreate() {

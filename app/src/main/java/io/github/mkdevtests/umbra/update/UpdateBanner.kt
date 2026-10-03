@@ -44,10 +44,10 @@ fun UpdateBanner(updater: Updater) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val text = when (val current = state) {
-                    is UpdateState.Downloading -> "Téléchargement d'Umbra ${release.version}… ${(current.progress * 100).toInt()} %"
-                    is UpdateState.Installing -> "Installation d'Umbra ${release.version}…"
+                    is UpdateState.Downloading -> "Téléchargement de Nyxara ${release.version}… ${(current.progress * 100).toInt()} %"
+                    is UpdateState.Installing -> "Installation de Nyxara ${release.version}…"
                     is UpdateState.Failed -> current.message
-                    else -> "Umbra ${release.version} est disponible"
+                    else -> "Nyxara ${release.version} est disponible"
                 }
                 Text(
                     text,
@@ -71,7 +71,7 @@ fun UpdateBanner(updater: Updater) {
     if (showNotes) {
         AlertDialog(
             onDismissRequest = { showNotes = false },
-            title = { Text("Umbra ${release.version}") },
+            title = { Text("Nyxara ${release.version}") },
             text = {
                 Text(release.notes, modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()))
             },

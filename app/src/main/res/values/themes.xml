@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Compose draws the UI; this theme only covers the window before the first frame. -->
-    <style name="Theme.Umbra" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/umbra_black</item>
+    <style name="Theme.Nyxara" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/night_sky</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>

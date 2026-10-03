@@ -18,7 +18,15 @@ data class PlayItem(
     val start: Double = 0.0,
     /** What it is on Trakt; null when it isn't matched surely enough to be scrobbled. */
     val trakt: TraktTarget? = null,
+    /** A run of the protocol test: played and measured on its own, then the next one. */
+    val bench: BenchStep? = null,
+    /** Name of the file in the stream server's stats when it isn't [file] ("nfs:Films\Dune.mkv"). */
+    val statsKey: String? = null,
 )
+
+/** What a run of the protocol test is, for its measure. */
+@Serializable
+data class BenchStep(val protocol: String, val source: String, val route: String)
 
 /** One audio or subtitle track of the playing file, as the side panel shows it. */
 data class PlayerTrack(
@@ -32,6 +40,8 @@ data class PlayerTrack(
 data class PlayerFigures(
     /** From the request to the first frame. */
     val openMs: Long?,
+    /** From the request to the file probed (tracks known): the rest of [openMs] is decoding and display. */
+    val loadedMs: Long?,
     val seeksMs: List<Long>,
     /** Waits for the network while playing, outside openings and seeks. */
     val stalls: Int,

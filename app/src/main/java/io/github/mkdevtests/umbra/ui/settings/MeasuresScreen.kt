@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.player.PlaybackLog
 import io.github.mkdevtests.umbra.player.summarize
+import io.github.mkdevtests.umbra.ui.theme.ScreenTitle
 
 /**
  * The playbacks measured: medians per NAS, network and protocol first, then
@@ -38,13 +39,11 @@ fun MeasuresScreen(log: PlaybackLog, onBack: () -> Unit) {
     val summaries = remember(measures) { summarize(measures) }
 
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-        Row(modifier = Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← Retour") }
-            Text("Mesures de lecture", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+        ScreenTitle("Mesures de lecture", onBack) {
             TextButton(onClick = {
                 val text = (listOf("Résumé :") + summaries.map { it.line() } + listOf("", "Lectures :") + measures.map { it.line() }).joinToString("\n")
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Mesures Umbra", text))
+                clipboard.setPrimaryClip(ClipData.newPlainText("Mesures Nyxara", text))
                 Toast.makeText(context, "Mesures copiées", Toast.LENGTH_SHORT).show()
             }, enabled = measures.isNotEmpty()) { Text("Copier") }
             TextButton(onClick = log::clear, enabled = measures.isNotEmpty()) { Text("Effacer") }

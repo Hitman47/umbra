@@ -4,7 +4,7 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import io.github.mkdevtests.umbra.UmbraApp
+import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.nas.NasEntry
 import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.SmbNas
@@ -49,7 +49,7 @@ sealed interface ShareDiscovery {
 
 class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val umbra = app as UmbraApp
+    private val nyxara = app as NyxaraApp
     private var loadJob: Job? = null
 
     /** Unfiltered listing of the current folder (subtitle files included). */
@@ -58,9 +58,9 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(BrowserState())
     val state: StateFlow<BrowserState> = _state.asStateFlow()
 
-    val hasSource get() = umbra.nas != null
-    val sources: List<SmbSource> get() = umbra.nas?.sources.orEmpty()
-    val sourceList: StateFlow<List<SmbSource>> = umbra.sourceList
+    val hasSource get() = nyxara.nas != null
+    val sources: List<SmbSource> get() = nyxara.nas?.sources.orEmpty()
+    val sourceList: StateFlow<List<SmbSource>> = nyxara.sourceList
 
     init {
         if (hasSource) open("")
@@ -68,7 +68,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     fun open(path: String) {
         loadJob?.cancel()
-        val nas = umbra.nas ?: return
+        val nas = nyxara.nas ?: return
         _state.value = BrowserState(path = path, crumbs = crumbs(nas, path), loading = true)
         listing = emptyList()
         loadJob = viewModelScope.launch {
@@ -94,7 +94,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
     fun up(): Boolean {
         val path = _state.value.path
         if (path.isEmpty()) return false
-        val nas = umbra.nas
+        val nas = nyxara.nas
         open(
             when {
                 '\\' in path -> path.substringBeforeLast('\\')
@@ -125,7 +125,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Intent playing [video] with the subtitle files sitting next to it. */
     fun playIntent(video: NasEntry): Intent {
-        val server = umbra.streamServer
+        val server = nyxara.streamServer
         val subtitles = subtitlesFor(video, listing).map { server.urlFor(it.path) }
         return PlayerActivity.intent(getApplication(), server.urlFor(video.path), video.name, subtitles, file = video.path)
     }
@@ -163,7 +163,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
-            umbra.saveSource(named, connection)
+            nyxara.saveSource(named, connection)
             open("")
             null
         } catch (e: Exception) {
@@ -174,21 +174,21 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Leaves out the folder at [path]: no longer scanned, browsed nor played. Shows its parent. */
     fun exclude(path: String) {
-        val source = umbra.nas?.sourceOf(path) ?: return
+        val source = nyxara.nas?.sourceOf(path) ?: return
         val updated = source.copy(excluded = (source.excluded + path).distinct())
-        umbra.saveSource(updated, SmbNas(updated))
+        nyxara.saveSource(updated, SmbNas(updated))
         open(path.substringBeforeLast('\\'))
     }
 
     /** Takes [folder] back into [source]. */
     fun include(source: SmbSource, folder: String) {
         val updated = source.copy(excluded = source.excluded - folder)
-        umbra.saveSource(updated, SmbNas(updated))
+        nyxara.saveSource(updated, SmbNas(updated))
         refresh()
     }
 
     fun remove(source: SmbSource) {
-        umbra.removeSource(source.id)
+        nyxara.removeSource(source.id)
         if (hasSource) open("") else _state.value = BrowserState()
     }
 }

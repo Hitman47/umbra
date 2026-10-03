@@ -43,7 +43,7 @@ class NasRouter(val connections: List<SmbNas>) : Closeable {
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */
-    fun open(path: String): NasFile {
+    fun open(path: String): RemoteFile {
         val root = path.substringBefore('\\')
         val (nas, share) = route(root)
         if (nas.source.isExcluded(path)) throw IOException("Dossier exclu de la bibliothèque")

@@ -4,18 +4,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Knows when Android gives the network back (battery saver blocks it in the background). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Settings › Trakt offers the system dialog that exempts Umbra from battery saver. -->
+    <!-- Settings › Trakt offers the system dialog that exempts Nyxara from battery saver. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Updates from the GitHub releases (Android asks the user once). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
-        android:name=".UmbraApp"
+        android:name=".NyxaraApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Umbra">
+        android:theme="@style/Theme.Nyxara">
 
         <activity
             android:name=".MainActivity"

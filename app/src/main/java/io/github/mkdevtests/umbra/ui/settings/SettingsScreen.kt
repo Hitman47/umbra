@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.ui.theme.ScreenTitle
 import io.github.mkdevtests.umbra.settings.AudioLanguage
 import io.github.mkdevtests.umbra.settings.Language
 import io.github.mkdevtests.umbra.settings.SettingsStore
@@ -64,6 +65,7 @@ fun SettingsScreen(
     onRemoveSource: (SmbSource) -> Unit,
     onIncludeFolder: (SmbSource, String) -> Unit,
     onOpenStats: () -> Unit,
+    onOpenBench: () -> Unit,
     onBack: () -> Unit,
 ) {
     val settings by store.settings.collectAsState()
@@ -74,10 +76,7 @@ fun SettingsScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-        Row(modifier = Modifier.padding(start = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← Retour") }
-            Text("Réglages", style = MaterialTheme.typography.headlineMedium)
-        }
+        ScreenTitle("Réglages", onBack)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -155,6 +154,9 @@ fun SettingsScreen(
                 Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
                     TextButton(onClick = onOpenStats) { Text("Voir ›") }
                 }
+                Item("Tester les protocoles", "Les mêmes vidéos lues en SMB, WebDAV et NFS, mesurées.") {
+                    TextButton(onClick = onOpenBench) { Text("Ouvrir ›") }
+                }
             }
 
             TraktSection(trakt)
@@ -171,7 +173,7 @@ fun SettingsScreen(
             UpdateBanner(updater)
 
             Text(
-                "Lecture seule : Umbra ne modifie ni ne supprime jamais de fichiers sur le NAS.",
+                "Lecture seule : Nyxara ne modifie ni ne supprime jamais de fichiers sur le NAS.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -188,12 +190,12 @@ private fun TraktSection(trakt: Trakt) {
         when {
             !status.configured -> Item("Clé Trakt absente", "Ajoute trakt.clientId dans local.properties puis recompile.")
             code != null -> {
-                Item("Code : ${code.userCode}", "Entre-le sur ${code.verificationUrl} (téléphone ou PC). Umbra attend la validation.") {
+                Item("Code : ${code.userCode}", "Entre-le sur ${code.verificationUrl} (téléphone ou PC). Nyxara attend la validation.") {
                     TextButton(onClick = { uri.openUri(code.verificationUrl) }) { Text("Ouvrir") }
                     TextButton(onClick = trakt::cancelConnect) { Text("Annuler") }
                 }
             }
-            !status.connected -> Item("Compte", "Non connecté. Umbra lit l'historique Trakt et y ajoute ce que tu regardes ; il n'efface jamais rien.") {
+            !status.connected -> Item("Compte", "Non connecté. Nyxara lit l'historique Trakt et y ajoute ce que tu regardes ; il n'efface jamais rien.") {
                 TextButton(onClick = trakt::connect) { Text("Connecter ›") }
             }
             else -> {
@@ -214,7 +216,7 @@ private fun TraktSection(trakt: Trakt) {
     }
 }
 
-/** Battery saver cuts Umbra's network in the background: offers the system dialog that exempts it. */
+/** Battery saver cuts Nyxara's network in the background: offers the system dialog that exempts it. */
 @SuppressLint("BatteryLife")
 @Composable
 private fun ColumnScope.BatteryItem() {
@@ -224,7 +226,7 @@ private fun ColumnScope.BatteryItem() {
     var exempted by remember { mutableStateOf(exempt()) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { exempted = exempt() }
     if (exempted) return
-    Item("Économie d'énergie", "Elle peut couper Trakt quand Umbra passe en arrière-plan (quitter un épisode avec Accueil). Autorise Umbra à rester connecté.") {
+    Item("Économie d'énergie", "Elle peut couper Trakt quand Nyxara passe en arrière-plan (quitter un épisode avec Accueil). Autorise Nyxara à rester connecté.") {
         TextButton(onClick = {
             val request = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
             runCatching { ask.launch(request) }.onFailure { ask.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
@@ -241,7 +243,7 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
         )
-        Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
             Column { content() }
         }
     }

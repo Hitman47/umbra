@@ -37,7 +37,7 @@ sealed interface UpdateState {
 
 /**
  * Updates the app from the GitHub releases of the (public) repository: no
- * token, no store. The APK is installed through [PackageInstaller]; once Umbra
+ * token, no store. The APK is installed through [PackageInstaller]; once Nyxara
  * has installed itself, Android lets it update without asking again.
  */
 class Updater(private val context: Context, private val http: OkHttpClient) {
@@ -64,7 +64,7 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
                 .onSuccess { release ->
                     if (release != null && isNewer(release.version, BuildConfig.VERSION_NAME)) {
                         _state.value = UpdateState.Available(release)
-                        _lastCheck.value = "Umbra ${release.version} disponible"
+                        _lastCheck.value = "Nyxara ${release.version} disponible"
                     } else {
                         _lastCheck.value = "À jour"
                     }
@@ -143,13 +143,13 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
             setAppPackageName(context.packageName)
             setSize(apkFile.length())
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // Silent once Umbra installed itself: Android only asks the first time.
+                // Silent once Nyxara installed itself: Android only asks the first time.
                 setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
             }
         }
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->
-            session.openWrite("umbra.apk", 0, apkFile.length()).use { output ->
+            session.openWrite("nyxara.apk", 0, apkFile.length()).use { output ->
                 apkFile.inputStream().use { it.copyTo(output) }
                 session.fsync(output)
             }

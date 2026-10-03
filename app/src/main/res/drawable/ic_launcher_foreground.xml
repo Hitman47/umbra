@@ -1,14 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder icon: an eclipse crescent (umbra). Safe zone = central 66dp. -->
+<!-- Nyxara: a crescent in the night's glow and three stars. Safe zone = central 66dp. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <path android:pathData="M47.93,34.21 A23,23 0 1 0 73.35,62.44 A19,19 0 0 1 47.93,34.21 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="38"
+                android:startY="36"
+                android:endX="70"
+                android:endY="80">
+                <item android:offset="0" android:color="#FFC4B1FF" />
+                <item android:offset="0.5" android:color="#FF8B5CF6" />
+                <item android:offset="1" android:color="#FFE36BF5" />
+            </gradient>
+        </aapt:attr>
+    </path>
     <path
-        android:fillColor="@color/umbra_violet"
-        android:pathData="M54,32a22,22 0,1 0,0.01 0z" />
-    <path
-        android:fillColor="@color/umbra_black"
-        android:pathData="M61,27a20,20 0,1 0,0.01 0z" />
+        android:fillColor="#FFF3EDFF"
+        android:pathData="M72,25 Q72,31 78,31 Q72,31 72,37 Q72,31 66,31 Q72,31 72,25 Z M80,43 Q80,46 83,46 Q80,46 80,49 Q80,46 77,46 Q80,46 80,43 Z M37,27.5 Q37,30 39.5,30 Q37,30 37,32.5 Q37,30 34.5,30 Q37,30 37,27.5 Z" />
 </vector>

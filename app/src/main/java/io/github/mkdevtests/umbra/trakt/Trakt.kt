@@ -80,8 +80,8 @@ fun episodeKey(showTmdbId: Int, season: Int, number: Int) = "e:$showTmdbId:$seas
 
 /**
  * The Trakt account: connection, download of what was watched, and scrobbles
- * of what Umbra plays. Disconnecting only forgets the account on the tablet;
- * Umbra never removes anything on Trakt (see [TraktEndpoint]).
+ * of what Nyxara plays. Disconnecting only forgets the account on the tablet;
+ * Nyxara never removes anything on Trakt (see [TraktEndpoint]).
  */
 class Trakt(private val context: Context, private val api: TraktApi) {
 
@@ -96,7 +96,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     private val scrobbles = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private val showIds = HashMap<Int, Int?>()
     private val episodeIds = HashMap<String, Int?>()
-    /** False while Android blocks Umbra's network: no network, or battery saver with Umbra in the background. */
+    /** False while Android blocks Nyxara's network: no network, or battery saver with Nyxara in the background. */
     private val online = MutableStateFlow(true)
 
     private val _status = MutableStateFlow(

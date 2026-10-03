@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
-import io.github.mkdevtests.umbra.UmbraApp
+import io.github.mkdevtests.umbra.NyxaraApp
 
 /** Receives the [PackageInstaller] outcome; shows Android's confirmation when it needs one. */
 class InstallReceiver : BroadcastReceiver() {
@@ -16,7 +16,7 @@ class InstallReceiver : BroadcastReceiver() {
             context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
-        val app = context.applicationContext as UmbraApp
+        val app = context.applicationContext as NyxaraApp
         app.updater.onInstallResult(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))
     }
 }

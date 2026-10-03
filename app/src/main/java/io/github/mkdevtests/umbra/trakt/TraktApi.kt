@@ -18,7 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 /**
- * Everything Umbra may ask Trakt, and nothing else. Umbra must never lose the
+ * Everything Nyxara may ask Trakt, and nothing else. Nyxara must never lose the
  * user's Trakt history: no endpoint here removes, resets or rewrites anything
  * (no history removal, no playback deletion, no revoke). The only writes are
  * the scrobbles of what is played, which add a play past 80 % and otherwise
@@ -160,7 +160,7 @@ class TraktApi(
                 when (endpoint.method) {
                     "GET" -> get()
                     "POST" -> post((body ?: "{}").toRequestBody(JSON))
-                    else -> error("Umbra never sends ${endpoint.method} to Trakt")
+                    else -> error("Nyxara never sends ${endpoint.method} to Trakt")
                 }
             }
             .build()

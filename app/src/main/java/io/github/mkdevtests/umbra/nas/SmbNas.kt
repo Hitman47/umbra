@@ -27,13 +27,13 @@ import java.util.concurrent.TimeUnit
 
 /**
  * A NAS file opened for reading. It wraps smbj's handle so that nothing in
- * the app can reach a write, rename or delete: Umbra never changes the NAS.
+ * the app can reach a write, rename or delete: Nyxara never changes the NAS.
  */
-class NasFile internal constructor(private val file: File) : Closeable {
-    val size: Long get() = file.fileInformation.standardInformation.endOfFile
+class NasFile internal constructor(private val file: File) : RemoteFile {
+    /** Asked once: each query is a round trip to the NAS. */
+    override val size: Long by lazy { file.fileInformation.standardInformation.endOfFile }
 
-    /** Reads up to [length] bytes at [fileOffset] into [buffer] from [bufferOffset]; -1 or 0 at the end. */
-    fun read(buffer: ByteArray, fileOffset: Long, bufferOffset: Int, length: Int): Int =
+    override fun read(buffer: ByteArray, fileOffset: Long, bufferOffset: Int, length: Int): Int =
         file.read(buffer, fileOffset, bufferOffset, length)
 
     override fun close() = file.close()

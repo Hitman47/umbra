@@ -5,8 +5,8 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Umbra must never make the user lose their Trakt history. These checks fail
- * the build if Umbra gains a way to remove, reset or rewrite anything there.
+ * Nyxara must never make the user lose their Trakt history. These checks fail
+ * the build if Nyxara gains a way to remove, reset or rewrite anything there.
  */
 class TraktSafetyTest {
 

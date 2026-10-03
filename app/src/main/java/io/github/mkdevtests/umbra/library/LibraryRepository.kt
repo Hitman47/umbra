@@ -2,7 +2,7 @@ package io.github.mkdevtests.umbra.library
 
 import android.util.Log
 import io.github.mkdevtests.umbra.BuildConfig
-import io.github.mkdevtests.umbra.UmbraApp
+import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.history.MatchFix
 import io.github.mkdevtests.umbra.nas.NasRouter
@@ -24,7 +24,7 @@ import java.io.File
 data class ScanState(val running: Boolean = false, val progress: String? = null, val error: String? = null)
 
 /** Holds the library in memory, persists it to the database and runs scans. */
-class LibraryRepository(private val app: UmbraApp) {
+class LibraryRepository(private val app: NyxaraApp) {
 
     private val dao by lazy { LibraryDatabase.open(app).dao() }
     /** Where earlier versions kept the library: imported once, so its TMDB matches aren't looked up again. */

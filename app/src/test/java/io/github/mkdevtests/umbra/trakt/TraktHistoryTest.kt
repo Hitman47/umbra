@@ -20,7 +20,7 @@ class TraktHistoryTest {
     private val library = Library(movies = listOf(dune, unknown), shows = listOf(show))
 
     @Test
-    fun nothingFromTraktKeepsUmbrasHistory() {
+    fun nothingFromTraktKeepsNyxarasHistory() {
         val local = mapOf(dune.file to Progress(dune.file, 10.0, 100.0, 5))
         assertSame(local, withTrakt(library, local, TraktData()))
     }
@@ -47,7 +47,7 @@ class TraktHistoryTest {
         val older = withTrakt(library, mapOf(dune.file to mine), TraktData(watched = mapOf(movieKey(1) to 1000L)))
         assertEquals(mine, older[dune.file])
         val newer = withTrakt(library, mapOf(dune.file to mine), TraktData(playback = mapOf(movieKey(1) to TraktResume(80.0, 9000L))))
-        // Umbra's own duration is the reference for the resume point.
+        // Nyxara's own duration is the reference for the resume point.
         assertEquals(7200.0, newer.getValue(dune.file).position, 0.1)
     }
 }

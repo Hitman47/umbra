@@ -33,24 +33,25 @@ import io.github.mkdevtests.umbra.ui.library.LibraryViewModel
 import io.github.mkdevtests.umbra.ui.library.MatchScreen
 import io.github.mkdevtests.umbra.ui.library.MovieDetailScreen
 import io.github.mkdevtests.umbra.ui.library.ShowDetailScreen
+import io.github.mkdevtests.umbra.ui.settings.BenchScreen
 import io.github.mkdevtests.umbra.ui.settings.MeasuresScreen
 import io.github.mkdevtests.umbra.ui.settings.SettingsScreen
-import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
+import io.github.mkdevtests.umbra.ui.theme.NyxaraTheme
 
 class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Back from the player or from another app: catch up with Trakt (one small request when nothing changed).
-        (application as UmbraApp).trakt.sync()
+        (application as NyxaraApp).trakt.sync()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            UmbraTheme {
+            NyxaraTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    UmbraRoot()
+                    NyxaraRoot()
                 }
             }
         }
@@ -64,16 +65,17 @@ private sealed interface Detail {
     data class FixMatch(val key: String) : Detail
     data object Settings : Detail
     data object Measures : Detail
+    data object Bench : Detail
 }
 
 /** NAS setup until a source works, then the library. */
 @Composable
-private fun UmbraRoot(
+private fun NyxaraRoot(
     browserViewModel: BrowserViewModel = viewModel(),
     libraryViewModel: LibraryViewModel = viewModel(),
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as UmbraApp
+    val app = context.applicationContext as NyxaraApp
     // The source being set up: its id, "" for a new one, null for none.
     var editingSource by rememberSaveable { mutableStateOf(if (browserViewModel.hasSource) null else "") }
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
@@ -154,9 +156,11 @@ private fun UmbraRoot(
                     libraryViewModel.onSourcesChanged()
                 },
                 onOpenStats = { stack.add(Detail.Measures) },
+                onOpenBench = { stack.add(Detail.Bench) },
                 onBack = back,
             )
             Detail.Measures -> MeasuresScreen(app.measures, back)
+            Detail.Bench -> BenchScreen(app.bench, library, onOpenMeasures = { stack.add(Detail.Measures) }, onBack = back)
         }
     }
 }
