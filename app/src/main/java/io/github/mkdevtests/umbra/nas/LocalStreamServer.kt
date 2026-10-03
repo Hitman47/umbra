@@ -299,8 +299,11 @@ class StreamStats {
  */
 data class ReadPlan(val block: Int, val parallel: Int) {
     companion object {
-        /** At home a round trip costs a millisecond: one read at a time, as measured fine. */
-        val LOCAL = ReadPlan(block = 1 shl 20, parallel = 1)
+        /**
+         * At home too, reads in flight pay: one at a time read 270 Mbit/s from a
+         * SMB 3.1.1 NAS on a PC, four of 2 MiB 646 (scripts/smb-bench).
+         */
+        val LOCAL = ReadPlan(block = 2 shl 20, parallel = 4)
         val REMOTE = ReadPlan(block = 2 shl 20, parallel = 4)
     }
 }

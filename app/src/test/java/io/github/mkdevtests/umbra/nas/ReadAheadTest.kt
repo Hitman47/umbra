@@ -20,6 +20,9 @@ class ReadAheadTest {
         override fun close() {}
     }
 
+    /** One read at a time: the handle reuse checked here; ParallelReadTest covers several. */
+    private val SERIAL = ReadPlan(block = 1 shl 20, parallel = 1)
+
     private fun get(url: String, from: Long, to: Long): ByteArray {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.setRequestProperty("Range", "bytes=$from-$to")
@@ -30,6 +33,7 @@ class ReadAheadTest {
     fun servesRangesAheadAndReusesTheHandle() {
         val opened = AtomicInteger()
         val server = LocalStreamServer { null }
+        server.forcedPlan = SERIAL
         val url = server.urlFor("key", "a.mkv") { opened.incrementAndGet(); FakeFile(5_000_000) }
         try {
             val body = get(url, 1_000_000, 3_999_999)
@@ -47,6 +51,7 @@ class ReadAheadTest {
     fun aSeekCutsTheReadingAndFreesTheHandle() {
         val opened = AtomicInteger()
         val server = LocalStreamServer { null }
+        server.forcedPlan = SERIAL
         val url = server.urlFor("cut", "b.mkv") { opened.incrementAndGet(); FakeFile(200_000_000) }
         try {
             // The player reads a little of a long range, then seeks: the connection is dropped.
