@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.browse.BrowserScreen
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
 
-enum class HomeTab(val label: String) { Movies("Films"), Shows("Séries"), Folders("Dossiers") }
+enum class HomeTab(val label: String) { Movies("Films"), Shows("Séries"), Folders("Partages") }
 
 @Composable
 fun HomeScreen(
@@ -84,7 +84,7 @@ fun HomeScreen(
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucune série trouvée.",
                 onClick = onOpenShow,
             )
-            HomeTab.Folders -> BrowserScreen(browserViewModel)
+            HomeTab.Folders -> BrowserScreen(browserViewModel, library, onOpenMovie, onOpenShow)
         }
     }
 }

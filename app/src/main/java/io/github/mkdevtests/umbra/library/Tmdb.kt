@@ -19,6 +19,9 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** HTTP requests sent so far, for the scan report. */
+    val requests = java.util.concurrent.atomic.AtomicInteger()
+
     /**
      * Best TMDB film for the first of [queries] that matches well, else the
      * best candidate overall. Results are ranked by title equality and year,
@@ -86,6 +89,7 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
             .build()
 
         repeat(3) { attempt ->
+            requests.incrementAndGet()
             http.newCall(request).execute().use { response ->
                 if (response.code == 429) {
                     delay(1_000L * (attempt + 1)) // rate limited: back off and retry
@@ -178,6 +182,7 @@ data class TmdbShow(
     @SerialName("backdrop_path") val backdropPath: String? = null,
     val genres: List<TmdbGenre> = emptyList(),
     @SerialName("vote_average") val voteAverage: Double? = null,
+    val status: String? = null,
     val seasons: List<TmdbSeasonSummary> = emptyList(),
 )
 
@@ -186,6 +191,7 @@ data class TmdbSeasonSummary(
     @SerialName("season_number") val number: Int,
     val name: String? = null,
     @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("episode_count") val episodeCount: Int = 0,
 )
 
 @Serializable

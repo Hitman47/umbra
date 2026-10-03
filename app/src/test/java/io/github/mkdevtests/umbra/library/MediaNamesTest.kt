@@ -71,4 +71,18 @@ class MediaNamesTest {
         assertEquals(0, parseSeasonFolder("Spéciaux"))
         assertNull(parseSeasonFolder("Drame"))
     }
+
+    @Test
+    fun episodeNumbersInSeasonFolders() {
+        fun number(file: String) = parseEpisodeNumber(file)?.let { it.season to it.episode }
+        assertEquals(null to 19, number("Claymore.E19.MULTi.1080p.BluRay.x264-SHiNiGAMi.mkv"))
+        assertEquals(null to 3, number("Kakkou.no.Iinazuke.E03.MULTi.1080p.WEB.x264-AMB3R.mkv"))
+        assertEquals(null to 54, number("Shingeki No Kyojin 54 ''Héroïque'' Multi 1080P Bluray - Monkey D.Lulu.mkv"))
+        assertEquals(1 to 6, number("S0106_HD[LQ][Anime-Ultime].mp4"))
+        assertEquals(1 to 7, number("Joker Game S01 - 07 VOSTFR [1080p][X265][10BITS][SR-71].mkv"))
+        assertEquals(null to 3, number("Saihate no Paladin - 03 MULTI [BD 1080p x265].mkv"))
+        assertEquals(null to 2, number("[Elecman] Blue Submarine NO.6 E02 [BDRIP][720p x264 Multi].mkv"))
+        assertNull(number("El Camino A Breaking Bad Movie (2019) MULTi VFi 1080p BluRay EAC3 5.1 x265-k7.mkv"))
+        assertNull(number("SPÉCIAL VIDÉOS RUSSES.mp4"))
+    }
 }

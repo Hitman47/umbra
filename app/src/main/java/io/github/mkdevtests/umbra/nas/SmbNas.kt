@@ -26,28 +26,25 @@ import java.util.EnumSet
 import java.util.concurrent.TimeUnit
 
 /** A file or folder on the NAS. [path] starts with the share name and uses "\" ("Films\Dune (2021)"). */
-data class NasEntry(val name: String, val path: String, val isDirectory: Boolean, val size: Long)
+data class NasEntry(val name: String, val path: String, val isDirectory: Boolean, val size: Long, val modified: Long = 0)
 
 /**
- * One authenticated SMB session to the NAS, with the configured shares
- * mounted on demand. The path root ("") lists the shares themselves.
- * Reconnects when the NAS dropped the session (sleep, Wi-Fi change,
- * Tailscale reconnect).
+ * Authenticated SMB access to the NAS, with the configured shares mounted on
+ * demand. The path root ("") lists the shares themselves. Reconnects when the
+ * NAS dropped the connection (sleep, Wi-Fi change, Tailscale reconnect).
+ *
+ * Each share gets its own connection: over a single one, the ZimaOS server
+ * answers a folder of one share with the same-named folder of another
+ * ("Films\Drame" listed "Séries\Drame"), which merged shares in the library.
  *
  * Blocking API: call from a background thread.
  */
 class SmbNas(val source: SmbSource) : Closeable {
 
-    private val client = SMBClient(
-        SmbConfig.builder()
-            // Android's crypto lacks MD4, which NTLM needs: use smbj's BouncyCastle provider.
-            .withSecurityProvider(BCSecurityProvider())
-            .withTimeout(15, TimeUnit.SECONDS)
-            .withSoTimeout(30, TimeUnit.SECONDS)
-            .build(),
-    )
-    private var session: Session? = null
-    private val shares = HashMap<String, DiskShare>()
+    /** One share over its own TCP connection and session. */
+    private class ShareLink(val client: SMBClient, val share: DiskShare)
+
+    private val links = HashMap<String, ShareLink>()
 
     fun list(path: String): List<NasEntry> {
         if (path.isEmpty()) return source.shares.map { NasEntry(it, it, isDirectory = true, size = 0) }
@@ -62,6 +59,7 @@ class SmbNas(val source: SmbSource) : Closeable {
                         path = "$path\\${it.fileName}",
                         isDirectory = it.fileAttributes and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value != 0L,
                         size = it.endOfFile,
+                        modified = it.lastWriteTime.toEpochMillis(),
                     )
                 }
         }
@@ -72,8 +70,8 @@ class SmbNas(val source: SmbSource) : Closeable {
      * would list them. Throws on connection or login errors; returns null when
      * the NAS refuses to enumerate its shares (the user then types them).
      */
-    fun availableShares(): List<String>? {
-        val session = synchronized(this) { session?.takeIf { it.connection.isConnected } ?: openSession() }
+    fun availableShares(): List<String>? = newClient().use { client ->
+        val session = login(client)
         val shares = try {
             ServerService(SMBTransportFactories.SRVSVC.getTransport(session)).shares1
         } catch (e: Exception) {
@@ -84,7 +82,7 @@ class SmbNas(val source: SmbSource) : Closeable {
             Log.w(TAG, "share enumeration unavailable", e)
             return null
         }
-        return shares
+        shares
             // Disk shares only (not printers or IPC$), without hidden admin shares ("C$").
             .filter { it.type and 0xFFFF == 0 && !it.netName.endsWith('$') }
             .map { it.netName }
@@ -106,24 +104,25 @@ class SmbNas(val source: SmbSource) : Closeable {
         }
     }
 
+    @Synchronized
     override fun close() {
-        invalidate()
-        client.close()
+        links.values.forEach { runCatching { it.client.close() } }
+        links.clear()
     }
 
     private fun split(path: String) = path.substringBefore('\\') to path.substringAfter('\\', "")
 
-    /** Runs [block] on the live share; if a cached session turns out dead, reconnects once. */
+    /** Runs [block] on the live share; if its cached connection turns out dead, reconnects once. */
     private fun <T> withShare(name: String, block: (DiskShare) -> T): T {
-        val cached = synchronized(this) { shares[name]?.takeIf { it.isConnected } }
+        val cached = synchronized(this) { links[name]?.share?.takeIf { it.isConnected } }
         if (cached != null) {
             try {
                 return block(cached)
             } catch (e: TransportException) {
-                invalidate()
+                invalidate(name)
             } catch (e: SMBRuntimeException) {
                 if (e is SMBApiException) throw e // a real answer from the NAS, e.g. file not found
-                invalidate()
+                invalidate(name)
             }
         }
         return block(connect(name))
@@ -131,15 +130,31 @@ class SmbNas(val source: SmbSource) : Closeable {
 
     @Synchronized
     private fun connect(name: String): DiskShare {
-        shares[name]?.takeIf { it.isConnected }?.let { return it }
-        val session = session?.takeIf { it.connection.isConnected } ?: openSession()
-        val share = session.connectShare(name) as? DiskShare
-            ?: throw IOException("« $name » n'est pas un partage de fichiers")
-        shares[name] = share
-        return share
+        links[name]?.share?.takeIf { it.isConnected }?.let { return it }
+        invalidate(name)
+        val client = newClient()
+        try {
+            val share = login(client).connectShare(name) as? DiskShare
+                ?: throw IOException("« $name » n'est pas un partage de fichiers")
+            links[name] = ShareLink(client, share)
+            return share
+        } catch (e: Throwable) {
+            runCatching { client.close() }
+            throw e
+        }
     }
 
-    private fun openSession(): Session {
+    /** SMBClient shares one connection per host: a client per share keeps the shares apart. */
+    private fun newClient() = SMBClient(
+        SmbConfig.builder()
+            // Android's crypto lacks MD4, which NTLM needs: use smbj's BouncyCastle provider.
+            .withSecurityProvider(BCSecurityProvider())
+            .withTimeout(15, TimeUnit.SECONDS)
+            .withSoTimeout(30, TimeUnit.SECONDS)
+            .build(),
+    )
+
+    private fun login(client: SMBClient): Session {
         val host = source.host.substringBefore(':').trim()
         val port = source.host.substringAfter(':', "").toIntOrNull() ?: SMBClient.DEFAULT_PORT
         val auth = if (source.username.isBlank()) {
@@ -147,14 +162,12 @@ class SmbNas(val source: SmbSource) : Closeable {
         } else {
             AuthenticationContext(source.username.trim(), source.password.toCharArray(), source.domain.ifBlank { null })
         }
-        return client.connect(host, port).authenticate(auth).also { session = it }
+        return client.connect(host, port).authenticate(auth)
     }
 
     @Synchronized
-    private fun invalidate() {
-        runCatching { session?.connection?.close(true) }
-        session = null
-        shares.clear()
+    private fun invalidate(name: String) {
+        links.remove(name)?.let { runCatching { it.client.close() } }
     }
 
     private companion object {

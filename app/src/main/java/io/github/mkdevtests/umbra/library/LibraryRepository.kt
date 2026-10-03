@@ -3,6 +3,7 @@ package io.github.mkdevtests.umbra.library
 import android.util.Log
 import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.UmbraApp
+import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.toUserMessage
 import kotlinx.coroutines.CoroutineScope
@@ -19,11 +20,12 @@ import java.io.File
 
 data class ScanState(val running: Boolean = false, val progress: String? = null, val error: String? = null)
 
-/** Holds the library in memory, persists it to library.json and runs scans. */
+/** Holds the library in memory, persists it to the database and runs scans. */
 class LibraryRepository(private val app: UmbraApp) {
 
-    private val file = File(app.filesDir, "library.json")
-    private val json = Json { ignoreUnknownKeys = true }
+    private val dao by lazy { LibraryDatabase.open(app).dao() }
+    /** Where earlier versions kept the library: imported once, so its TMDB matches aren't looked up again. */
+    private val legacyFile = File(app.filesDir, "library.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val tmdb by lazy { Tmdb(BuildConfig.TMDB_TOKEN, OkHttpClient()) }
     private var scanJob: Job? = null
@@ -35,10 +37,18 @@ class LibraryRepository(private val app: UmbraApp) {
     val scan: StateFlow<ScanState> = _scan.asStateFlow()
 
     private val loadJob = scope.launch {
-        if (!file.exists()) return@launch
-        runCatching { json.decodeFromString(Library.serializer(), file.readText()) }
-            .onSuccess { if (it.version == Library.VERSION) _library.value = it }
-            .onFailure { Log.w(TAG, "library.json unreadable, rescanning", it) }
+        val stored = runCatching { dao.load() ?: importLegacyFile() }
+            .onFailure { Log.w(TAG, "library unreadable, rescanning", it) }
+            .getOrNull() ?: return@launch
+        // An older format is shown until the rescan it triggers; its TMDB matches are reused.
+        _library.value = if (stored.version == Library.VERSION) stored.sorted() else stored.copy(scannedAt = 0)
+    }
+
+    /** Titles matching what the user typed: films, shows and episodes. */
+    suspend fun search(text: String, limit: Int = 200): List<SearchHit> {
+        loadJob.join()
+        val query = ftsQuery(text) ?: return emptyList()
+        return dao.search(query, limit)
     }
 
     /** Scans unless a scan of the current share already exists. */
@@ -62,9 +72,12 @@ class LibraryRepository(private val app: UmbraApp) {
                 val previous = _library.value.takeIf { it.source == key }
                     ?: Library().also { _library.value = it } // another share: don't show its titles
                 val scanner = LibraryScanner(smb, tmdb) { _scan.value = ScanState(running = true, progress = it) }
+                val started = System.currentTimeMillis()
+                val requests = tmdb.requests.get()
                 val result = scanner.scan(previous, key)
                 _library.value = result
                 save(result)
+                Log.i(TAG, "scan done in ${(System.currentTimeMillis() - started) / 1000} s, ${tmdb.requests.get() - requests} TMDB requests")
                 _scan.value = ScanState()
             } catch (e: Exception) {
                 Log.w(TAG, "scan failed", e)
@@ -73,11 +86,22 @@ class LibraryRepository(private val app: UmbraApp) {
         }
     }
 
-    private fun save(library: Library) {
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(Library.serializer(), library))
-        tmp.renameTo(file)
+    private suspend fun save(library: Library) = dao.replace(library)
+
+    private suspend fun importLegacyFile(): Library? {
+        if (!legacyFile.exists()) return null
+        val library = Json { ignoreUnknownKeys = true }.decodeFromString(Library.serializer(), legacyFile.readText())
+        dao.replace(library)
+        legacyFile.delete() // the app's own cache, now in the database
+        Log.i(TAG, "imported library.json: ${library.movies.size} films, ${library.shows.size} shows")
+        return library
     }
+
+    /** The database returns rows in any order: back to title order. */
+    private fun Library.sorted() = copy(
+        movies = movies.sortedWith { a, b -> naturalCompare(a.title, b.title) },
+        shows = shows.sortedWith { a, b -> naturalCompare(a.title, b.title) },
+    )
 
     companion object {
         private const val TAG = "LibraryRepository"

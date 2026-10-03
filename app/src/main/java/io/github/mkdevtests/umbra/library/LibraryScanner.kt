@@ -35,6 +35,8 @@ private val COLLECTION_NUMBER = Regex("""^\d{1,2}\s*[-.]?\s+""")
 /** "Jumanji 1": the first film is rarely numbered on TMDB. */
 private val FIRST_PART = Regex("""\s+1$""")
 
+private val EXTRA_FILE = Regex("""(?i)sample|trailer|(?<![a-z])bonus(?![a-z])""")
+
 /** Deep enough for "Share\Séries\Drame\Show\Saison 1", shallow enough to stop on loops. */
 private const val MAX_DEPTH = 8
 
@@ -49,25 +51,53 @@ class LibraryScanner(
     private val tmdb: Tmdb,
     private val onProgress: (String) -> Unit,
 ) {
-    /** Parallel workers: NAS listings and TMDB calls overlap their latency. */
+    /** Parallel TMDB calls: their latency overlaps without hitting the rate limit. */
     private val workers = Semaphore(6)
+
+    /** Parallel NAS listings: each waits on a round trip, the NAS serves many at once. */
+    private val listings = Semaphore(16)
 
     /** A video found on the NAS; [folders] are the folder names between the share and the file. */
     private class VideoFile(val entry: NasEntry, val folders: List<String>, val subtitles: List<String>)
 
-    private class EpisodeFile(val video: VideoFile, val show: ParsedName, val season: Int, val episode: Int)
+    /**
+     * An episode found on the NAS. [group] gathers the files of one show before
+     * the TMDB lookup: its folder ("folder:Animes\Claymore") or its title.
+     * [folder] is the show's own folder, if the file sits in one.
+     */
+    private data class EpisodeFile(
+        val video: VideoFile,
+        val show: ParsedName,
+        val group: String,
+        val season: Int,
+        /** Null for an unnumbered special, named by [title] instead. */
+        val episode: Int?,
+        /** False when [season] is a default: [episode] may then count from the show's first episode. */
+        val seasonKnown: Boolean = true,
+        val folder: String? = null,
+        val title: String? = null,
+    )
 
     suspend fun scan(previous: Library, source: String): Library {
         val videos = walk()
         if (videos.isEmpty()) throw IOException("Aucune vidéo trouvée dans les partages choisis.")
 
-        val episodes = mutableListOf<EpisodeFile>()
+        val found = mutableListOf<EpisodeFile>()
         val movieFiles = mutableListOf<VideoFile>()
-        videos.forEach { video -> episodeOf(video)?.let(episodes::add) ?: movieFiles.add(video) }
+        videos.forEach { video -> episodeOf(video)?.let(found::add) ?: movieFiles.add(video) }
+        // A folder with nothing but unnumbered specials holds films: "Akira\Specials\Akira.mkv".
+        val (filmsOnly, showGroups) = found.groupBy { it.group }.values.partition { group -> group.all { it.episode == null } }
+        filmsOnly.flatten().mapTo(movieFiles) { it.video }
+        val episodes = showGroups.flatten()
         Log.i(TAG, "${videos.size} videos: ${movieFiles.size} films, ${episodes.size} episodes")
 
-        val movies = scanMovies(movieFiles, previous.movies.associateBy(Movie::file))
-        val shows = scanShows(episodes, previous.shows)
+        val counts = videoCounts(videos)
+        // Every file the last scan saw, smaller copies included.
+        val knownFiles = previous.movies.flatMap { movie ->
+            listOf(movie.file to movie) + movie.copies.map { it.file to movie.copy(file = it.file, fileSize = it.size, modified = it.modified) }
+        }.toMap()
+        val movies = scanMovies(movieFiles, knownFiles, counts)
+        val shows = scanShows(episodes, previous.shows, counts)
         return Library(
             version = Library.VERSION,
             source = source,
@@ -85,7 +115,7 @@ class LibraryScanner(
 
         fun visit(path: String, names: List<String>) {
             launch(Dispatchers.IO) {
-                val entries = workers.withPermit {
+                val entries = listings.withPermit {
                     try {
                         list(path)
                     } catch (e: CancellationException) {
@@ -109,20 +139,67 @@ class LibraryScanner(
         found
     }.toList()
 
+    /** Number of videos under each folder, at any depth ("Films\Drame" → 212). Share roots are left out. */
+    private fun videoCounts(videos: List<VideoFile>): Map<String, Int> {
+        val counts = HashMap<String, Int>()
+        videos.forEach { video ->
+            var folder = video.entry.path.substringBeforeLast('\\', "")
+            while ('\\' in folder) {
+                counts.merge(folder, 1, Int::plus)
+                folder = folder.substringBeforeLast('\\')
+            }
+        }
+        return counts
+    }
+
     /** The episode a video is, or null for a film. */
     private fun episodeOf(video: VideoFile): EpisodeFile? {
         val folderSeason = video.folders.lastOrNull()?.let(::parseSeasonFolder)
+        if (folderSeason != null) seasonFolderEpisode(video, folderSeason)?.let { return it }
         val name = parseEpisodeName(video.entry.name, inSeasonFolder = folderSeason != null) ?: return null
         // The title in the file name wins: the folder may be a genre ("Séries\Drame\Show.S01E01.mkv").
-        val show = name.show
-            ?: video.folders.lastOrNull { parseSeasonFolder(it) == null }?.let(::parseMediaName)
-            ?: return null
-        return EpisodeFile(video, show, name.season ?: folderSeason ?: 1, name.episode)
+        val parent = video.folders.lastOrNull { parseSeasonFolder(it) == null }
+        val show = name.show ?: parent?.let(::parseMediaName) ?: return null
+        // The parent is the show's own folder when it bears its name ("Animes\Claymore\Claymore - 05.mkv").
+        val folder = video.entry.path.substringBeforeLast('\\')
+            .takeIf { folderSeason == null && parent != null && normalizeTitle(parseMediaName(parent).title) == normalizeTitle(show.title) }
+        return EpisodeFile(
+            video, show, "title:${normalizeTitle(show.title)}",
+            season = name.season ?: folderSeason ?: 1,
+            episode = name.episode,
+            seasonKnown = name.season != null || folderSeason != null,
+            folder = folder,
+        )
     }
+
+    /**
+     * Infuse's rule: a video in "Show\Saison 2" is an episode of Show, whatever
+     * its name, as long as a number can be read from it ("Claymore.E19",
+     * "Shingeki No Kyojin 54", "S0106_HD"). Unnumbered videos in "Spéciaux"
+     * are specials, unless named like a film ("Specials\El Camino (2019)").
+     */
+    private fun seasonFolderEpisode(video: VideoFile, folderSeason: Int): EpisodeFile? {
+        val fileName = video.entry.name
+        if (hasMediaId(fileName)) return null // "Specials\El Camino {tmdb-559969}" is a film
+        val folders = video.folders
+        val showIndex = folders.indexOfLast { parseSeasonFolder(it) == null && !isSeasonsContainer(it) }
+        if (showIndex < 0) return null
+        val show = parseMediaName(folders[showIndex]).takeIf { it.title.isNotBlank() } ?: return null
+        val folder = (listOf(video.entry.path.substringBefore('\\')) + folders.take(showIndex + 1)).joinToString("\\")
+        val group = "folder:$folder"
+
+        val number = parseEpisodeName(fileName, inSeasonFolder = true) ?: parseEpisodeNumber(fileName)
+        if (number != null) return EpisodeFile(video, show, group, number.season ?: folderSeason, number.episode, folder = folder)
+        if (folderSeason != 0 || isTitleWithYear(fileName)) return null
+        return EpisodeFile(video, show, group, 0, episode = null, folder = folder, title = parseMediaName(fileName).title)
+    }
+
+    /** "Show\Saisons\Saison 1": a folder grouping the seasons is not the show. */
+    private fun isSeasonsContainer(name: String) = name.withoutAccents().lowercase().trim() in setOf("saisons", "seasons")
 
     // --- Films ---
 
-    private suspend fun scanMovies(files: List<VideoFile>, known: Map<String, Movie>): List<Movie> {
+    private suspend fun scanMovies(files: List<VideoFile>, known: Map<String, Movie>, counts: Map<String, Int>): List<Movie> {
         val names = files.associateWith(::movieName)
         // One lookup per title, even when the same film is there twice.
         val groups = files.groupBy { file ->
@@ -131,6 +208,8 @@ class LibraryScanner(
         val movies = forEachParallel(groups, "Films") { group ->
             val name = names.getValue(group.first())
             val template = group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> movie.tmdbId != null } }
+                // Unchanged since TMDB found nothing for it: don't ask again.
+                ?: group.firstNotNullOfOrNull { known[it.entry.path]?.takeIf { movie -> unchanged(movie.fileSize, movie.modified, it.entry) } }
                 ?: lookup("film ${group.first().entry.name}") {
                     val id = name.tmdbId
                         ?: name.imdbId?.let { tmdb.movieForImdb(it) }
@@ -138,12 +217,28 @@ class LibraryScanner(
                     id?.let { tmdb.movie(it).toMovie(name) }
                 }
                 ?: Movie(file = "", fileSize = 0, title = name.title, year = name.year)
-            group.map { template.copy(file = it.entry.path, fileSize = it.entry.size, subtitles = it.subtitles) }
+            group.map { template.copy(file = it.entry.path, fileSize = it.entry.size, modified = it.entry.modified, subtitles = it.subtitles) }
         }.flatten()
         // Several copies of a film (1080p and 4K, or in two genre folders): keep the biggest.
         return movies
             .groupBy { it.tmdbId?.toString() ?: "${normalizeTitle(it.title)}|${it.year}" }
-            .map { (_, copies) -> copies.maxBy { it.fileSize } }
+            .map { (_, copies) ->
+                val kept = copies.maxBy { it.fileSize }
+                kept.copy(
+                    folder = filmFolder(kept, copies, counts),
+                    copies = (copies - kept).map { FileCopy(it.file, it.fileSize, it.modified) },
+                )
+            }
+    }
+
+    /** The folder of [movie] when it holds only this film and bears its name: "Films\Drame\Dune (2021)", not "Films\Drame". */
+    private fun filmFolder(movie: Movie, copies: List<Movie>, counts: Map<String, Int>): String? {
+        val folder = movie.file.substringBeforeLast('\\')
+        if ('\\' !in folder) return null // a share root
+        val name = folder.substringAfterLast('\\')
+        val titles = listOfNotNull(movie.title, movie.originalTitle, parseMediaName(movie.file.substringAfterLast('\\')).title).map(::normalizeTitle)
+        val named = isTitleWithYear(name) || normalizeTitle(parseMediaName(name).title) in titles
+        return folder.takeIf { named && counts[it] == copies.count { copy -> copy.file.startsWith("$it\\") } }
     }
 
     /** Title from the file name; the folder only when the file name is useless or the folder is "Titre (Année)". */
@@ -176,62 +271,123 @@ class LibraryScanner(
 
     // --- Shows ---
 
-    private suspend fun scanShows(episodes: List<EpisodeFile>, previous: List<Show>): List<Show> {
-        val knownShowOf = previous.flatMap { show -> show.seasons.flatMap { it.episodes }.map { it.file to show } }.toMap()
+    private suspend fun scanShows(episodes: List<EpisodeFile>, previous: List<Show>, counts: Map<String, Int>): List<Show> {
+        val knownShowOf = previous.flatMap { show -> (show.seasons.flatMap { it.episodes }.map { it.file } + show.duplicates).map { it to show } }.toMap()
         val knownEpisodes = previous.flatMap { show -> show.seasons.flatMap { it.episodes } }.associateBy { it.file }
         val previousByKey = previous.associateBy { it.key }
 
-        // 1. Which show each title is.
-        val groups = episodes.groupBy { normalizeTitle(it.show.title) }.values.toList()
+        // 1. Which show each folder or title is.
+        val groups = episodes.groupBy { it.group }.values.toList()
         val identified = forEachParallel(groups, "Séries") { group ->
             val known = group.firstNotNullOfOrNull { knownShowOf[it.video.entry.path]?.takeIf { show -> show.tmdbId != null } }
             val name = group.groupingBy { it.show }.eachCount().maxBy { it.value }.key
-            (known?.copy(seasons = emptyList()) ?: matchShow(name)) to group
+            val show = when {
+                known == null -> matchShow(name)
+                // Matched by an older version, without the season sizes: refresh it.
+                known.seasonEpisodes.isEmpty() -> lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known
+                else -> known
+            }
+            show.copy(seasons = emptyList(), folders = emptyList()) to group
         }
-        // "Show" and "Show (2019)" may be the same TMDB show.
+        // "Show" and "Show (2019)", or two folders of one show, may be the same TMDB show.
         val merged = identified.groupBy { it.first.key }.map { (_, parts) -> parts.first().first to parts.flatMap { it.second } }
 
         // 2. Seasons, with TMDB episode details for files not known yet.
-        return forEachParallel(merged, "Épisodes") { (show, files) ->
+        return forEachParallel(merged, "Épisodes") { (show, all) ->
+            val files = numberSpecials(all.map { it.renumbered(show.seasonEpisodes) })
             val unique = files.groupBy { it.season to it.episode }.map { (_, copies) -> copies.maxBy { it.video.entry.size } }
             val seasons = unique.groupBy { it.season }.map { (number, seasonFiles) ->
                 val episodesOfSeason = seasonFiles.sortedBy { it.episode }.map { file ->
                     val video = file.video
+                    val episode = file.episode!!
                     knownEpisodes[video.entry.path]
-                        ?.takeIf { it.hasMetadata && it.season == number && it.number == file.episode }
-                        ?.copy(fileSize = video.entry.size, subtitles = video.subtitles)
-                        ?: Episode(number, file.episode, video.entry.path, video.entry.size, video.subtitles)
+                        ?.takeIf { it.season == number && it.number == episode }
+                        ?.takeIf { it.hasMetadata || unchanged(it.fileSize, it.modified, video.entry) }
+                        ?.copy(fileSize = video.entry.size, modified = video.entry.modified, subtitles = video.subtitles)
+                        ?: Episode(number, episode, video.entry.path, video.entry.size, video.subtitles, title = file.title, modified = video.entry.modified)
                 }
                 val knownSeason = previousByKey[show.key]?.seasons?.firstOrNull { it.number == number }
                 val season = Season(number, knownSeason?.name, knownSeason?.poster, episodesOfSeason)
-                if (show.tmdbId != null && episodesOfSeason.any { !it.hasMetadata }) {
+                // A season TMDB doesn't list would only answer 404.
+                val onTmdb = show.seasonEpisodes.isEmpty() || number in show.seasonEpisodes
+                // Episodes TMDB had no details for, unchanged since: not asked again.
+                val missing = episodesOfSeason.any { episode ->
+                    !episode.hasMetadata && knownEpisodes[episode.file]?.let { unchanged(it.fileSize, it.modified, episode) } != true
+                }
+                if (show.tmdbId != null && onTmdb && missing) {
                     lookup("saison $number de ${show.title}") { withSeasonDetails(show.tmdbId, season) } ?: season
                 } else {
                     season
                 }
             }
-            show.copy(seasons = seasons.sortedBy { it.number })
+            val shown = unique.mapTo(HashSet()) { it.video.entry.path }
+            show.copy(
+                seasons = seasons.sortedBy { it.number },
+                folders = showFolders(all, counts),
+                duplicates = all.map { it.video.entry.path }.filterNot { it in shown },
+            )
         }
     }
 
+    /**
+     * An absolute number ("Shingeki No Kyojin 54" in Saison 03) in the season's
+     * own numbering, from the TMDB season sizes: 54 = S03E17 after 25 + 12
+     * episodes. Without a season ("[Group] Show - 30"), finds the season too.
+     */
+    private fun EpisodeFile.renumbered(sizes: Map<Int, Int>): EpisodeFile {
+        val number = episode ?: return this
+        val size = sizes[season] ?: return this
+        if (season < 1 || number <= size) return this
+        if (!seasonKnown) {
+            var before = 0
+            for (s in sizes.keys.filter { it >= 1 }.sorted()) {
+                val count = sizes.getValue(s)
+                if (number <= before + count) return copy(season = s, episode = number - before)
+                before += count
+            }
+            return this
+        }
+        val before = sizes.filterKeys { it in 1 until season }.values.sum()
+        return if (number - before in 1..size) copy(episode = number - before) else this
+    }
+
+    /** Unnumbered specials go after the numbered ones of season 0, in name order. */
+    private fun numberSpecials(files: List<EpisodeFile>): List<EpisodeFile> {
+        val unnumbered = files.filter { it.episode == null }
+        if (unnumbered.isEmpty()) return files
+        val last = files.filter { it.season == 0 }.maxOfOrNull { it.episode ?: 0 } ?: 0
+        return files.filter { it.episode != null } +
+            unnumbered.sortedWith { a, b -> naturalCompare(a.video.entry.name, b.video.entry.name) }
+                .mapIndexed { i, file -> file.copy(episode = last + i + 1) }
+    }
+
+    /** The show's folders that hold nothing else, so that browsing them shows the show. */
+    private fun showFolders(files: List<EpisodeFile>, counts: Map<String, Int>): List<String> =
+        files.mapNotNull { it.folder }.distinct().filter { folder ->
+            counts[folder] == files.count { it.video.entry.path.startsWith("$folder\\") }
+        }
+
     private suspend fun matchShow(name: ParsedName): Show {
         val unmatched = Show(key = "title:${normalizeTitle(name.title)}", title = name.title, year = name.year)
-        val match = lookup("série ${name.title}") {
-            tmdb.findShow(searchQueries(name), name.year)?.let { tmdb.show(it) }
-        } ?: return unmatched
-        return Show(
-            key = "tmdb:${match.id}",
-            tmdbId = match.id,
-            title = match.name,
-            originalTitle = match.originalName,
-            year = match.firstAirDate.year() ?: name.year,
-            overview = match.overview,
-            poster = match.posterPath,
-            backdrop = match.backdropPath,
-            genres = match.genres.map { it.name },
-            rating = match.voteAverage?.takeIf { it > 0 },
-        )
+        return lookup("série ${name.title}") {
+            tmdb.findShow(searchQueries(name), name.year)?.let { tmdb.show(it).toShow(name) }
+        } ?: unmatched
     }
+
+    private fun TmdbShow.toShow(name: ParsedName) = Show(
+        key = "tmdb:$id",
+        tmdbId = id,
+        title = this.name,
+        originalTitle = originalName,
+        year = firstAirDate.year() ?: name.year,
+        overview = overview,
+        poster = posterPath,
+        backdrop = backdropPath,
+        genres = genres.map { it.name },
+        rating = voteAverage?.takeIf { it > 0 },
+        status = status,
+        seasonEpisodes = seasons.associate { it.number to it.episodeCount },
+    )
 
     private suspend fun withSeasonDetails(showId: Int, season: Season): Season {
         val details = tmdb.season(showId, season.number)
@@ -240,6 +396,7 @@ class LibraryScanner(
             name = details.name,
             poster = details.posterPath,
             episodes = season.episodes.map { episode ->
+                if (episode.hasMetadata) return@map episode // known already, or a special named by its file
                 val info = byNumber[episode.number] ?: return@map episode
                 episode.copy(
                     title = info.name ?: "Épisode ${episode.number}",
@@ -303,11 +460,17 @@ class LibraryScanner(
         null
     }
 
-    private fun NasEntry.isExtra() = name.contains("sample", ignoreCase = true) || name.contains("trailer", ignoreCase = true)
+    /** "Film.sample.mkv", "The.Lost.Room.BONUS.mkv": not part of the library (the share browser still shows them). */
+    private fun NasEntry.isExtra() = EXTRA_FILE.containsMatchIn(name)
 
     /** "Bonus [Edition 25eme Anniversaire]" counts as "bonus". */
     private fun NasEntry.isSkipped() =
         name.startsWith('.') || name.lowercase().substringBefore('[').substringBefore('(').trim() in SKIPPED_FOLDERS
+
+    /** Same size and write time as at the last scan (0 = written before times were kept). */
+    private fun unchanged(size: Long, modified: Long, entry: NasEntry) = modified != 0L && size == entry.size && modified == entry.modified
+
+    private fun unchanged(size: Long, modified: Long, episode: Episode) = modified != 0L && size == episode.fileSize && modified == episode.modified
 
     private fun String?.year() = this?.take(4)?.toIntOrNull()
 

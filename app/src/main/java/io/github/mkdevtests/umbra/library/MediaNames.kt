@@ -153,6 +153,29 @@ fun parseEpisodeName(fileName: String, inSeasonFolder: Boolean): EpisodeName? {
     return null
 }
 
+private val SEASON_DASH = Regex("""(?i)(?<![a-z0-9])S(\d{1,2})\s*-\s*(\d{1,4})(?!\d)""")
+private val PACKED_SEASON_EPISODE = Regex("""(?i)^S(\d{2})(\d{2,3})(?!\d)""")
+private val E_NUMBER = Regex("""(?i)(?<![a-z])EP?[\s._-]?(\d{1,4})(?!\d)""")
+private val LOOSE_DASH = Regex("""\s-\s*(\d{1,4})(?:v\d)?(?!\d)""")
+private val STANDALONE_NUMBER = Regex("""(?<![\w'])(\d{1,4})(?![\w'])""")
+
+/**
+ * Episode number of a file sitting in a season folder, where the folder
+ * already says it is an episode: "Claymore.E19", "Joker Game S01 - 07 VOSTFR",
+ * "S0106_HD", "Paladin - 03 MULTI", "Shingeki No Kyojin 54 ''Héroïque''".
+ * [EpisodeName.show] is always null: the show is the folder.
+ */
+fun parseEpisodeNumber(fileName: String): EpisodeName? {
+    val noTags = fileName.replace(VIDEO_EXTENSION, "").replace(LEADING_GROUPS, "")
+        .replace(Regex("""\[[^\]]*\]|\{[^}]*\}"""), " ")
+    val base = RELEASE_TAG.find(noTags)?.let { noTags.substring(0, it.range.first) } ?: noTags
+    SEASON_DASH.find(base)?.let { return EpisodeName(null, it.groupValues[1].toInt(), it.groupValues[2].toInt()) }
+    PACKED_SEASON_EPISODE.find(base.trim())?.let { return EpisodeName(null, it.groupValues[1].toInt(), it.groupValues[2].toInt()) }
+    val number = (E_NUMBER.find(base) ?: EPISODE_WORD.find(base) ?: LOOSE_DASH.find(base))?.groupValues?.get(1)
+        ?: STANDALONE_NUMBER.findAll(base.replace(BARE_YEAR, " ")).lastOrNull()?.value
+    return number?.toIntOrNull()?.let { EpisodeName(null, null, it) }
+}
+
 /** Lowercase name without accents, to recognise "Séries" / "series" / "Films". */
 fun String.withoutAccents(): String =
     Normalizer.normalize(this, Normalizer.Form.NFD).replace(Regex("""\p{Mn}+"""), "")
