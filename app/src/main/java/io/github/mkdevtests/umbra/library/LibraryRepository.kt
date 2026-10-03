@@ -30,6 +30,7 @@ class LibraryRepository(private val app: UmbraApp) {
     private val legacyFile = File(app.filesDir, "library.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val tmdb by lazy { Tmdb(BuildConfig.TMDB_TOKEN, OkHttpClient()) }
+    private val tvdb by lazy { BuildConfig.THETVDB_TOKEN.takeIf { it.isNotBlank() }?.let { Tvdb(it, OkHttpClient()) } }
     private var scanJob: Job? = null
     /** Groups whose correction was removed, matched again by the next scan. */
     private val rematch = java.util.Collections.synchronizedSet(HashSet<String>())
@@ -109,14 +110,21 @@ class LibraryRepository(private val app: UmbraApp) {
                     ?: Library().also { _library.value = it } // another share: don't show its titles
                 val fixes = app.matchFixes.load()
                 val again = synchronized(rematch) { rematch.toSet() }
-                val scanner = LibraryScanner(smb, tmdb, fixes, again) { _scan.value = ScanState(running = true, progress = it) }
+                val numberings = NumberingCache(File(app.filesDir, "tvdb-numbering.json"))
+                val scanner = LibraryScanner(smb, tmdb, fixes, again, tvdb, numberings) { _scan.value = ScanState(running = true, progress = it) }
                 val started = System.currentTimeMillis()
                 val requests = tmdb.requests.get()
+                val tvdbRequests = tvdb?.requests?.get() ?: 0
                 val result = scanner.scan(previous, key)
                 _library.value = result
                 save(result)
+                numberings.save()
                 rematch -= again
-                Log.i(TAG, "scan done in ${(System.currentTimeMillis() - started) / 1000} s, ${tmdb.requests.get() - requests} TMDB requests")
+                Log.i(
+                    TAG,
+                    "scan done in ${(System.currentTimeMillis() - started) / 1000} s, ${tmdb.requests.get() - requests} TMDB requests, " +
+                        "${(tvdb?.requests?.get() ?: 0) - tvdbRequests} TheTVDB requests",
+                )
                 _scan.value = ScanState()
             } catch (e: CancellationException) {
                 _scan.value = ScanState()

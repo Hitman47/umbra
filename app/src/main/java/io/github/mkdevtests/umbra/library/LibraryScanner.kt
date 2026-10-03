@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -43,6 +44,10 @@ private val EXTRA_FILE = Regex("""(?i)sample|trailer|(?<![a-z])bonus(?![a-z])"""
 /** Deep enough for "Share\Séries\Drame\Show\Saison 1", shallow enough to stop on loops. */
 private const val MAX_DEPTH = 8
 
+/** Age of a TheTVDB numbering asked again; half a day if a file is missing from it (a new episode). */
+private const val NUMBERING_MAX_AGE = 7 * 24 * 3600_000L
+private const val NUMBERING_RETRY_AGE = 12 * 3600_000L
+
 /** Tries before a listing that times out fails the scan. */
 private const val LIST_ATTEMPTS = 3
 
@@ -59,6 +64,9 @@ class LibraryScanner(
     private val fixes: Map<String, MatchFix> = emptyMap(),
     /** Groups whose correction was just removed: matched again rather than kept from the last scan. */
     private val rematch: Set<String> = emptySet(),
+    /** Anime numbering; none without a TheTVDB key. */
+    private val tvdb: Tvdb? = null,
+    private val numberings: NumberingCache? = null,
     private val onProgress: (String) -> Unit,
 ) {
     /** Parallel TMDB calls: their latency overlaps without hitting the rate limit. */
@@ -66,6 +74,9 @@ class LibraryScanner(
 
     /** Parallel NAS listings: each waits on a round trip, the NAS serves many at once. */
     private val listings = Semaphore(16)
+
+    /** TMDB seasons fetched by this scan: a TheTVDB numbering needs them all, the episode details again. */
+    private val tmdbSeasons = ConcurrentHashMap<Pair<Int, Int>, TmdbSeason>()
 
     /** A video found on the NAS; [folders] are the folder names between the share and the file. */
     private class VideoFile(val entry: NasEntry, val folders: List<String>, val subtitles: List<String>)
@@ -328,7 +339,7 @@ class LibraryScanner(
 
         // 2. Seasons, with TMDB episode details for files not known yet.
         return forEachParallel(merged, "Épisodes") { (show, all) ->
-            val files = numberSpecials(all.map { it.renumbered(show.seasonEpisodes) })
+            val files = numberSpecials(withTvdbNumbers(show, all).map { it.renumbered(show.seasonEpisodes) })
             val unique = files.groupBy { it.season to it.episode }.map { (_, copies) -> copies.maxBy { it.video.entry.size } }
             val seasons = unique.groupBy { it.season }.map { (number, seasonFiles) ->
                 val episodesOfSeason = seasonFiles.sortedBy { it.episode }.map { file ->
@@ -388,6 +399,53 @@ class LibraryScanner(
         return if (number - before in 1..size) copy(episode = number - before) else this
     }
 
+    /**
+     * Episodes TMDB can't place by their numbers ("One Piece - 1050", "Saison 3\54",
+     * or seasons cut otherwise than TMDB's), placed through TheTVDB, which
+     * knows each episode's absolute number and air date. A whole season folder
+     * (or all the files without a season) goes through it, so that its
+     * episodes are numbered one way. The others keep their numbers.
+     */
+    private suspend fun withTvdbNumbers(show: Show, files: List<EpisodeFile>): List<EpisodeFile> {
+        val sizes = show.seasonEpisodes
+        val id = show.tmdbId
+        if (tvdb == null || numberings == null || id == null || sizes.isEmpty()) return files
+        val numbered = files.filter { it.episode != null && it.season >= 1 && it.group !in fixes }
+        val off = numbered.filter { file -> sizes[file.season]?.let { file.episode!! > it } ?: true }
+        if (off.isEmpty()) return files
+        val batches = off.mapTo(HashSet()) { it.seasonKnown to it.season }
+        val odd = numbered.filter { (it.seasonKnown to it.season) in batches }
+        val numbering = numberingOf(show, odd) ?: return files
+        val placed = odd.associateWith { numbering.place(it.season, it.episode!!, it.seasonKnown) }
+        return files.map { file -> placed[file]?.let { (season, number) -> file.copy(season = season, episode = number, seasonKnown = true) } ?: file }
+    }
+
+    /** The cached numbering of [show], or TheTVDB's when old or missing an episode of [files]. */
+    private suspend fun numberingOf(show: Show, files: List<EpisodeFile>): Numbering? {
+        val id = show.tmdbId ?: return null
+        val cache = numberings ?: return null
+        val cached = cache[id]
+        val now = System.currentTimeMillis()
+        val age = cached?.let { now - it.fetchedAt } ?: Long.MAX_VALUE
+        val complete = cached != null && files.all { cached.place(it.season, it.episode!!, it.seasonKnown) != null }
+        if (age < NUMBERING_MAX_AGE && (complete || age < NUMBERING_RETRY_AGE)) return cached
+        return lookup("TheTVDB ${show.title}") {
+            // Unknown to TheTVDB: an empty numbering, not asked again before long.
+            val episodes = tmdb.tvdbId(id)?.let { tvdb!!.episodes(it) }.orEmpty()
+            val slots = if (episodes.isEmpty()) {
+                emptyList()
+            } else {
+                show.seasonEpisodes.keys.filter { it >= 1 }.sorted().flatMap { number ->
+                    tmdbSeason(id, number).episodes.map { TmdbSlot(number, it.number, it.airDate) }
+                }
+            }
+            Numbering(now, pairEpisodes(episodes, slots)).also { cache[id] = it }
+        } ?: cached
+    }
+
+    private suspend fun tmdbSeason(showId: Int, number: Int): TmdbSeason =
+        tmdbSeasons[showId to number] ?: tmdb.season(showId, number).also { tmdbSeasons[showId to number] = it }
+
     /** Unnumbered specials go after the numbered ones of season 0, in name order. */
     private fun numberSpecials(files: List<EpisodeFile>): List<EpisodeFile> {
         val unnumbered = files.filter { it.episode == null }
@@ -445,7 +503,7 @@ class LibraryScanner(
     )
 
     private suspend fun withSeasonDetails(showId: Int, season: Season): Season {
-        val details = tmdb.season(showId, season.number)
+        val details = tmdbSeason(showId, season.number)
         val byNumber = details.episodes.associateBy { it.number }
         return season.copy(
             name = details.name,

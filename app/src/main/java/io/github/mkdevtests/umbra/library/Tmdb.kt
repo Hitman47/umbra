@@ -74,6 +74,10 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
         return show.copy(overview = get("tv/$id", TmdbShow.serializer(), "language" to "en-US").overview)
     }
 
+    /** TheTVDB id of a show, null if TMDB doesn't know it. */
+    suspend fun tvdbId(showId: Int): Int? =
+        get("tv/$showId/external_ids", TmdbExternalIds.serializer()).tvdbId?.takeIf { it > 0 }
+
     suspend fun season(showId: Int, number: Int): TmdbSeason =
         get("tv/$showId/season/$number", TmdbSeason.serializer())
 
@@ -157,6 +161,9 @@ data class TmdbSearchItem(
 
 @Serializable
 data class TmdbFind(@SerialName("movie_results") val movieResults: List<TmdbSearchItem> = emptyList())
+
+@Serializable
+data class TmdbExternalIds(@SerialName("tvdb_id") val tvdbId: Int? = null)
 
 @Serializable
 data class TmdbGenre(val name: String)
