@@ -62,6 +62,8 @@ fun SettingsScreen(
     onAddSource: () -> Unit,
     onEditSource: (SmbSource) -> Unit,
     onRemoveSource: (SmbSource) -> Unit,
+    onIncludeFolder: (SmbSource, String) -> Unit,
+    onOpenStats: () -> Unit,
     onBack: () -> Unit,
 ) {
     val settings by store.settings.collectAsState()
@@ -122,6 +124,11 @@ fun SettingsScreen(
                         TextButton(onClick = { removing = source }) { Text("Retirer") }
                         TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
                     }
+                    source.excluded.forEach { folder ->
+                        Item("Exclu : ${folder.replace("\\", " › ")}", "Ni analysé, ni affiché, ni lisible.") {
+                            TextButton(onClick = { onIncludeFolder(source, folder) }) { Text("Rétablir") }
+                        }
+                    }
                 }
                 Item("Ajouter un NAS", "Les vues Films et Séries regroupent toutes les sources.") {
                     TextButton(onClick = onAddSource) { Text("Ajouter ›") }
@@ -142,6 +149,12 @@ fun SettingsScreen(
                     Switch(checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
                 }
                 Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
+            }
+
+            Section("Lecture") {
+                Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
+                    TextButton(onClick = onOpenStats) { Text("Voir ›") }
+                }
             }
 
             TraktSection(trakt)

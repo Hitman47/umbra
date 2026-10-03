@@ -32,4 +32,14 @@ class SourcesTest {
         val second = SmbSource("x", listOf("Media"), id = "b").withRoots(listOf(salon, SmbSource("y", listOf("Media (x)"), id = "c")))
         assertEquals(mapOf("Media" to "Media (x 2)"), second.roots)
     }
+
+    @Test
+    fun excludedFoldersAndWhatTheyHold() {
+        val source = salon.copy(excluded = listOf("Media\\Photos"))
+        assertEquals(true, source.isExcluded("Media\\Photos"))
+        assertEquals(true, source.isExcluded("media\\photos\\2019\\x.mp4"))
+        assertEquals(false, source.isExcluded("Media\\Photos 2019"))
+        assertEquals(false, source.isExcluded("Media"))
+        assertEquals(true, NasRouter(listOf(SmbNas(source))).isExcluded("Media\\Photos\\a.mkv"))
+    }
 }

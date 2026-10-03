@@ -74,6 +74,17 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
         return show.copy(overview = get("tv/$id", TmdbShow.serializer(), "language" to "en-US").overview)
     }
 
+    /** Cast and crew with photos, recommendations and saga of a film, for its page. */
+    suspend fun movieExtras(id: Int): TmdbMovieExtras =
+        get("movie/$id", TmdbMovieExtras.serializer(), "append_to_response" to "credits,recommendations")
+
+    /** Films of a saga ("Dune Collection"). */
+    suspend fun collection(id: Int): TmdbCollection = get("collection/$id", TmdbCollection.serializer())
+
+    /** Cast of every season, creators and recommendations of a show, for its page. */
+    suspend fun showExtras(id: Int): TmdbShowExtras =
+        get("tv/$id", TmdbShowExtras.serializer(), "append_to_response" to "aggregate_credits,recommendations")
+
     /** TheTVDB id of a show, null if TMDB doesn't know it. */
     suspend fun tvdbId(showId: Int): Int? =
         get("tv/$showId/external_ids", TmdbExternalIds.serializer()).tvdbId?.takeIf { it > 0 }
@@ -161,6 +172,47 @@ data class TmdbSearchItem(
 
 @Serializable
 data class TmdbFind(@SerialName("movie_results") val movieResults: List<TmdbSearchItem> = emptyList())
+
+/** Someone in a cast or crew; [roles] and [jobs] are a show's, over all its seasons. */
+@Serializable
+data class TmdbCredit(
+    val name: String,
+    val character: String? = null,
+    val job: String? = null,
+    @SerialName("profile_path") val profilePath: String? = null,
+    val roles: List<TmdbRole> = emptyList(),
+    val jobs: List<TmdbJob> = emptyList(),
+    @SerialName("total_episode_count") val episodes: Int? = null,
+)
+
+@Serializable
+data class TmdbRole(val character: String? = null)
+
+@Serializable
+data class TmdbJob(val job: String? = null)
+
+@Serializable
+data class TmdbFullCredits(val cast: List<TmdbCredit> = emptyList(), val crew: List<TmdbCredit> = emptyList())
+
+@Serializable
+data class TmdbCollectionRef(val id: Int, val name: String? = null)
+
+@Serializable
+data class TmdbCollection(val id: Int, val name: String? = null, val parts: List<TmdbSearchItem> = emptyList())
+
+@Serializable
+data class TmdbMovieExtras(
+    @SerialName("belongs_to_collection") val collection: TmdbCollectionRef? = null,
+    val credits: TmdbFullCredits? = null,
+    val recommendations: TmdbSearch? = null,
+)
+
+@Serializable
+data class TmdbShowExtras(
+    @SerialName("created_by") val createdBy: List<TmdbCredit> = emptyList(),
+    @SerialName("aggregate_credits") val credits: TmdbFullCredits? = null,
+    val recommendations: TmdbSearch? = null,
+)
 
 @Serializable
 data class TmdbExternalIds(@SerialName("tvdb_id") val tvdbId: Int? = null)

@@ -25,12 +25,15 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
 import io.github.mkdevtests.umbra.browse.SourceScreen
 import io.github.mkdevtests.umbra.player.PlayerActivity
+import io.github.mkdevtests.umbra.library.SearchFilters
+import io.github.mkdevtests.umbra.ui.library.DetailLinks
 import io.github.mkdevtests.umbra.ui.library.HomeScreen
 import io.github.mkdevtests.umbra.ui.library.HomeTab
 import io.github.mkdevtests.umbra.ui.library.LibraryViewModel
 import io.github.mkdevtests.umbra.ui.library.MatchScreen
 import io.github.mkdevtests.umbra.ui.library.MovieDetailScreen
 import io.github.mkdevtests.umbra.ui.library.ShowDetailScreen
+import io.github.mkdevtests.umbra.ui.settings.MeasuresScreen
 import io.github.mkdevtests.umbra.ui.settings.SettingsScreen
 import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
 
@@ -60,6 +63,7 @@ private sealed interface Detail {
     data class ShowDetail(val key: String) : Detail
     data class FixMatch(val key: String) : Detail
     data object Settings : Detail
+    data object Measures : Detail
 }
 
 /** NAS setup until a source works, then the library. */
@@ -97,41 +101,62 @@ private fun UmbraRoot(
         return
     }
 
+    val sources by browserViewModel.sourceList.collectAsState()
     // Read here so that a scan redraws the open detail screen with the new library.
     val library by libraryViewModel.library.collectAsState()
     BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
     val back = { stack.removeAt(stack.lastIndex); Unit }
-    when (val detail = stack.lastOrNull()) {
-        null -> HomeScreen(
-            libraryViewModel = libraryViewModel,
-            browserViewModel = browserViewModel,
-            updater = app.updater,
-            tab = tab,
-            onTabChange = { tab = it },
-            onOpenMovie = { stack.add(Detail.MovieDetail(it)) },
-            onOpenShow = { stack.add(Detail.ShowDetail(it)) },
-            onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
-            onOpenSettings = { stack.add(Detail.Settings) },
-        )
-        is Detail.MovieDetail -> library.movies.firstOrNull { it.file == detail.file }?.let { MovieDetailScreen(it, libraryViewModel, back) } ?: back()
-        is Detail.ShowDetail -> library.shows.firstOrNull { it.key == detail.key }?.let {
-            ShowDetailScreen(it, libraryViewModel, back, onFixMatch = { stack.add(Detail.FixMatch(detail.key)) })
-        } ?: back()
-        is Detail.FixMatch -> library.shows.firstOrNull { it.key == detail.key }?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
-        Detail.Settings -> SettingsScreen(
-            store = app.settings,
-            trakt = app.trakt,
-            updater = app.updater,
-            sources = browserViewModel.sources,
-            imageCache = context.cacheDir.resolve("image_cache"),
-            onAddSource = { editingSource = "" },
-            onEditSource = { editingSource = it.id },
-            onRemoveSource = { source ->
-                browserViewModel.remove(source)
-                libraryViewModel.onSourcesChanged()
-                if (!browserViewModel.hasSource) editingSource = ""
-            },
-            onBack = back,
-        )
+    val links = DetailLinks(
+        onOpenMovie = { stack.add(Detail.MovieDetail(it)) },
+        onOpenShow = { stack.add(Detail.ShowDetail(it)) },
+        // An actor or a director: the search tab, with their titles in the library.
+        onPerson = { name ->
+            libraryViewModel.searchFilters.value = SearchFilters()
+            libraryViewModel.searchQuery.value = name
+            tab = HomeTab.Search
+            stack.clear()
+        },
+    )
+    // A page opened from another of the same kind starts at its top.
+    key(stack.size) {
+        when (val detail = stack.lastOrNull()) {
+            null -> HomeScreen(
+                libraryViewModel = libraryViewModel,
+                browserViewModel = browserViewModel,
+                updater = app.updater,
+                tab = tab,
+                onTabChange = { tab = it },
+                onOpenMovie = { stack.add(Detail.MovieDetail(it)) },
+                onOpenShow = { stack.add(Detail.ShowDetail(it)) },
+                onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
+                onOpenSettings = { stack.add(Detail.Settings) },
+            )
+            is Detail.MovieDetail -> library.movies.firstOrNull { it.file == detail.file }?.let { MovieDetailScreen(it, libraryViewModel, links, back) } ?: back()
+            is Detail.ShowDetail -> library.shows.firstOrNull { it.key == detail.key }?.let {
+                ShowDetailScreen(it, libraryViewModel, links, back, onFixMatch = { stack.add(Detail.FixMatch(detail.key)) })
+            } ?: back()
+            is Detail.FixMatch -> library.shows.firstOrNull { it.key == detail.key }?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
+            Detail.Settings -> SettingsScreen(
+                store = app.settings,
+                trakt = app.trakt,
+                updater = app.updater,
+                sources = sources,
+                imageCache = context.cacheDir.resolve("image_cache"),
+                onAddSource = { editingSource = "" },
+                onEditSource = { editingSource = it.id },
+                onRemoveSource = { source ->
+                    browserViewModel.remove(source)
+                    libraryViewModel.onSourcesChanged()
+                    if (!browserViewModel.hasSource) editingSource = ""
+                },
+                onIncludeFolder = { source, folder ->
+                    browserViewModel.include(source, folder)
+                    libraryViewModel.onSourcesChanged()
+                },
+                onOpenStats = { stack.add(Detail.Measures) },
+                onBack = back,
+            )
+            Detail.Measures -> MeasuresScreen(app.measures, back)
+        }
     }
 }

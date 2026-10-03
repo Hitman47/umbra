@@ -7,6 +7,7 @@ import java.io.BufferedInputStream
 import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * HTTP server on 127.0.0.1 that streams NAS files to mpv.
@@ -19,6 +20,16 @@ import java.util.concurrent.ConcurrentHashMap
 class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) {
 
     private val files = ConcurrentHashMap<String, String>()
+
+    /** What reading each NAS file cost, for the playback measures. */
+    private val stats = ConcurrentHashMap<String, StreamStats>()
+
+    /** Reading figures of [path] since [resetStats]; null if it wasn't read. */
+    fun statsFor(path: String): StreamStats? = stats[path]
+
+    fun resetStats(path: String) {
+        stats.remove(path)
+    }
 
     /** Returns the URL mpv should open for the NAS file at [path]. */
     @Synchronized
@@ -35,13 +46,17 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
         val path = files[token] ?: return text(Response.Status.NOT_FOUND, "Unknown file")
         val router = nas() ?: return text(Response.Status.SERVICE_UNAVAILABLE, "No NAS configured")
 
+        val stat = stats.getOrPut(path) { StreamStats() }
+        val opening = System.nanoTime()
         val file = try {
             router.open(path)
         } catch (e: Exception) {
             Log.w(TAG, "open $path failed", e)
             return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
         }
+        stat.opened(System.nanoTime() - opening)
         val size = file.size
+        stat.size = size
 
         val range = parseRange(session.headers["range"], size)
         if (range == null) {
@@ -54,7 +69,7 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
         val length = end - start + 1
         val partial = session.headers.containsKey("range")
 
-        val body = BufferedInputStream(SmbRangeStream(file, start, length), READ_SIZE)
+        val body = BufferedInputStream(SmbRangeStream(file, start, length, stat), READ_SIZE)
         return newFixedLengthResponse(
             if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK,
             mimeType(path),
@@ -106,11 +121,42 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
     }
 }
 
+/** Requests made for one file, time spent opening it on the NAS and reading from it. */
+class StreamStats {
+    @Volatile var size = 0L
+    private val requestCount = AtomicLong()
+    private val openNanos = AtomicLong()
+    private val bytes = AtomicLong()
+    private val readNanos = AtomicLong()
+
+    fun opened(nanos: Long) {
+        requestCount.incrementAndGet()
+        openNanos.addAndGet(nanos)
+    }
+
+    fun read(count: Int, nanos: Long) {
+        bytes.addAndGet(count.toLong())
+        readNanos.addAndGet(nanos)
+    }
+
+    /** Requests made by mpv: the first one, then one per seek or so. */
+    val requests get() = requestCount.get().toInt()
+
+    /** Mean time to open the file on the NAS, per request. */
+    val openMs get() = if (requests > 0) openNanos.get() / requests / 1_000_000 else null
+
+    /** What the NAS delivers while it is read, in Mbit/s (waits on mpv not counted). */
+    val readMbps get() = readNanos.get().takeIf { it > 50_000_000 }?.let { bytes.get() * 8.0 / 1e6 / (it / 1e9) }
+
+    val megabytes get() = bytes.get() / 1_000_000
+}
+
 /** Reads [length] bytes of an SMB file from [offset]; closing it closes the remote handle. */
 private class SmbRangeStream(
     private val file: NasFile,
     private var offset: Long,
     private var remaining: Long,
+    private val stats: StreamStats,
 ) : InputStream() {
 
     override fun read(): Int {
@@ -120,8 +166,10 @@ private class SmbRangeStream(
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
         if (remaining <= 0) return -1
+        val started = System.nanoTime()
         val count = file.read(b, offset, off, minOf(len.toLong(), remaining).toInt())
         if (count <= 0) return -1
+        stats.read(count, System.nanoTime() - started)
         offset += count
         remaining -= count
         return count

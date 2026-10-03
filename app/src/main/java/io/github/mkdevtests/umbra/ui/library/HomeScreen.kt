@@ -104,7 +104,7 @@ fun HomeScreen(
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucune série trouvée.",
                 onClick = onOpenShow,
             )
-            HomeTab.Folders -> BrowserScreen(browserViewModel, fullLibrary, onOpenMovie, onOpenShow)
+            HomeTab.Folders -> BrowserScreen(browserViewModel, fullLibrary, onOpenMovie, onOpenShow, onExcluded = libraryViewModel::onFolderExcluded)
             HomeTab.Search -> SearchScreen(fullLibrary, libraryViewModel, onOpenMovie, onOpenShow)
         }
     }

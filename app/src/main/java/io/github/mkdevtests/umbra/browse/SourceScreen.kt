@@ -94,10 +94,10 @@ fun SourceScreen(
         busy = true
         error = null
         scope.launch {
-            // The id and the root names of an edited source are kept: its titles and history stay its own.
+            // The id, root names and excluded folders of an edited source are kept: its titles and history stay its own.
             val source = SmbSource(
                 host.trim(), shares.filter { it in selected }, username.trim(), password, initial?.domain.orEmpty(),
-                id = initial?.id.orEmpty(), name = name.trim(), roots = initial?.roots.orEmpty(),
+                id = initial?.id.orEmpty(), name = name.trim(), roots = initial?.roots.orEmpty(), excluded = initial?.excluded.orEmpty(),
             )
             error = onConnect(source)
             busy = false

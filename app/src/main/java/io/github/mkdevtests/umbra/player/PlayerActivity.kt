@@ -2,6 +2,8 @@ package io.github.mkdevtests.umbra.player
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import android.view.SurfaceView
@@ -132,6 +134,7 @@ class PlayerActivity : ComponentActivity() {
                     onNext = {
                         saveProgress()
                         scrobbler.stop()
+                        recordMeasure()
                         index++
                         start(queue[index])
                     },
@@ -150,7 +153,60 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun start(item: PlayItem) = player.play(toMpvPath(item.url), item.subtitles, item.start)
+    private fun start(item: PlayItem) {
+        item.file?.let { (application as UmbraApp).streamServer.resetStats(it) }
+        player.play(toMpvPath(item.url), item.subtitles, item.start)
+    }
+
+    /** The queue index already measured: one measure per file. */
+    private var measured = -1
+
+    /** Keeps what this file cost to open, seek and play, for Réglages › Mesures de lecture. */
+    private fun recordMeasure() {
+        if (measured == index) return
+        val item = queue.getOrNull(index) ?: return
+        val figures = player.figures()
+        if (figures.openMs == null) return // never played: nothing to measure
+        measured = index
+        val app = application as UmbraApp
+        val stats = item.file?.let { app.streamServer.statsFor(it) }
+        val source = item.file?.let { app.nas?.sourceOf(it) }
+        app.measures.add(
+            PlaybackMeasure(
+                at = System.currentTimeMillis(),
+                title = listOfNotNull(item.title, item.subtitle?.substringBefore(" · ")).joinToString(" "),
+                source = source?.label ?: "Appareil",
+                network = networkLabel(),
+                route = source?.host?.let(::routeOf) ?: "Local",
+                openMs = figures.openMs,
+                seeksMs = figures.seeksMs,
+                stalls = figures.stalls,
+                stalledMs = figures.stalledMs,
+                watchedS = figures.watchedS,
+                readMbps = stats?.readMbps,
+                nasOpenMs = stats?.openMs,
+                requests = stats?.requests ?: 0,
+                megabytes = stats?.megabytes ?: 0,
+                fileMbps = stats?.size?.takeIf { it > 0 && figures.duration > 0 }?.let { it * 8.0 / 1e6 / figures.duration },
+                video = figures.video,
+                droppedFrames = figures.droppedFrames,
+            ),
+        )
+    }
+
+    /** "Wi-Fi", "Mobile", "Wi-Fi + VPN"… */
+    private fun networkLabel(): String {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return "?"
+        val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return "Hors ligne"
+        val base = when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+            else -> null
+        }
+        val vpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        return listOfNotNull(base, "VPN".takeIf { vpn }).joinToString(" + ").ifEmpty { "?" }
+    }
 
     private val scrobbler = object {
         /** Trakt's view of the current file: a pause only follows a start, nothing follows a stop but a new start. */
@@ -202,7 +258,10 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (::player.isInitialized) player.release()
+        if (::player.isInitialized) {
+            recordMeasure()
+            player.release()
+        }
         super.onDestroy()
     }
 

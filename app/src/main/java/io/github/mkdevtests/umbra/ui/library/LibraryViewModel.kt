@@ -19,6 +19,7 @@ import io.github.mkdevtests.umbra.library.SearchFilters
 import io.github.mkdevtests.umbra.library.searchResults
 import androidx.lifecycle.viewModelScope
 import io.github.mkdevtests.umbra.trakt.TraktTarget
+import io.github.mkdevtests.umbra.library.Extras
 import io.github.mkdevtests.umbra.trakt.withTrakt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,10 +72,17 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** Called once a NAS source is added, edited or removed. */
     fun onSourcesChanged() = repository.onSourcesChanged()
 
+    fun onFolderExcluded() = repository.onFolderExcluded()
+
     suspend fun search(query: String, filters: SearchFilters): List<Found> {
         val hits = if (query.isBlank()) null else repository.search(query)
         return searchResults(library.value, hidden.value, query, hits, filters, history.value)
     }
+
+    /** Cast, saga and related titles of a page; null offline or for a title TMDB doesn't know. */
+    suspend fun extras(movie: Movie): Extras? = runCatching { repository.extras(movie) }.getOrNull()
+
+    suspend fun extras(show: Show): Extras? = runCatching { repository.extras(show) }.getOrNull()
 
     fun setHidden(movie: Movie, hidden: Boolean) = umbra.hidden.setHidden(movie.hideKey, hidden)
 

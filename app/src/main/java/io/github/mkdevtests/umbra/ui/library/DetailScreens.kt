@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
@@ -28,17 +31,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -47,14 +55,26 @@ import io.github.mkdevtests.umbra.history.hideKey
 import io.github.mkdevtests.umbra.home.nextUp
 import io.github.mkdevtests.umbra.home.regularEpisodes
 import io.github.mkdevtests.umbra.library.Episode
+import io.github.mkdevtests.umbra.library.Extras
+import io.github.mkdevtests.umbra.library.Person
+import io.github.mkdevtests.umbra.library.Related
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.Tmdb
 import java.util.Locale
 
+/** Where a page leads: another title of the library, or the search for a person. */
+class DetailLinks(
+    val onOpenMovie: (String) -> Unit,
+    val onOpenShow: (String) -> Unit,
+    val onPerson: (String) -> Unit,
+)
+
 @Composable
-fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> Unit) {
+fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLinks, onBack: () -> Unit) {
     val context = LocalContext.current
+    var extras by remember(movie.file) { mutableStateOf<Extras?>(null) }
+    LaunchedEffect(movie.file) { extras = viewModel.extras(movie) }
     val history by viewModel.history.collectAsState()
     val progress = history[movie.file]
     val hidden by viewModel.hidden.collectAsState()
@@ -88,16 +108,21 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> U
             Column(modifier = Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 movie.tagline?.let { Text(it, style = MaterialTheme.typography.titleMedium, fontStyle = FontStyle.Italic) }
                 movie.overview?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
-                Credits("Réalisation", movie.directors, movie.cast)
-                FileInfo(movie.file, movie.fileSize)
+                if (extras == null) Credits("Réalisation", movie.directors, movie.cast)
             }
+        }
+        extras?.let { item { ExtrasRows(it, links) } }
+        item {
+            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) { FileInfo(movie.file, movie.fileSize) }
         }
     }
 }
 
 @Composable
-fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit, onFixMatch: () -> Unit) {
+fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks, onBack: () -> Unit, onFixMatch: () -> Unit) {
     val context = LocalContext.current
+    var extras by remember(show.key) { mutableStateOf<Extras?>(null) }
+    LaunchedEffect(show.key) { extras = viewModel.extras(show) }
     var selected by rememberSaveable(show.key) { mutableIntStateOf(show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1) }
     val season = show.seasons.firstOrNull { it.number == selected }
     val history by viewModel.history.collectAsState()
@@ -132,7 +157,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
         item {
             Column(modifier = Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 show.overview?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
-                Credits("Création", show.directors, show.cast)
+                if (extras == null) Credits("Création", show.directors, show.cast)
             }
         }
         item {
@@ -152,6 +177,99 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
         }
         items(season?.episodes.orEmpty(), key = { "${it.season}-${it.number}" }) { episode ->
             EpisodeRow(episode, history[episode.file]) { context.startActivity(viewModel.playIntent(show, episode)) }
+        }
+        extras?.let { item { Column(modifier = Modifier.padding(bottom = 32.dp)) { ExtrasRows(it, links) } } }
+    }
+}
+
+/** Cast and crew with their photos, the saga, the library's related titles and TMDB's recommendations. */
+@Composable
+private fun ExtrasRows(extras: Extras, links: DetailLinks) {
+    Column {
+        PeopleRow("Distribution", extras.cast, links.onPerson)
+        PeopleRow("Équipe", extras.crew, links.onPerson)
+        RelatedRow(extras.saga ?: "Saga", extras.sagaParts, links)
+        RelatedRow("Dans la bibliothèque", extras.linked, links)
+        RelatedRow("Titres similaires", extras.recommended, links)
+    }
+}
+
+@Composable
+private fun RowTitle(title: String) {
+    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 8.dp))
+}
+
+/** People in a row; a touch searches the library for them. */
+@Composable
+private fun PeopleRow(title: String, people: List<Person>, onPerson: (String) -> Unit) {
+    if (people.isEmpty()) return
+    RowTitle(title)
+    LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(people) { person ->
+            Column(
+                modifier = Modifier.width(92.dp).clickable { onPerson(person.name) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier.size(80.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (person.photo != null) {
+                        AsyncImage(
+                            model = Tmdb.image(person.photo, "w185"),
+                            contentDescription = person.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Text(person.name.split(' ').mapNotNull { it.firstOrNull()?.uppercase() }.take(2).joinToString(""), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                Text(
+                    person.name,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                person.role?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Posters in a row; titles missing from the library are dimmed and don't open. */
+@Composable
+private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks) {
+    if (items.isEmpty()) return
+    RowTitle(title)
+    LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(items) { item ->
+            val open = item.movie?.let { { links.onOpenMovie(it) } } ?: item.show?.let { { links.onOpenShow(it) } }
+            Column(
+                modifier = Modifier
+                    .width(110.dp)
+                    .alpha(if (item.owned) 1f else 0.45f)
+                    .then(if (open != null) Modifier.clickable(onClick = open) else Modifier),
+            ) {
+                Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth(), size = "w185")
+                Text(item.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                Text(
+                    listOfNotNull(item.year?.toString(), "absent".takeIf { !item.owned }).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

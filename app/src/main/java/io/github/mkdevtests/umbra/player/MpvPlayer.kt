@@ -1,6 +1,7 @@
 package io.github.mkdevtests.umbra.player
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import android.view.SurfaceHolder
 import dev.jdtech.mpv.MPVLib
@@ -62,6 +63,16 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     /** Zoomed to fill the screen (cropping the edges) instead of showing the whole picture. */
     private val _fill = MutableStateFlow(false)
     val fill: StateFlow<Boolean> = _fill.asStateFlow()
+
+    // What the viewer waited for, read by [figures] for the playback measures (ms, elapsedRealtime).
+    @Volatile private var loadAt = 0L
+    @Volatile private var firstFrameAt = 0L
+    @Volatile private var openMs: Long? = null
+    @Volatile private var seekAt = 0L
+    private val seeks = java.util.Collections.synchronizedList(mutableListOf<Long>())
+    @Volatile private var stallAt = 0L
+    @Volatile private var stalls = 0
+    @Volatile private var stalledMs = 0L
 
     /** The file played to its end (mpv keeps the last frame: keep-open). */
     private val _ended = MutableStateFlow(false)
@@ -128,6 +139,14 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         // The previous file's values must not be saved as this one's progress.
         _position.value = 0.0
         _duration.value = 0.0
+        loadAt = SystemClock.elapsedRealtime()
+        firstFrameAt = 0L
+        openMs = null
+        seekAt = 0L
+        seeks.clear()
+        stallAt = 0L
+        stalls = 0
+        stalledMs = 0L
         mpv.setPropertyString("start", if (start > 0) start.toString() else "none")
         if (surfaceAttached) {
             mpv.command(arrayOf("loadfile", url, "replace"))
@@ -140,9 +159,41 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
     fun pause() = mpv.setPropertyBoolean("pause", true)
 
-    fun seekTo(seconds: Double) = mpv.command(arrayOf("seek", seconds.toString(), "absolute"))
+    fun seekTo(seconds: Double) {
+        markSeek()
+        mpv.command(arrayOf("seek", seconds.toString(), "absolute"))
+    }
 
-    fun seekBy(seconds: Int) = mpv.command(arrayOf("seek", seconds.toString(), "relative"))
+    fun seekBy(seconds: Int) {
+        markSeek()
+        mpv.command(arrayOf("seek", seconds.toString(), "relative"))
+    }
+
+    /** A seek made while another one is under way is timed from the first. */
+    private fun markSeek() {
+        if (openMs != null && seekAt == 0L) seekAt = SystemClock.elapsedRealtime()
+    }
+
+    /** What the viewer waited for since the file was asked for: opening, seeks, stalls. */
+    fun figures(): PlayerFigures {
+        fun p(name: String) = mpv.getPropertyString(name)?.takeIf { it.isNotBlank() }
+        val video = listOfNotNull(
+            p("video-format"),
+            p("video-params/w")?.let { w -> p("video-params/h")?.let { h -> "${w}x$h" } },
+            p("hwdec-current")?.takeIf { it != "no" } ?: "logiciel",
+        ).joinToString(" ")
+        val now = SystemClock.elapsedRealtime()
+        return PlayerFigures(
+            openMs = openMs,
+            seeksMs = seeks.toList(),
+            stalls = stalls,
+            stalledMs = stalledMs + (if (stallAt != 0L) now - stallAt else 0L),
+            watchedS = if (firstFrameAt != 0L) (now - firstFrameAt) / 1000 else 0L,
+            video = video.ifBlank { null },
+            droppedFrames = p("frame-drop-count")?.toIntOrNull(),
+            duration = _duration.value,
+        )
+    }
 
     fun selectAudio(id: Int) = mpv.setPropertyString("aid", id.toString())
 
@@ -222,7 +273,10 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     override fun eventProperty(property: String, value: Boolean) {
         when (property) {
             "pause" -> _paused.value = value
-            "paused-for-cache" -> _buffering.value = value
+            "paused-for-cache" -> {
+                _buffering.value = value
+                countStall(value)
+            }
             "core-idle" -> if (!value) _buffering.value = false
             "eof-reached" -> _ended.value = value
         }
@@ -230,8 +284,31 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
     override fun eventProperty(property: String, value: String) {}
 
+    /** A wait for the network while playing; those of the opening and of a seek are timed with them. */
+    private fun countStall(waiting: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (waiting) {
+            if (openMs != null && seekAt == 0L && stallAt == 0L) stallAt = now
+        } else if (stallAt != 0L) {
+            stalls++
+            stalledMs += now - stallAt
+            stallAt = 0L
+        }
+    }
+
     override fun event(eventId: Int) {
         when (eventId) {
+            // Playback starts, or starts again after a seek: the picture moves.
+            PLAYBACK_RESTART -> {
+                val now = SystemClock.elapsedRealtime()
+                if (openMs == null) {
+                    openMs = now - loadAt
+                    firstFrameAt = now
+                } else if (seekAt != 0L) {
+                    seeks += now - seekAt
+                    seekAt = 0L
+                }
+            }
             MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> {
                 // mpv only finds subtitles next to local files: add the NAS ones by hand.
                 externalSubtitles.forEach { mpv.command(arrayOf("sub-add", it, "auto")) }
@@ -320,6 +397,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     private companion object {
         const val TAG = "MpvPlayer"
         const val VO = "gpu-next"
+
+        /** MPV_EVENT_PLAYBACK_RESTART in mpv's client.h. */
+        const val PLAYBACK_RESTART = 21
 
         fun languageName(tag: String): String? {
             val name = Locale.forLanguageTag(tag).getDisplayLanguage(Locale.FRENCH)

@@ -7,6 +7,8 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -36,7 +40,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.library.Found
 import io.github.mkdevtests.umbra.library.Library
+import io.github.mkdevtests.umbra.library.SearchFilters
 import io.github.mkdevtests.umbra.library.SearchKind
+import io.github.mkdevtests.umbra.library.decadeLabel
 import io.github.mkdevtests.umbra.library.decadesOf
 import io.github.mkdevtests.umbra.library.genresOf
 import kotlinx.coroutines.delay
@@ -118,22 +124,24 @@ fun SearchScreen(
                 )
             }
         }
-        ChipRow {
-            items(genres) { genre ->
-                FilterChip(
-                    selected = filters.genre == genre,
-                    onClick = { viewModel.searchFilters.value = filters.copy(genre = genre.takeIf { it != filters.genre }) },
-                    label = { Text(genre) },
-                )
-            }
-        }
-        ChipRow {
-            items(decades) { decade ->
-                FilterChip(
-                    selected = filters.decade == decade,
-                    onClick = { viewModel.searchFilters.value = filters.copy(decade = decade.takeIf { it != filters.decade }) },
-                    label = { Text("Années ${if (decade in 1930..1999) decade % 100 else decade}") },
-                )
+        Row(
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Dropdown(
+                text = filters.genre ?: "Genre",
+                active = filters.genre != null,
+                options = listOf<Pair<String?, String>>(null to "Tous les genres") + genres.map { (genre, count) -> genre to "$genre ($count)" },
+                onSelect = { viewModel.searchFilters.value = filters.copy(genre = it) },
+            )
+            Dropdown(
+                text = filters.decade?.let(::decadeLabel) ?: "Années",
+                active = filters.decade != null,
+                options = listOf<Pair<Int?, String>>(null to "Toutes les années") + decades.map { (decade, count) -> decade to "${decadeLabel(decade)} ($count)" },
+                onSelect = { viewModel.searchFilters.value = filters.copy(decade = it) },
+            )
+            if (filters != SearchFilters()) {
+                TextButton(onClick = { viewModel.searchFilters.value = SearchFilters() }) { Text("Tout effacer") }
             }
         }
         val found = results ?: return@Column
@@ -146,6 +154,20 @@ fun SearchScreen(
             },
             onClick = { key -> if (found.first { it.key == key }.isShow) onOpenShow(key) else onOpenMovie(key) },
         )
+    }
+}
+
+/** A filter chip opening its list of choices: "Genre ▾". */
+@Composable
+private fun <T> Dropdown(text: String, active: Boolean, options: List<Pair<T, String>>, onSelect: (T) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        FilterChip(selected = active, onClick = { open = true }, label = { Text("$text  ▾") })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 420.dp)) {
+            options.forEach { (value, label) ->
+                DropdownMenuItem(text = { Text(label) }, onClick = { open = false; onSelect(value) })
+            }
+        }
     }
 }
 

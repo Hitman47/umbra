@@ -6,6 +6,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import io.github.mkdevtests.umbra.library.LibraryRepository
+import io.github.mkdevtests.umbra.player.PlaybackLog
 import io.github.mkdevtests.umbra.nas.LocalStreamServer
 import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.SmbNas
@@ -19,6 +20,9 @@ import io.github.mkdevtests.umbra.history.WatchHistory
 import io.github.mkdevtests.umbra.update.Updater
 import io.github.mkdevtests.umbra.trakt.Trakt
 import io.github.mkdevtests.umbra.trakt.TraktApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import kotlin.concurrent.thread
@@ -35,11 +39,19 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
     var nas: NasRouter? = null
         private set
 
+    private val _sourceList = MutableStateFlow<List<SmbSource>>(emptyList())
+
+    /** The sources, for the screens that list them. */
+    val sourceList: StateFlow<List<SmbSource>> = _sourceList.asStateFlow()
+
     val streamServer by lazy { LocalStreamServer { nas } }
 
     val library by lazy { LibraryRepository(this) }
 
     val updater by lazy { Updater(this, OkHttpClient()) }
+
+    /** What the last playbacks cost to open, seek and play. */
+    val measures by lazy { PlaybackLog(filesDir.resolve("playback-measures.json")) }
 
     /** The user's own data (history, match corrections), kept apart from the library cache. */
     val userData by lazy { HistoryDatabase.open(this) }
@@ -55,6 +67,7 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(::SmbNas)) }
+        _sourceList.value = nas?.sources.orEmpty()
         updater.check()
     }
 
@@ -84,6 +97,7 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
         sources.save(connections.map { it.source })
         val dropped = nas?.connections.orEmpty().filter { it !in connections }
         nas = connections.takeIf { it.isNotEmpty() }?.let(::NasRouter)
+        _sourceList.value = nas?.sources.orEmpty()
         // Closing logs off the NAS: network I/O, not allowed on the main thread.
         if (dropped.isNotEmpty()) thread { dropped.forEach { it.close() } }
     }

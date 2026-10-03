@@ -71,6 +71,23 @@ class LibraryRepository(private val app: UmbraApp) {
     /** Shows on TMDB for what the user typed, to correct a match. */
     suspend fun searchShows(query: String): List<TmdbSearchItem> = tmdb.searchShows(query)
 
+    /** A title page's TMDB details, kept for the session: opening it again costs nothing. */
+    private val extras = java.util.concurrent.ConcurrentHashMap<String, Extras>()
+
+    suspend fun extras(movie: Movie): Extras? {
+        val id = movie.tmdbId ?: return null
+        extras["m:$id"]?.let { return it }
+        val details = tmdb.movieExtras(id)
+        val saga = details.collection?.let { runCatching { tmdb.collection(it.id) }.getOrNull() }
+        return movieExtras(movie, details, saga, _library.value).also { extras["m:$id"] = it }
+    }
+
+    suspend fun extras(show: Show): Extras? {
+        val id = show.tmdbId ?: return null
+        extras["t:$id"]?.let { return it }
+        return showExtras(show, tmdb.showExtras(id), _library.value).also { extras["t:$id"] = it }
+    }
+
     /** TMDB seasons of a show, to place a folder in one of them. */
     suspend fun seasonsOf(tmdbId: Int): List<TmdbSeasonSummary> = tmdb.show(tmdbId).seasons
 
@@ -107,6 +124,16 @@ class LibraryRepository(private val app: UmbraApp) {
         }
     }
 
+    /** A folder was left out: its titles go, nothing else to scan. */
+    fun onFolderExcluded() {
+        scope.launch {
+            loadJob.join()
+            val library = _library.value.within(app.nas)
+            _library.value = library
+            runCatching { save(library) }.onFailure { Log.w(TAG, "library not saved", it) }
+        }
+    }
+
     @Synchronized
     fun startScan() {
         if (scanJob?.isActive == true) return
@@ -127,6 +154,7 @@ class LibraryRepository(private val app: UmbraApp) {
                 val tvdbRequests = tvdb?.requests?.get() ?: 0
                 val result = scanner.scan(previous, key)
                 _library.value = result
+                extras.clear() // "in the library" may have changed
                 save(result)
                 numberings.save()
                 rematch -= again
@@ -158,10 +186,10 @@ class LibraryRepository(private val app: UmbraApp) {
         }
     }
 
-    /** Only the titles stored on the shares of [nas]. */
+    /** Only the titles stored on the shares of [nas], out of the excluded folders. */
     private fun Library.within(nas: NasRouter?): Library {
         val roots = nas?.let { router -> router.sources.flatMap(router::rootsOf) }.orEmpty().mapTo(HashSet()) { it.lowercase() }
-        fun kept(file: String) = file.substringBefore('\\').lowercase() in roots
+        fun kept(file: String) = file.substringBefore('\\').lowercase() in roots && nas?.isExcluded(file) != true
         return copy(
             movies = movies.filter { kept(it.file) },
             shows = shows.mapNotNull { show ->

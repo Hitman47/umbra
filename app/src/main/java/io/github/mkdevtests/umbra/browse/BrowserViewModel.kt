@@ -60,6 +60,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     val hasSource get() = umbra.nas != null
     val sources: List<SmbSource> get() = umbra.nas?.sources.orEmpty()
+    val sourceList: StateFlow<List<SmbSource>> = umbra.sourceList
 
     init {
         if (hasSource) open("")
@@ -169,6 +170,21 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) { connection.close() }
             e.toUserMessage()
         }
+    }
+
+    /** Leaves out the folder at [path]: no longer scanned, browsed nor played. Shows its parent. */
+    fun exclude(path: String) {
+        val source = umbra.nas?.sourceOf(path) ?: return
+        val updated = source.copy(excluded = (source.excluded + path).distinct())
+        umbra.saveSource(updated, SmbNas(updated))
+        open(path.substringBeforeLast('\\'))
+    }
+
+    /** Takes [folder] back into [source]. */
+    fun include(source: SmbSource, folder: String) {
+        val updated = source.copy(excluded = source.excluded - folder)
+        umbra.saveSource(updated, SmbNas(updated))
+        refresh()
     }
 
     fun remove(source: SmbSource) {

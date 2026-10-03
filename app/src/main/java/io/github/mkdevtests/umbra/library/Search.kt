@@ -96,14 +96,20 @@ fun searchResults(
     }
 }
 
-/** Genres of the library, the most common first. */
-fun genresOf(library: Library): List<String> =
-    (library.movies.flatMap { it.genres } + library.shows.flatMap { it.genres })
-        .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }
+/** Genres of the library and their number of titles, in alphabetical order. */
+fun genresOf(library: Library): List<Pair<String, Int>> {
+    val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
+    return (library.movies.flatMap { it.genres } + library.shows.flatMap { it.genres })
+        .groupingBy { it }.eachCount().toList().sortedWith { a, b -> collator.compare(a.first, b.first) }
+}
 
-/** Decades of the library, the latest first. */
-fun decadesOf(library: Library): List<Int> =
-    (library.movies.mapNotNull { it.year } + library.shows.mapNotNull { it.year }).map { it / 10 * 10 }.distinct().sortedDescending()
+/** Decades of the library and their number of titles, the latest first. */
+fun decadesOf(library: Library): List<Pair<Int, Int>> =
+    (library.movies.mapNotNull { it.year } + library.shows.mapNotNull { it.year })
+        .groupingBy { it / 10 * 10 }.eachCount().toList().sortedByDescending { it.first }
+
+/** "Années 90", "Années 2010". */
+fun decadeLabel(decade: Int) = "Années ${if (decade in 1930..1999) decade % 100 else decade}"
 
 private fun keep(hideKey: String, genres: List<String>, year: Int?, seen: Seen, hidden: Set<String>, filters: SearchFilters): Boolean =
     (hideKey in hidden) == filters.hidden &&

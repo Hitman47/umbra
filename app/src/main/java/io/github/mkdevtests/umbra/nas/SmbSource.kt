@@ -15,8 +15,13 @@ data class SmbSource(
     val name: String = "",
     /** Name of a share in the app's paths when it isn't the share's own ("Media (Zima 2)"): see [withRoots]. */
     val roots: Map<String, String> = emptyMap(),
+    /** Folders left out, as app paths ("Media\Photos"): not scanned, browsed nor played. */
+    val excluded: List<String> = emptyList(),
 ) {
     val label get() = name.ifBlank { host }
+
+    /** [path] is an excluded folder or inside one. */
+    fun isExcluded(path: String) = excluded.any { path.equals(it, ignoreCase = true) || path.startsWith("$it\\", ignoreCase = true) }
 
     /** First folder of the app's paths for [share]. */
     fun rootOf(share: String) = roots[share] ?: share

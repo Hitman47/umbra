@@ -25,6 +25,7 @@ private data class StoredSource(
     val password: String = "",
     val domain: String = "",
     val roots: Map<String, String> = emptyMap(),
+    val excluded: List<String> = emptyList(),
 )
 
 /**
@@ -42,11 +43,11 @@ class SourceStore(context: Context) {
         return runCatching { json.decodeFromString<List<StoredSource>>(stored) }
             .onFailure { Log.w(TAG, "sources unreadable", it) }
             .getOrDefault(emptyList())
-            .map { SmbSource(it.host, it.shares, it.username, it.password.let(::decrypt).orEmpty(), it.domain, it.id, it.name, it.roots) }
+            .map { SmbSource(it.host, it.shares, it.username, it.password.let(::decrypt).orEmpty(), it.domain, it.id, it.name, it.roots, it.excluded) }
     }
 
     fun save(sources: List<SmbSource>) = prefs.edit {
-        val stored = sources.map { StoredSource(it.id, it.name, it.host, it.shares, it.username, encrypt(it.password), it.domain, it.roots) }
+        val stored = sources.map { StoredSource(it.id, it.name, it.host, it.shares, it.username, encrypt(it.password), it.domain, it.roots, it.excluded) }
         putString(KEY_LIST, json.encodeToString(stored))
         listOf(KEY_HOST, KEY_SHARE, KEY_SHARES, KEY_USER, KEY_PASSWORD, KEY_DOMAIN).forEach(::remove)
     }

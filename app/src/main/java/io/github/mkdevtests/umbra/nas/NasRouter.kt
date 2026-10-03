@@ -26,22 +26,27 @@ class NasRouter(val connections: List<SmbNas>) : Closeable {
     /** The source holding [path]. */
     fun sourceOf(path: String): SmbSource? = byRoot[path.substringBefore('\\').lowercase()]?.first?.source
 
+    /** [path] is in a folder the user left out. */
+    fun isExcluded(path: String) = sourceOf(path)?.isExcluded(path) == true
+
     fun list(path: String): List<NasEntry> {
         if (path.isEmpty()) {
             return sources.flatMap(::rootsOf).sortedWith(::naturalCompare).map { NasEntry(it, it, isDirectory = true, size = 0) }
         }
         val root = path.substringBefore('\\')
         val (nas, share) = route(root)
+        if (nas.source.isExcluded(path)) return emptyList()
         val prefix = "$share\\"
-        return nas.list(share + path.substring(root.length)).map { entry ->
-            entry.copy(path = root + "\\" + entry.path.removePrefix(prefix))
-        }
+        return nas.list(share + path.substring(root.length))
+            .map { entry -> entry.copy(path = root + "\\" + entry.path.removePrefix(prefix)) }
+            .filterNot { nas.source.isExcluded(it.path) }
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */
     fun open(path: String): NasFile {
         val root = path.substringBefore('\\')
         val (nas, share) = route(root)
+        if (nas.source.isExcluded(path)) throw IOException("Dossier exclu de la bibliothèque")
         return nas.open(share + path.substring(root.length))
     }
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -26,7 +27,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,12 +68,33 @@ fun BrowserScreen(
     library: Library,
     onOpenMovie: (String) -> Unit,
     onOpenShow: (String) -> Unit,
+    /** A folder was just left out: its titles leave the library. */
+    onExcluded: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     val index = remember(library) { PathIndex(library) }
+    var excluding by remember { mutableStateOf<String?>(null) }
 
     BackHandler(enabled = state.path.isNotEmpty()) { viewModel.up() }
+
+    excluding?.let { path ->
+        AlertDialog(
+            onDismissRequest = { excluding = null },
+            title = { Text("Exclure « ${path.substringAfterLast('\\')} » ?") },
+            text = {
+                Text("Ce dossier n'est plus analysé ni affiché, et ses vidéos ne sont plus lisibles. Pour le rétablir : Réglages › Sources.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    excluding = null
+                    viewModel.exclude(path)
+                    onExcluded()
+                }) { Text("Exclure") }
+            },
+            dismissButton = { TextButton(onClick = { excluding = null }) { Text("Annuler") } },
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -90,6 +114,8 @@ fun BrowserScreen(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // A folder inside a share; a whole share is left out by unticking it in the source.
+            if ('\\' in state.path) TextButton(onClick = { excluding = state.path }) { Text("Exclure") }
         }
         HorizontalDivider()
 

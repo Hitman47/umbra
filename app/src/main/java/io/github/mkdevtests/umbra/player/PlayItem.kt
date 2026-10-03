@@ -27,3 +27,20 @@ data class PlayerTrack(
     val detail: String,
     val selected: Boolean,
 )
+
+/** What the player measured of one file; see [MpvPlayer.figures]. */
+data class PlayerFigures(
+    /** From the request to the first frame. */
+    val openMs: Long?,
+    val seeksMs: List<Long>,
+    /** Waits for the network while playing, outside openings and seeks. */
+    val stalls: Int,
+    val stalledMs: Long,
+    /** Time since the first frame. */
+    val watchedS: Long,
+    /** "hevc 3840x2160 mediacodec". */
+    val video: String?,
+    val droppedFrames: Int?,
+    /** Seconds. */
+    val duration: Double,
+)
