@@ -431,8 +431,11 @@ private fun TraktSection(trakt: Trakt) {
                     TextButton(onClick = trakt::cancelConnect) { Text("Annuler") }
                 }
             }
-            !status.connected -> Item("Compte", "Non connecté. Nyxara lit l'historique Trakt et y ajoute ce que tu regardes ; il n'efface jamais rien.") {
-                TextButton(onClick = trakt::connect) { Text("Connecter ›") }
+            !status.connected -> Item(
+                "Compte",
+                if (status.connecting) "Demande du code à Trakt…" else "Non connecté. Nyxara lit l'historique Trakt et y ajoute ce que tu regardes ; il n'efface jamais rien.",
+            ) {
+                TextButton(onClick = trakt::connect, enabled = !status.connecting) { Text(if (status.error != null) "Réessayer ›" else "Connecter ›") }
             }
             else -> {
                 val last = if (status.lastSync > 0) DateUtils.getRelativeTimeSpanString(status.lastSync).toString() else "jamais"
@@ -542,16 +545,25 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
 /** One settings row: label and explanation on the left, controls on the right. */
 @Composable
 private fun ColumnScope.Item(label: String, detail: String? = null, controls: (@Composable () -> Unit)? = null) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
+        val text = @Composable { modifier: Modifier ->
+            Column(modifier = modifier) {
+                Text(label, style = MaterialTheme.typography.bodyLarge)
+                detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
         }
-        controls?.let { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { it() } }
+        if (maxWidth < 600.dp) {
+            // A phone: the controls under the text, on as many lines as they need, the text keeps the width.
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                text(Modifier.fillMaxWidth())
+                controls?.let { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { it() } }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                text(Modifier.weight(1f))
+                controls?.let { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { it() } }
+            }
+        }
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.background)
 }

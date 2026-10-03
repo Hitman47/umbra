@@ -38,6 +38,8 @@ data class TraktStatus(
     /** Code to enter on the Trakt site while connecting. */
     val pendingCode: TraktDeviceCode? = null,
     val error: String? = null,
+    /** Asking Trakt for a code: the button waits. */
+    val connecting: Boolean = false,
     /**
      * Trakt unreachable while the device has network, and Android's battery
      * optimization on for Nyxara: it cuts the app's network, the user can lift it.
@@ -205,9 +207,11 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     fun connect() {
         if (connectJob?.isActive == true || !api.configured) return
         connectJob = scope.launch {
+            _status.update { it.copy(connecting = true, error = null) }
             try {
-                val code = api.deviceCode()
-                _status.update { it.copy(pendingCode = code, error = null) }
+                // Android may give the network back a few seconds late: asked again before giving up.
+                val code = retryOnNetwork { api.deviceCode() }
+                _status.update { it.copy(pendingCode = code, error = null, connecting = false) }
                 val deadline = System.currentTimeMillis() + code.expiresIn * 1000L
                 var interval = code.interval.coerceAtLeast(1) * 1000L
                 while (System.currentTimeMillis() < deadline) {
@@ -221,6 +225,10 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                             418 -> throw IllegalStateException("Connexion refusée sur Trakt.")
                             else -> throw IllegalStateException("Code expiré, recommence.")
                         }
+                    } catch (e: java.io.IOException) {
+                        // No answer (network cut, app in the background): the code stays valid, asked again.
+                        Log.i(TAG, "device token: ${e.message}")
+                        continue
                     }
                     saveToken(token)
                     _status.update { it.copy(connected = true, pendingCode = null) }
@@ -229,12 +237,24 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                 }
                 throw IllegalStateException("Code expiré, recommence.")
             } catch (e: CancellationException) {
-                _status.update { it.copy(pendingCode = null) }
+                _status.update { it.copy(pendingCode = null, connecting = false) }
                 throw e
             } catch (e: Exception) {
-                _status.update { it.copy(pendingCode = null, error = e.traktMessage()) }
+                _status.update { it.copy(pendingCode = null, connecting = false, error = e.traktMessage()) }
             }
         }
+    }
+
+    private suspend fun <T> retryOnNetwork(block: suspend () -> T): T {
+        repeat(SYNC_ATTEMPTS - 1) { attempt ->
+            try {
+                return block()
+            } catch (e: java.io.IOException) {
+                if (!e.isNetwork()) throw e
+                delay(SYNC_RETRY_MS * (attempt + 1))
+            }
+        }
+        return block()
     }
 
     fun cancelConnect() {
