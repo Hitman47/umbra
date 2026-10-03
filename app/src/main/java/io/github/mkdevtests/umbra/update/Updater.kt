@@ -49,16 +49,30 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
     private val _state = MutableStateFlow<UpdateState>(UpdateState.None)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
+    /** Outcome of the last check, for the settings screen ("À jour"); null before any. */
+    private val _lastCheck = MutableStateFlow<String?>(null)
+    val lastCheck: StateFlow<String?> = _lastCheck.asStateFlow()
+
     /** Looks for a newer release, quietly: no network, no release or a GitHub error just means no update. */
     fun check() {
         if (!BuildConfig.UPDATES) return
+        if (_state.value is UpdateState.Downloading || _state.value is UpdateState.Installing) return
         scope.launch {
             apkFile.delete() // left over by an earlier update
+            _lastCheck.value = "Recherche…"
             runCatching { latestRelease() }
-                .onFailure { Log.w(TAG, "update check failed", it) }
-                .getOrNull()
-                ?.takeIf { isNewer(it.version, BuildConfig.VERSION_NAME) }
-                ?.let { _state.value = UpdateState.Available(it) }
+                .onSuccess { release ->
+                    if (release != null && isNewer(release.version, BuildConfig.VERSION_NAME)) {
+                        _state.value = UpdateState.Available(release)
+                        _lastCheck.value = "Umbra ${release.version} disponible"
+                    } else {
+                        _lastCheck.value = "À jour"
+                    }
+                }
+                .onFailure {
+                    Log.w(TAG, "update check failed", it)
+                    _lastCheck.value = "Impossible de joindre GitHub"
+                }
         }
     }
 

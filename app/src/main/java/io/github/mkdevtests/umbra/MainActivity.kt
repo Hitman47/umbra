@@ -28,6 +28,7 @@ import io.github.mkdevtests.umbra.ui.library.HomeTab
 import io.github.mkdevtests.umbra.ui.library.LibraryViewModel
 import io.github.mkdevtests.umbra.ui.library.MovieDetailScreen
 import io.github.mkdevtests.umbra.ui.library.ShowDetailScreen
+import io.github.mkdevtests.umbra.ui.settings.SettingsScreen
 import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
 
 class MainActivity : ComponentActivity() {
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
 private sealed interface Detail {
     data class MovieDetail(val file: String) : Detail
     data class ShowDetail(val key: String) : Detail
+    data object Settings : Detail
 }
 
 /** NAS setup until a source works, then the library. */
@@ -57,11 +59,12 @@ private fun UmbraRoot(
     libraryViewModel: LibraryViewModel = viewModel(),
 ) {
     val context = LocalContext.current
+    val app = context.applicationContext as UmbraApp
     var editingSource by rememberSaveable { mutableStateOf(!browserViewModel.hasSource) }
     var tab by rememberSaveable { mutableStateOf(HomeTab.Movies) }
     val stack = remember { mutableStateListOf<Detail>() }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) context.startActivity(PlayerActivity.intent(context, uri.toString(), uri.lastPathSegment))
+        if (uri != null) context.startActivity(PlayerActivity.intent(context, uri.toString(), uri.lastPathSegment ?: "Vidéo"))
     }
 
     if (editingSource) {
@@ -87,15 +90,23 @@ private fun UmbraRoot(
         null -> HomeScreen(
             libraryViewModel = libraryViewModel,
             browserViewModel = browserViewModel,
-            updater = (context.applicationContext as UmbraApp).updater,
+            updater = app.updater,
             tab = tab,
             onTabChange = { tab = it },
             onOpenMovie = { stack.add(Detail.MovieDetail(it)) },
             onOpenShow = { stack.add(Detail.ShowDetail(it)) },
             onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
-            onEditSource = { editingSource = true },
+            onOpenSettings = { stack.add(Detail.Settings) },
         )
         is Detail.MovieDetail -> libraryViewModel.movie(detail.file)?.let { MovieDetailScreen(it, libraryViewModel, back) } ?: back()
         is Detail.ShowDetail -> libraryViewModel.show(detail.key)?.let { ShowDetailScreen(it, libraryViewModel, back) } ?: back()
+        Detail.Settings -> SettingsScreen(
+            store = app.settings,
+            updater = app.updater,
+            source = browserViewModel.source,
+            imageCache = context.cacheDir.resolve("image_cache"),
+            onEditSource = { editingSource = true },
+            onBack = back,
+        )
     }
 }

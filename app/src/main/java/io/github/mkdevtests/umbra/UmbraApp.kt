@@ -10,6 +10,7 @@ import io.github.mkdevtests.umbra.nas.LocalStreamServer
 import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.SourceStore
+import io.github.mkdevtests.umbra.settings.SettingsStore
 import io.github.mkdevtests.umbra.update.Updater
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
@@ -19,6 +20,8 @@ import kotlin.concurrent.thread
 class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     val sources by lazy { SourceStore(this) }
+
+    val settings by lazy { SettingsStore(this) }
 
     @Volatile
     var smb: SmbNas? = null

@@ -9,6 +9,7 @@ import io.github.mkdevtests.umbra.library.Library
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.ScanState
 import io.github.mkdevtests.umbra.library.Show
+import io.github.mkdevtests.umbra.player.PlayItem
 import io.github.mkdevtests.umbra.player.PlayerActivity
 import kotlinx.coroutines.flow.StateFlow
 
@@ -33,15 +34,26 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun show(key: String): Show? = library.value.shows.firstOrNull { it.key == key }
 
-    fun playIntent(movie: Movie): Intent = play(movie.file, movie.title, movie.subtitles)
+    fun playIntent(movie: Movie): Intent =
+        PlayerActivity.intent(getApplication(), listOf(PlayItem(url(movie.file), movie.title, subtitles = movie.subtitles.map(::url))))
 
+    /** Plays [episode], then the following ones (specials only after a special). */
     fun playIntent(show: Show, episode: Episode): Intent {
-        val code = "S%02dE%02d".format(episode.season, episode.number)
-        return play(episode.file, listOfNotNull(show.title, code, episode.title).joinToString(" · "), episode.subtitles)
+        val episodes = show.seasons.sortedBy { it.number }
+            .filter { episode.season == 0 || it.number > 0 }
+            .flatMap { it.episodes }
+        val start = episodes.indexOfFirst { it.file == episode.file }.coerceAtLeast(0)
+        val queue = (listOf(episode) + episodes.drop(start + 1).take(MAX_QUEUE)).map { item ->
+            val code = "S%02dE%02d".format(item.season, item.number)
+            PlayItem(url(item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "), item.subtitles.map(::url))
+        }
+        return PlayerActivity.intent(getApplication(), queue)
     }
 
-    private fun play(file: String, title: String, subtitles: List<String>): Intent {
-        val server = umbra.streamServer
-        return PlayerActivity.intent(getApplication(), server.urlFor(file), title, subtitles.map(server::urlFor))
+    private fun url(file: String) = umbra.streamServer.urlFor(file)
+
+    private companion object {
+        /** Episodes queued after the chosen one (keeps the intent small). */
+        const val MAX_QUEUE = 50
     }
 }

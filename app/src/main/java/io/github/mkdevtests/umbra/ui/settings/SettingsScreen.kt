@@ -1,0 +1,180 @@
+package io.github.mkdevtests.umbra.ui.settings
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import io.github.mkdevtests.umbra.BuildConfig
+import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.settings.AudioLanguage
+import io.github.mkdevtests.umbra.settings.Language
+import io.github.mkdevtests.umbra.settings.SettingsStore
+import io.github.mkdevtests.umbra.settings.SubtitleSize
+import io.github.mkdevtests.umbra.update.UpdateBanner
+import io.github.mkdevtests.umbra.update.Updater
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+
+@Composable
+fun SettingsScreen(
+    store: SettingsStore,
+    updater: Updater,
+    source: SmbSource?,
+    imageCache: File,
+    onEditSource: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val settings by store.settings.collectAsState()
+    val lastCheck by updater.lastCheck.collectAsState()
+    var cacheSize by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(imageCache) {
+        cacheSize = withContext(Dispatchers.IO) { imageCache.walk().filter { it.isFile }.sumOf { it.length() } }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+        Row(modifier = Modifier.padding(start = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("← Retour") }
+            Text("Réglages", style = MaterialTheme.typography.headlineMedium)
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .widthIn(max = 900.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            Section("Profil de lecture") {
+                Item("Audio préféré", "Touchez une langue pour la monter d'un rang.") {
+                    settings.audioOrder.forEachIndexed { index, language ->
+                        FilterChip(
+                            selected = index == 0,
+                            onClick = { store.update { it.copy(audioOrder = it.audioOrder.movedUp(language)) } },
+                            label = { Text("${index + 1} · ${language.label}") },
+                        )
+                    }
+                }
+                Item("Sous-titres", "Complets, pas seulement les passages forcés. Si l'audio est déjà dans cette langue : seulement les passages étrangers.") {
+                    (Language.entries + null).forEach { language ->
+                        FilterChip(
+                            selected = settings.subtitles == language,
+                            onClick = { store.update { it.copy(subtitles = language) } },
+                            label = { Text(language?.label ?: "Aucun") },
+                        )
+                    }
+                }
+                Item("Taille des sous-titres") {
+                    SubtitleSize.entries.forEach { size ->
+                        FilterChip(
+                            selected = settings.subtitleSize == size,
+                            onClick = { store.update { it.copy(subtitleSize = size) } },
+                            label = { Text(size.label) },
+                        )
+                    }
+                }
+                Item("Si une langue manque", "La piste la plus proche est choisie : la lecture n'est jamais bloquée. Les choix s'appliquent à la prochaine vidéo ouverte.")
+            }
+
+            Section("Source") {
+                Item(
+                    "NAS",
+                    source?.let { "SMB · ${it.host} · ${it.shares.size} partage${if (it.shares.size > 1) "s" else ""}" } ?: "Aucun",
+                ) {
+                    TextButton(onClick = onEditSource) { Text("Modifier ›") }
+                }
+            }
+
+            Section("Bibliothèque") {
+                Item("Actualiser au lancement", "Seuls les fichiers nouveaux ou modifiés sont analysés.") {
+                    Switch(checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
+                }
+                Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
+            }
+
+            Section("Mises à jour") {
+                if (BuildConfig.UPDATES) {
+                    Item("Version installée", "${BuildConfig.VERSION_NAME} · GitHub ${Updater.REPOSITORY}${lastCheck?.let { " · $it" } ?: ""}") {
+                        TextButton(onClick = updater::check) { Text("Rechercher") }
+                    }
+                } else {
+                    Item("Version installée", "${BuildConfig.VERSION_NAME} · version de test, mise à jour par le PC")
+                }
+            }
+            UpdateBanner(updater)
+
+            Text(
+                "Lecture seule : Umbra ne modifie ni ne supprime jamais de fichiers sur le NAS.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+        )
+        Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large) {
+            Column { content() }
+        }
+    }
+}
+
+/** One settings row: label and explanation on the left, controls on the right. */
+@Composable
+private fun ColumnScope.Item(label: String, detail: String? = null, controls: (@Composable () -> Unit)? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        controls?.let { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { it() } }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.background)
+}
+
+private fun List<AudioLanguage>.movedUp(language: AudioLanguage): List<AudioLanguage> {
+    val index = indexOf(language)
+    if (index <= 0) return this
+    return toMutableList().apply { add(index - 1, removeAt(index)) }
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> "%.1f Go".format(bytes / (1L shl 30).toDouble())
+    else -> "${bytes / (1L shl 20)} Mo"
+}

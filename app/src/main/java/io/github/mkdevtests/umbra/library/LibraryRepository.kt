@@ -51,12 +51,13 @@ class LibraryRepository(private val app: UmbraApp) {
         return dao.search(query, limit)
     }
 
-    /** Scans unless a scan of the current share already exists. */
+    /** Scans at launch if the user wants it, or when no scan of the current shares exists. */
     fun scanIfNeeded() {
         scope.launch {
             loadJob.join()
             val source = app.smb?.source ?: return@launch
-            if (_library.value.source != keyOf(source) || _library.value.scannedAt == 0L) startScan()
+            val stale = _library.value.source != keyOf(source) || _library.value.scannedAt == 0L
+            if (stale || app.settings.settings.value.rescanAtLaunch) startScan()
         }
     }
 

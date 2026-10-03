@@ -42,7 +42,7 @@ fun HomeScreen(
     onOpenMovie: (String) -> Unit,
     onOpenShow: (String) -> Unit,
     onPickLocalFile: () -> Unit,
-    onEditSource: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val library by libraryViewModel.library.collectAsState()
     val scan by libraryViewModel.scan.collectAsState()
@@ -56,7 +56,7 @@ fun HomeScreen(
             Box(modifier = Modifier.weight(1f))
             TextButton(onClick = libraryViewModel::rescan, enabled = !scan.running) { Text("Actualiser") }
             TextButton(onClick = onPickLocalFile) { Text("Fichier local") }
-            TextButton(onClick = onEditSource) { Text("NAS") }
+            TextButton(onClick = onOpenSettings) { Text("Réglages") }
         }
         Row(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),

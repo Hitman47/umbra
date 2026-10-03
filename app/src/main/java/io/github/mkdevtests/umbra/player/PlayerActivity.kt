@@ -11,6 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,21 +21,32 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,16 +54,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import io.github.mkdevtests.umbra.UmbraApp
+import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
+import io.github.mkdevtests.umbra.settings.Settings
 import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
 import kotlinx.coroutines.delay
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 
-/** Full-screen player. Receives the media location in [EXTRA_URL]. */
+/** Full-screen player. Plays the queue in [EXTRA_QUEUE]: a film, or an episode and the ones after it. */
 class PlayerActivity : ComponentActivity() {
 
     private lateinit var player: MpvPlayer
@@ -64,13 +83,27 @@ class PlayerActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        val url = intent.getStringExtra(EXTRA_URL) ?: return finish()
-        player = MpvPlayer(this)
-        player.play(toMpvPath(url), intent.getStringArrayListExtra(EXTRA_SUBTITLES).orEmpty())
+        val queue = intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }
+        if (queue.isNullOrEmpty()) return finish()
+        val settings = (application as UmbraApp).settings.settings.value
+        player = MpvPlayer(this, settings)
+        var index by mutableIntStateOf(0)
+        fun start(item: PlayItem) = player.play(toMpvPath(item.url), item.subtitles)
+        start(queue[0])
 
         setContent {
             UmbraTheme {
-                PlayerScreen(player = player, title = intent.getStringExtra(EXTRA_TITLE) ?: url, onBack = ::finish)
+                PlayerScreen(
+                    player = player,
+                    item = queue[index],
+                    next = queue.getOrNull(index + 1),
+                    settings = settings,
+                    onNext = {
+                        index++
+                        start(queue[index])
+                    },
+                    onBack = ::finish,
+                )
             }
         }
     }
@@ -94,35 +127,49 @@ class PlayerActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val EXTRA_URL = "url"
-        private const val EXTRA_TITLE = "title"
-        private const val EXTRA_SUBTITLES = "subtitles"
+        private const val EXTRA_QUEUE = "queue"
+        private val QUEUE = ListSerializer(PlayItem.serializer())
 
-        fun intent(context: Context, url: String, title: String? = null, subtitles: List<String> = emptyList()): Intent =
-            Intent(context, PlayerActivity::class.java)
-                .putExtra(EXTRA_URL, url)
-                .putExtra(EXTRA_TITLE, title)
-                .putStringArrayListExtra(EXTRA_SUBTITLES, ArrayList(subtitles))
+        fun intent(context: Context, queue: List<PlayItem>): Intent =
+            Intent(context, PlayerActivity::class.java).putExtra(EXTRA_QUEUE, Json.encodeToString(QUEUE, queue))
+
+        fun intent(context: Context, url: String, title: String, subtitles: List<String> = emptyList()): Intent =
+            intent(context, listOf(PlayItem(url, title, subtitles = subtitles)))
     }
 }
 
+private val PanelColor = Color(0xFF14121A)
+private val SPEEDS = listOf(0.75, 1.0, 1.25, 1.5, 2.0)
+
 @Composable
-private fun PlayerScreen(player: MpvPlayer, title: String, onBack: () -> Unit) {
+private fun PlayerScreen(
+    player: MpvPlayer,
+    item: PlayItem,
+    next: PlayItem?,
+    settings: Settings,
+    onNext: () -> Unit,
+    onBack: () -> Unit,
+) {
     val position by player.position.collectAsState()
     val duration by player.duration.collectAsState()
     val paused by player.paused.collectAsState()
     val buffering by player.buffering.collectAsState()
-    val audio by player.audioLabel.collectAsState()
-    val subtitles by player.subtitleLabel.collectAsState()
+    val speed by player.speed.collectAsState()
+    val fill by player.fill.collectAsState()
+    val ended by player.ended.collectAsState()
 
     var controlsVisible by remember { mutableStateOf(true) }
+    var panelOpen by remember { mutableStateOf(false) }
+    var speedMenu by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
     // While dragging, the slider shows the finger position, not mpv's.
     var dragPosition by remember { mutableStateOf<Float?>(null) }
+    // The end-of-episode countdown, dismissed for the current file only.
+    var nextCancelled by remember(item) { mutableStateOf(false) }
 
-    LaunchedEffect(controlsVisible, paused) {
-        if (controlsVisible && !paused) {
+    LaunchedEffect(controlsVisible, paused, panelOpen, speedMenu) {
+        if (controlsVisible && !paused && !panelOpen && !speedMenu) {
             delay(4_000)
             controlsVisible = false
         }
@@ -133,13 +180,16 @@ private fun PlayerScreen(player: MpvPlayer, title: String, onBack: () -> Unit) {
             delay(1_000)
         }
     }
+    LaunchedEffect(ended) {
+        if (ended && next == null) controlsVisible = true
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                controlsVisible = !controlsVisible
+                if (panelOpen) panelOpen = false else controlsVisible = !controlsVisible
             },
     ) {
         AndroidView(
@@ -171,24 +221,40 @@ private fun PlayerScreen(player: MpvPlayer, title: String, onBack: () -> Unit) {
                     modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().safeDrawingPadding().padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = onBack) { Text("← Retour", color = Color.White) }
-                    Text(title, color = Color.White, maxLines = 1, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onBack) { Text("←", color = Color.White, fontSize = 24.sp) }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(item.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        item.subtitle?.let { Text(it, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, maxLines = 1) }
+                    }
                     TextButton(onClick = { showInfo = !showInfo }) { Text("Infos", color = Color.White) }
                 }
 
                 Row(
                     modifier = Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = { player.seekBy(-10) }) { Text("−10 s", color = Color.White, fontSize = 20.sp) }
-                    TextButton(onClick = { player.togglePause() }) {
-                        Text(if (paused) "▶" else "❚❚", color = Color.White, fontSize = 40.sp)
+                    TextButton(onClick = { player.seekBy(-10) }) { Text("−10", color = Color.White, fontSize = 22.sp) }
+                    Surface(
+                        onClick = { player.togglePause() },
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.18f),
+                        modifier = Modifier.size(88.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(if (paused) "▶" else "❚❚", color = Color.White, fontSize = 34.sp)
+                        }
                     }
-                    TextButton(onClick = { player.seekBy(10) }) { Text("+10 s", color = Color.White, fontSize = 20.sp) }
+                    TextButton(onClick = { player.seekBy(10) }) { Text("+10", color = Color.White, fontSize = 22.sp) }
                 }
 
-                Column(modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().safeDrawingPadding().padding(horizontal = 16.dp)) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .safeDrawingPadding()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val shown = dragPosition?.toDouble() ?: position
                         Text(formatTime(shown), color = Color.White, fontSize = 13.sp)
@@ -202,18 +268,184 @@ private fun PlayerScreen(player: MpvPlayer, title: String, onBack: () -> Unit) {
                             valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
                             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                         )
-                        Text(formatTime(duration), color = Color.White, fontSize = 13.sp)
+                        Text("−" + formatTime(duration - shown), color = Color.White, fontSize = 13.sp)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { player.cycleAudio() }) { Text("Audio : $audio", color = Color.White, maxLines = 1) }
-                        Spacer(Modifier.width(16.dp))
-                        TextButton(onClick = { player.cycleSubtitles() }) { Text("Sous-titres : $subtitles", color = Color.White, maxLines = 1) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Audio et sous-titres", active = panelOpen) { panelOpen = !panelOpen }
+                        Box {
+                            Pill("Vitesse ${formatSpeed(speed)}", active = speed != 1.0) { speedMenu = true }
+                            DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
+                                SPEEDS.forEach { choice ->
+                                    DropdownMenuItem(
+                                        text = { Text((if (choice == speed) "✓ " else "    ") + formatSpeed(choice)) },
+                                        onClick = {
+                                            player.setSpeed(choice)
+                                            speedMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        Pill(if (fill) "Format : remplir" else "Format : entier", active = fill) { player.toggleFill() }
+                        Spacer(Modifier.weight(1f))
+                        if (next != null) Pill("Épisode suivant ›", active = false, onClick = onNext)
                     }
                 }
             }
         }
+
+        AnimatedVisibility(
+            visible = panelOpen,
+            enter = slideInHorizontally { it },
+            exit = slideOutHorizontally { it },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            TrackPanel(player, settings)
+        }
+
+        if (ended && next != null && !nextCancelled) {
+            NextUp(
+                next = next,
+                onPlay = onNext,
+                onCancel = { nextCancelled = true; controlsVisible = true },
+                modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(32.dp),
+            )
+        }
     }
 }
+
+@Composable
+private fun Pill(text: String, active: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (active) Color.White else Color.White.copy(alpha = 0.14f),
+        contentColor = if (active) Color.Black else Color.White,
+    ) {
+        Text(text, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+    }
+}
+
+/** Side panel: audio and subtitle tracks, subtitle delay. */
+@Composable
+private fun TrackPanel(player: MpvPlayer, settings: Settings) {
+    val audio by player.audioTracks.collectAsState()
+    val subtitles by player.subtitleTracks.collectAsState()
+    val delay by player.subtitleDelay.collectAsState()
+    val subtitlesOn = subtitles.any { it.selected }
+
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(420.dp)
+            .background(PanelColor)
+            // Taps inside the panel must not close it.
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 16.dp),
+    ) {
+        PanelTitle("Audio")
+        if (audio.isEmpty()) PanelNote("Aucune piste audio")
+        audio.forEach { track -> TrackRow(track.label, track.detail, track.selected) { player.selectAudio(track.id) } }
+
+        PanelTitle("Sous-titres")
+        subtitles.forEach { track -> TrackRow(track.label, track.detail, track.selected) { player.selectSubtitles(track.id) } }
+        TrackRow("Désactivés", null, !subtitlesOn) { player.selectSubtitles(NO_SUBTITLES) }
+
+        PanelTitle("Décalage sous-titres")
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            OutlinedButton(onClick = { player.shiftSubtitles(-0.1) }, enabled = subtitlesOn) { Text("−", color = Color.White) }
+            Text(
+                "%+.1f s".format(delay).replace('.', ',').replace("+0,0", "0,0"),
+                color = Color.White,
+                fontSize = 16.sp,
+                modifier = Modifier.widthIn(min = 64.dp),
+            )
+            OutlinedButton(onClick = { player.shiftSubtitles(0.1) }, enabled = subtitlesOn) { Text("+", color = Color.White) }
+            if (delay != 0.0) TextButton(onClick = { player.shiftSubtitles(-delay) }) { Text("Remettre à 0") }
+        }
+        PanelNote("Positif : les sous-titres arrivent plus tard.")
+
+        Spacer(Modifier.size(16.dp))
+        PanelNote(profileSummary(settings))
+    }
+}
+
+@Composable
+private fun PanelTitle(text: String) {
+    Text(
+        text,
+        color = Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 6.dp),
+    )
+}
+
+@Composable
+private fun PanelNote(text: String) {
+    Text(
+        text,
+        color = Color.White.copy(alpha = 0.55f),
+        fontSize = 12.sp,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun TrackRow(label: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(if (selected) Color.White.copy(alpha = 0.08f) else Color.Transparent)
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = Color.White, fontSize = 15.sp)
+            if (!detail.isNullOrEmpty()) Text(detail, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+        }
+        if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+    }
+}
+
+/** End of an episode: the next one starts after a short countdown, unless cancelled. */
+@Composable
+private fun NextUp(next: PlayItem, onPlay: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+    var remaining by remember(next) { mutableIntStateOf(8) }
+    LaunchedEffect(next) {
+        while (remaining > 0) {
+            delay(1_000)
+            remaining--
+        }
+        onPlay()
+    }
+    Surface(color = PanelColor, shape = RoundedCornerShape(16.dp), modifier = modifier.widthIn(max = 420.dp)) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Épisode suivant dans $remaining s", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+            Text(next.subtitle ?: next.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Lire maintenant", active = true, onClick = onPlay)
+                Pill("Annuler", active = false, onClick = onCancel)
+            }
+        }
+    }
+}
+
+private fun profileSummary(settings: Settings): String {
+    val audio = settings.audioOrder.joinToString(", puis ") { if (it.language == null) it.label else it.label.lowercase() }
+    val subtitles = settings.subtitles?.let { "sous-titres ${it.label.lowercase()} non forcés" } ?: "sans sous-titres"
+    return "Choisi par ton profil : audio $audio ; $subtitles. Modifiable dans Réglages."
+}
+
+private fun formatSpeed(speed: Double) =
+    (if (speed % 1.0 == 0.0) speed.toInt().toString() else speed.toString().replace('.', ',')) + "×"
 
 private fun formatTime(seconds: Double): String {
     val total = seconds.toLong().coerceAtLeast(0)

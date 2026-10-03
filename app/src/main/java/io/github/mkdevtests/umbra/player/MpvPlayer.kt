@@ -5,9 +5,15 @@ import android.util.Log
 import android.view.SurfaceHolder
 import dev.jdtech.mpv.MPVLib
 import dev.jdtech.mpv.MPVLib.MpvFormat
+import io.github.mkdevtests.umbra.settings.Language
+import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
+import io.github.mkdevtests.umbra.settings.Settings
+import io.github.mkdevtests.umbra.settings.Track
+import io.github.mkdevtests.umbra.settings.chooseTracks
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Locale
 
 /**
  * Owns one libmpv instance and exposes its playback state as flows.
@@ -18,12 +24,15 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * mpv calls the observer from its own event thread; StateFlow is thread-safe,
  * so values are published from there directly.
+ *
+ * Audio and subtitle tracks follow the user's [settings] when a file opens.
  */
-class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback {
+class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.EventObserver, SurfaceHolder.Callback {
 
     private val mpv = MPVLib.create(context.applicationContext)
         ?: error("libmpv could not be created")
     private var pendingFile: String? = null
+    private var surfaceAttached = false
     private var externalSubtitles: List<String> = emptyList()
 
     private val _position = MutableStateFlow(0.0)
@@ -38,11 +47,25 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
     private val _buffering = MutableStateFlow(true)
     val buffering: StateFlow<Boolean> = _buffering.asStateFlow()
 
-    private val _audioLabel = MutableStateFlow("")
-    val audioLabel: StateFlow<String> = _audioLabel.asStateFlow()
+    private val _audioTracks = MutableStateFlow<List<PlayerTrack>>(emptyList())
+    val audioTracks: StateFlow<List<PlayerTrack>> = _audioTracks.asStateFlow()
 
-    private val _subtitleLabel = MutableStateFlow("")
-    val subtitleLabel: StateFlow<String> = _subtitleLabel.asStateFlow()
+    private val _subtitleTracks = MutableStateFlow<List<PlayerTrack>>(emptyList())
+    val subtitleTracks: StateFlow<List<PlayerTrack>> = _subtitleTracks.asStateFlow()
+
+    private val _subtitleDelay = MutableStateFlow(0.0)
+    val subtitleDelay: StateFlow<Double> = _subtitleDelay.asStateFlow()
+
+    private val _speed = MutableStateFlow(1.0)
+    val speed: StateFlow<Double> = _speed.asStateFlow()
+
+    /** Zoomed to fill the screen (cropping the edges) instead of showing the whole picture. */
+    private val _fill = MutableStateFlow(false)
+    val fill: StateFlow<Boolean> = _fill.asStateFlow()
+
+    /** The file played to its end (mpv keeps the last frame: keep-open). */
+    private val _ended = MutableStateFlow(false)
+    val ended: StateFlow<Boolean> = _ended.asStateFlow()
 
     init {
         val cacheDir = context.cacheDir.absolutePath
@@ -71,6 +94,7 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
         mpv.setOptionString("sub-fonts-dir", "/system/fonts")
         mpv.setOptionString("osd-fonts-dir", "/system/fonts")
         mpv.setOptionString("sub-font", "Roboto")
+        mpv.setOptionString("sub-scale", settings.subtitleSize.scale.toString())
 
         mpv.setOptionString("cache", "yes")
         mpv.setOptionString("demuxer-max-bytes", "64MiB")
@@ -90,14 +114,22 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
         mpv.observeProperty("pause", MpvFormat.MPV_FORMAT_FLAG)
         mpv.observeProperty("paused-for-cache", MpvFormat.MPV_FORMAT_FLAG)
         mpv.observeProperty("core-idle", MpvFormat.MPV_FORMAT_FLAG)
-        mpv.observeProperty("aid", MpvFormat.MPV_FORMAT_STRING)
-        mpv.observeProperty("sid", MpvFormat.MPV_FORMAT_STRING)
+        mpv.observeProperty("track-list", MpvFormat.MPV_FORMAT_NONE)
+        mpv.observeProperty("sub-delay", MpvFormat.MPV_FORMAT_DOUBLE)
+        mpv.observeProperty("speed", MpvFormat.MPV_FORMAT_DOUBLE)
+        mpv.observeProperty("eof-reached", MpvFormat.MPV_FORMAT_FLAG)
     }
 
-    /** Plays [url] as soon as a Surface is available, with extra subtitle files. */
+    /** Plays [url] with extra subtitle files: now, or as soon as a Surface is available. */
     fun play(url: String, subtitles: List<String> = emptyList()) {
-        pendingFile = url
         externalSubtitles = subtitles
+        _ended.value = false
+        _buffering.value = true
+        if (surfaceAttached) {
+            mpv.command(arrayOf("loadfile", url, "replace"))
+        } else {
+            pendingFile = url
+        }
     }
 
     fun togglePause() = mpv.command(arrayOf("cycle", "pause"))
@@ -108,9 +140,20 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
 
     fun seekBy(seconds: Int) = mpv.command(arrayOf("seek", seconds.toString(), "relative"))
 
-    fun cycleAudio() = mpv.command(arrayOf("cycle", "aid"))
+    fun selectAudio(id: Int) = mpv.setPropertyString("aid", id.toString())
 
-    fun cycleSubtitles() = mpv.command(arrayOf("cycle", "sid"))
+    /** [NO_SUBTITLES] turns them off. */
+    fun selectSubtitles(id: Int) = mpv.setPropertyString("sid", if (id == NO_SUBTITLES) "no" else id.toString())
+
+    /** Subtitles later (positive) or earlier, in seconds; kept for the next files. */
+    fun shiftSubtitles(seconds: Double) = mpv.command(arrayOf("add", "sub-delay", seconds.toString()))
+
+    fun setSpeed(speed: Double) = mpv.setPropertyDouble("speed", speed)
+
+    fun toggleFill() {
+        _fill.value = !_fill.value
+        mpv.setPropertyDouble("panscan", if (_fill.value) 1.0 else 0.0)
+    }
 
     /** Technical summary for the debug overlay (decoder, HDR, drops). */
     fun debugInfo(): String {
@@ -133,6 +176,7 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         mpv.attachSurface(holder.surface)
+        surfaceAttached = true
         mpv.setOptionString("force-window", "yes")
         val file = pendingFile
         if (file != null) {
@@ -151,11 +195,14 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
         mpv.setPropertyString("vo", "null")
         mpv.setPropertyString("force-window", "no")
         mpv.detachSurface()
+        surfaceAttached = false
     }
 
     // --- MPVLib.EventObserver (mpv event thread) ---
 
-    override fun eventProperty(property: String) {}
+    override fun eventProperty(property: String) {
+        if (property == "track-list") publishTracks()
+    }
 
     override fun eventProperty(property: String, value: Long) {}
 
@@ -163,6 +210,8 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
         when (property) {
             "time-pos" -> _position.value = value
             "duration" -> _duration.value = value
+            "sub-delay" -> _subtitleDelay.value = value
+            "speed" -> _speed.value = value
         }
     }
 
@@ -171,38 +220,128 @@ class MpvPlayer(context: Context) : MPVLib.EventObserver, SurfaceHolder.Callback
             "pause" -> _paused.value = value
             "paused-for-cache" -> _buffering.value = value
             "core-idle" -> if (!value) _buffering.value = false
+            "eof-reached" -> _ended.value = value
         }
     }
 
-    override fun eventProperty(property: String, value: String) {
-        when (property) {
-            "aid" -> _audioLabel.value = trackLabel("audio", value, off = "Aucune")
-            "sid" -> _subtitleLabel.value = trackLabel("sub", value, off = "Désactivés")
-        }
-    }
+    override fun eventProperty(property: String, value: String) {}
 
     override fun event(eventId: Int) {
         when (eventId) {
-            // mpv only finds subtitles next to local files: add the NAS ones by hand.
-            MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED ->
+            MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> {
+                // mpv only finds subtitles next to local files: add the NAS ones by hand.
                 externalSubtitles.forEach { mpv.command(arrayOf("sub-add", it, "auto")) }
+                selectTracks()
+                publishTracks()
+            }
             MPVLib.MpvEvent.MPV_EVENT_END_FILE -> Log.i(TAG, "end of file")
         }
     }
 
-    private fun trackLabel(type: String, id: String, off: String): String {
-        if (id == "no") return off
-        val base = "current-tracks/$type"
-        val parts = listOfNotNull(
-            mpv.getPropertyString("$base/lang"),
-            mpv.getPropertyString("$base/title"),
-            mpv.getPropertyString("$base/codec"),
-        )
-        return parts.joinToString(" · ").ifEmpty { "Piste $id" }
+    /** Applies the language settings; any failure leaves mpv's own choice, playback goes on. */
+    private fun selectTracks() {
+        try {
+            val tracks = readTracks()
+            fun of(type: String) = tracks.filter { it.type == type }
+                .map { Track(it.id, it.lang, it.title, it.forced, it.default) }
+            val choice = chooseTracks(audio = of("audio"), subtitles = of("sub"), settings = settings)
+            choice.audio?.let(::selectAudio)
+            choice.subtitles?.let(::selectSubtitles)
+            Log.i(TAG, "tracks: audio ${choice.audio}, subtitles ${choice.subtitles}")
+        } catch (e: Exception) {
+            Log.w(TAG, "track selection failed", e)
+        }
+    }
+
+    private fun publishTracks() {
+        val tracks = try {
+            readTracks()
+        } catch (e: Exception) {
+            Log.w(TAG, "track list unreadable", e)
+            return
+        }
+        _audioTracks.value = tracks.filter { it.type == "audio" }.map { it.toPlayerTrack() }
+        _subtitleTracks.value = tracks.filter { it.type == "sub" }.map { it.toPlayerTrack() }
+    }
+
+    private fun readTracks(): List<MpvTrack> =
+        (0 until (mpv.getPropertyString("track-list/count")?.toIntOrNull() ?: 0)).mapNotNull { i ->
+            fun p(name: String) = mpv.getPropertyString("track-list/$i/$name")
+            MpvTrack(
+                type = p("type") ?: return@mapNotNull null,
+                id = p("id")?.toIntOrNull() ?: return@mapNotNull null,
+                lang = p("lang"),
+                title = p("title"),
+                codec = p("codec"),
+                channels = p("demux-channel-count")?.toIntOrNull(),
+                forced = p("forced") == "yes",
+                default = p("default") == "yes",
+                external = p("external") == "yes",
+                selected = p("selected") == "yes",
+            )
+        }
+
+    private class MpvTrack(
+        val type: String,
+        val id: Int,
+        val lang: String?,
+        val title: String?,
+        val codec: String?,
+        val channels: Int?,
+        val forced: Boolean,
+        val default: Boolean,
+        val external: Boolean,
+        val selected: Boolean,
+    ) {
+        /** "Anglais" / "Commentaires · E-AC3 · 5.1 · par défaut"; what the title already says is not repeated. */
+        fun toPlayerTrack(): PlayerTrack {
+            val track = Track(id, lang, title, forced, default)
+            val language = Language.entries.firstOrNull(track::isIn)?.label ?: lang?.let(::languageName)
+            val label = language ?: title?.takeIf { it.isNotBlank() } ?: "Piste $id"
+            val shownTitle = title?.takeIf { language != null && it.isNotBlank() }
+            fun new(text: String?) = text?.takeIf { shownTitle?.contains(it, ignoreCase = true) != true }
+            val detail = listOfNotNull(
+                shownTitle,
+                new(codec?.let(::codecName)),
+                new(channels?.let(::channelLayout)),
+                // Forced audio means nothing to the viewer; forced subtitles only cover foreign dialogue.
+                new("forcés").takeIf { type == "sub" && track.isForced && title?.contains("forc", ignoreCase = true) != true },
+                "externe".takeIf { external },
+                "par défaut".takeIf { default },
+            )
+            return PlayerTrack(id, label, detail.joinToString(" · "), selected)
+        }
     }
 
     private companion object {
         const val TAG = "MpvPlayer"
         const val VO = "gpu-next"
+
+        fun languageName(tag: String): String? {
+            val name = Locale.forLanguageTag(tag).getDisplayLanguage(Locale.FRENCH)
+            return name.takeIf { it.isNotBlank() && !it.equals(tag, ignoreCase = true) }
+                ?.replaceFirstChar { it.titlecase(Locale.FRENCH) }
+        }
+
+        fun codecName(codec: String) = when (codec.lowercase()) {
+            "hdmv_pgs_subtitle" -> "PGS"
+            "subrip" -> "SRT"
+            "dvd_subtitle" -> "VobSub"
+            "mov_text" -> "TX3G"
+            "webvtt" -> "WebVTT"
+            "eac3" -> "E-AC3"
+            "truehd" -> "TrueHD"
+            "opus" -> "Opus"
+            "vorbis" -> "Vorbis"
+            else -> codec.uppercase()
+        }
+
+        fun channelLayout(channels: Int) = when (channels) {
+            1 -> "mono"
+            2 -> "stéréo"
+            6 -> "5.1"
+            8 -> "7.1"
+            else -> "$channels canaux"
+        }
     }
 }
