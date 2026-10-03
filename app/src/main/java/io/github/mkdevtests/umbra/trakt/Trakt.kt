@@ -38,7 +38,18 @@ data class TraktStatus(
     /** Code to enter on the Trakt site while connecting. */
     val pendingCode: TraktDeviceCode? = null,
     val error: String? = null,
+    /**
+     * Trakt unreachable while the device has network, and Android's battery
+     * optimization on for Nyxara: it cuts the app's network, the user can lift it.
+     */
+    val batteryBlocked: Boolean = false,
 )
+
+/** A network failure (no answer, name not resolved), not Trakt refusing a request. */
+private fun Throwable.isNetwork() = this is java.io.IOException && this !is TraktHttpException
+
+/** "Pas de réseau pour Trakt", not "Unable to resolve host api.trakt.tv: No address associated with hostname". */
+private fun Throwable.traktMessage() = if (isNetwork()) "Trakt injoignable (pas de réseau pour Nyxara)" else message ?: toUserMessage()
 
 /** What Trakt says was watched or started, by TMDB ids; a cache, downloaded again when Trakt changes. */
 @Serializable
@@ -93,7 +104,13 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     private val syncLock = Mutex()
     private var connectJob: Job? = null
     /** Played in order, after the screen that sent them is gone. */
-    private val scrobbles = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private val scrobbles = Channel<Scrobble>(Channel.UNLIMITED)
+
+    /** A write to Trakt; [keep]: worth sending again later if the network fails (a film or episode watched). */
+    private class Scrobble(val keep: Boolean, val run: suspend () -> Unit)
+
+    /** Watched marks Trakt couldn't get: sent again after the next sync that reaches it. */
+    private val later = mutableListOf<Scrobble>()
     private val showIds = HashMap<Int, Int?>()
     private val episodeIds = HashMap<String, Int?>()
     /** False while Android blocks Nyxara's network: no network, or battery saver with Nyxara in the background. */
@@ -122,11 +139,13 @@ class Trakt(private val context: Context, private val api: TraktApi) {
             for (send in scrobbles) {
                 // Without network, wait until Android gives it back, then retry, in order.
                 for (attempt in 1..SCROBBLE_ATTEMPTS) {
-                    val result = runCatching { send() }
+                    val result = runCatching { send.run() }
                     val error = result.exceptionOrNull() ?: break
-                    val offline = error is java.io.IOException && error !is TraktHttpException
+                    val offline = error.isNetwork()
                     if (!offline || attempt == SCROBBLE_ATTEMPTS) {
                         Log.w(TAG, "scrobble failed: ${error.message}")
+                        // Still no network (Nyxara in the background, battery saver): a watched mark waits for the next sync.
+                        if (offline && send.keep) synchronized(later) { later += send }
                         break
                     }
                     delay(3_000L * attempt)
@@ -191,7 +210,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                 _status.update { it.copy(pendingCode = null) }
                 throw e
             } catch (e: Exception) {
-                _status.update { it.copy(pendingCode = null, error = e.message ?: e.toUserMessage()) }
+                _status.update { it.copy(pendingCode = null, error = e.traktMessage()) }
             }
         }
     }
@@ -230,77 +249,108 @@ class Trakt(private val context: Context, private val api: TraktApi) {
         scope.launch { syncNow(force) }
     }
 
+    /**
+     * [syncOnce], tried again while the network fails: coming back to the
+     * front, Android may give Nyxara its network a few seconds late.
+     */
     private suspend fun syncNow(force: Boolean) = syncLock.withLock {
-        _status.update { it.copy(syncing = true, error = null) }
+        _status.update { it.copy(syncing = true, error = null, batteryBlocked = false) }
         try {
-            val token = accessToken() ?: return@withLock
-            val activities = api.lastActivities(token)
-            val old = _data.value
-            var data = old
-            // An empty show list is a cache from before the show index: download it again.
-            if (force || activities != old.activities || old.shows.isEmpty()) {
-                val watched = HashMap<String, Long>()
-                val movies = api.watchedMovies(token)
-                movies.forEach { item ->
-                    item.movie.ids.tmdb?.let { watched[movieKey(it)] = millis(item.lastWatchedAt) }
+            for (attempt in 1..SYNC_ATTEMPTS) {
+                try {
+                    syncOnce(force)
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (!e.isNetwork() || attempt == SYNC_ATTEMPTS) throw e
+                    Log.i(TAG, "sync attempt $attempt: ${e.message}")
+                    delay(SYNC_RETRY_MS * attempt)
+                    online.first { it }
                 }
-                val shows = HashMap<Int, TraktShowState>()
-                api.watchedShows(token).forEach { item ->
-                    val tmdb = item.show.ids.tmdb ?: return@forEach
-                    val trakt = item.show.ids.trakt ?: return@forEach
-                    val known = old.shows[tmdb]
-                    val same = known != null && known.lastWatchedAt == item.lastWatchedAt && known.resetAt == item.resetAt
-                    shows[tmdb] = TraktShowState(trakt, item.lastWatchedAt, item.resetAt, known?.episodes?.takeIf { same })
-                }
-                val playback = HashMap<String, TraktResume>()
-                val started = api.playbackMovies(token) + api.playbackEpisodes(token)
-                started.forEach { item ->
-                    val key = item.movie?.ids?.tmdb?.let(::movieKey)
-                        ?: item.show?.ids?.tmdb?.let { show -> item.episode?.let { episodeKey(show, it.season, it.number) } }
-                        ?: return@forEach
-                    playback[key] = TraktResume(item.progress, millis(item.pausedAt))
-                }
-                data = TraktData(watched, playback, activities, shows)
-                Log.i(TAG, "synced: ${movies.size} films, ${shows.size} shows, ${playback.size} resume points")
             }
-            // Episodes come show by show, only for the shows of the library that changed.
-            val wanted = libraryShows
-            val stale = data.shows.filter { (tmdb, show) -> tmdb in wanted && show.episodes == null }
-            if (stale.isNotEmpty()) {
-                val shows = data.shows.toMutableMap()
-                stale.entries.forEachIndexed { index, (tmdb, show) ->
-                    _status.update { it.copy(syncingShows = "${index + 1}/${stale.size}") }
-                    val progress = api.showProgress(token, show.trakt)
-                    // Episodes watched before a reset on Trakt don't count any more.
-                    val resetAt = progress.resetAt?.let(::millis) ?: 0
-                    val episodes = HashMap<String, Long>()
-                    progress.seasons.forEach { season ->
-                        season.episodes.forEach { episode ->
-                            val at = episode.lastWatchedAt?.let(::millis) ?: 0
-                            if (episode.completed && at > resetAt) episodes["${season.number}:${episode.number}"] = at
-                        }
-                    }
-                    shows[tmdb] = show.copy(episodes = episodes)
-                }
-                data = data.copy(shows = shows)
-                Log.i(TAG, "episodes of ${stale.size} shows downloaded")
-            }
-            if (data !== old) {
-                data = data.copy(watched = data.watched.filterKeys { it.startsWith("m:") } + episodesWatched(data.shows))
-                _data.value = data
-                cacheFile.writeText(json.encodeToString(TraktData.serializer(), data))
-            }
-            val now = System.currentTimeMillis()
-            prefs.edit { putLong(KEY_LAST_SYNC, now) }
-            _status.update { it.copy(lastSync = now) }
+            // Through: the watched marks that couldn't go before.
+            synchronized(later) { later.toList().also { later.clear() } }.forEach { scrobbles.trySend(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "sync failed: ${e.message}")
-            _status.update { it.copy(error = "Synchronisation Trakt impossible : ${e.message ?: e.toUserMessage()}") }
+            _status.update { it.copy(error = "Synchronisation impossible : ${e.traktMessage()}", batteryBlocked = e.isNetwork() && batteryOptimized()) }
         } finally {
             _status.update { it.copy(syncing = false, syncingShows = null) }
         }
+    }
+
+    /** Android's battery optimization applies to Nyxara: its network is cut whenever it leaves the screen. */
+    fun batteryOptimized(): Boolean =
+        context.getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == false
+
+    /** The user lifted the battery optimization: the sync that failed runs again. */
+    fun onBatteryExempted() {
+        if (_status.value.batteryBlocked) sync()
+    }
+
+    private suspend fun syncOnce(force: Boolean) {
+        val token = accessToken() ?: return
+        val activities = api.lastActivities(token)
+        val old = _data.value
+        var data = old
+        // An empty show list is a cache from before the show index: download it again.
+        if (force || activities != old.activities || old.shows.isEmpty()) {
+            val watched = HashMap<String, Long>()
+            val movies = api.watchedMovies(token)
+            movies.forEach { item ->
+                item.movie.ids.tmdb?.let { watched[movieKey(it)] = millis(item.lastWatchedAt) }
+            }
+            val shows = HashMap<Int, TraktShowState>()
+            api.watchedShows(token).forEach { item ->
+                val tmdb = item.show.ids.tmdb ?: return@forEach
+                val trakt = item.show.ids.trakt ?: return@forEach
+                val known = old.shows[tmdb]
+                val same = known != null && known.lastWatchedAt == item.lastWatchedAt && known.resetAt == item.resetAt
+                shows[tmdb] = TraktShowState(trakt, item.lastWatchedAt, item.resetAt, known?.episodes?.takeIf { same })
+            }
+            val playback = HashMap<String, TraktResume>()
+            val started = api.playbackMovies(token) + api.playbackEpisodes(token)
+            started.forEach { item ->
+                val key = item.movie?.ids?.tmdb?.let(::movieKey)
+                    ?: item.show?.ids?.tmdb?.let { show -> item.episode?.let { episodeKey(show, it.season, it.number) } }
+                    ?: return@forEach
+                playback[key] = TraktResume(item.progress, millis(item.pausedAt))
+            }
+            data = TraktData(watched, playback, activities, shows)
+            Log.i(TAG, "synced: ${movies.size} films, ${shows.size} shows, ${playback.size} resume points")
+        }
+        // Episodes come show by show, only for the shows of the library that changed.
+        val wanted = libraryShows
+        val stale = data.shows.filter { (tmdb, show) -> tmdb in wanted && show.episodes == null }
+        if (stale.isNotEmpty()) {
+            val shows = data.shows.toMutableMap()
+            stale.entries.forEachIndexed { index, (tmdb, show) ->
+                _status.update { it.copy(syncingShows = "${index + 1}/${stale.size}") }
+                val progress = api.showProgress(token, show.trakt)
+                // Episodes watched before a reset on Trakt don't count any more.
+                val resetAt = progress.resetAt?.let(::millis) ?: 0
+                val episodes = HashMap<String, Long>()
+                progress.seasons.forEach { season ->
+                    season.episodes.forEach { episode ->
+                        val at = episode.lastWatchedAt?.let(::millis) ?: 0
+                        if (episode.completed && at > resetAt) episodes["${season.number}:${episode.number}"] = at
+                    }
+                }
+                shows[tmdb] = show.copy(episodes = episodes)
+            }
+            data = data.copy(shows = shows)
+            Log.i(TAG, "episodes of ${stale.size} shows downloaded")
+        }
+        if (data !== old) {
+            data = data.copy(watched = data.watched.filterKeys { it.startsWith("m:") } + episodesWatched(data.shows))
+            _data.value = data
+            cacheFile.writeText(json.encodeToString(TraktData.serializer(), data))
+        }
+        val now = System.currentTimeMillis()
+        prefs.edit { putLong(KEY_LAST_SYNC, now) }
+        _status.update { it.copy(lastSync = now) }
     }
 
     /** Sends a scrobble for [target] at [percent]; ignored when disconnected or turned off. */
@@ -309,14 +359,17 @@ class Trakt(private val context: Context, private val api: TraktApi) {
         if (!status.connected || !status.scrobble) return
         // Trakt ignores a stop under 1 % (422).
         if (endpoint == TraktEndpoint.ScrobbleStop && percent < 1) return
-        scrobbles.trySend {
-            val token = accessToken() ?: return@trySend
-            send(endpoint, token, target, percent)
-            if (endpoint == TraktEndpoint.ScrobbleStop) {
-                delay(3_000)
-                syncNow(force = false)
-            }
-        }
+        // A stop past 80 % marks it watched on Trakt: kept for later when the network fails.
+        scrobbles.trySend(
+            Scrobble(keep = endpoint == TraktEndpoint.ScrobbleStop && percent >= 80) {
+                val token = accessToken() ?: return@Scrobble
+                send(endpoint, token, target, percent)
+                if (endpoint == TraktEndpoint.ScrobbleStop) {
+                    delay(3_000)
+                    syncNow(force = false)
+                }
+            },
+        )
     }
 
     /**
@@ -327,14 +380,27 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     fun markWatched(targets: List<TraktTarget>) {
         val status = _status.value
         if (!status.connected || !status.scrobble || targets.isEmpty()) return
-        scrobbles.trySend {
-            val token = accessToken() ?: return@trySend
-            targets.forEach { target ->
-                runCatching { send(TraktEndpoint.ScrobbleStop, token, target, 100.0) }
-                    .onFailure { Log.w(TAG, "not marked on Trakt: ${target.label}", it) }
-                delay(1_100) // Trakt's limit: one write a second
-            }
-            syncNow(force = false)
+        scrobbles.trySend(
+            Scrobble(keep = false) {
+                val token = accessToken() ?: return@Scrobble
+                val missed = targets.filter { target ->
+                    val failure = runCatching { send(TraktEndpoint.ScrobbleStop, token, target, 100.0) }.exceptionOrNull()
+                    failure?.let { Log.w(TAG, "not marked on Trakt: ${target.label}", it) }
+                    delay(1_100) // Trakt's limit: one write a second
+                    failure?.isNetwork() == true
+                }
+                // No network: marked once Trakt answers again.
+                if (missed.isNotEmpty()) synchronized(later) { later += Scrobble(keep = true) { markAgain(missed) } }
+                syncNow(force = false)
+            },
+        )
+    }
+
+    private suspend fun markAgain(targets: List<TraktTarget>) {
+        val token = accessToken() ?: return
+        targets.forEach { target ->
+            send(TraktEndpoint.ScrobbleStop, token, target, 100.0)
+            delay(1_100)
         }
     }
 
@@ -412,6 +478,8 @@ class Trakt(private val context: Context, private val api: TraktApi) {
     private companion object {
         const val TAG = "Trakt"
         const val SCROBBLE_ATTEMPTS = 4
+        const val SYNC_ATTEMPTS = 4
+        const val SYNC_RETRY_MS = 2_000L
         const val KEY_ACCESS = "access_token"
         const val KEY_REFRESH = "refresh_token"
         const val KEY_EXPIRES = "expires_at"

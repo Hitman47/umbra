@@ -188,6 +188,7 @@ private fun HomeContent(
             if (!wide) IconButton(onClick = onOpenSettings) { Icon(NyxaraIcons.Settings, contentDescription = "Réglages") }
         }
         UpdateBanner(updater)
+        TraktBatteryBanner()
 
         if (scan.running) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp))
@@ -490,6 +491,48 @@ internal fun PosterCard(item: PosterItem, onClick: () -> Unit, modifier: Modifie
         val caption = listOfNotNull(item.year?.toString(), item.subtitle).joinToString(" · ")
         if (caption.isNotEmpty()) {
             Text(caption, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+    }
+}
+
+/**
+ * Trakt failed for lack of network while Android's battery optimization
+ * applies to Nyxara: says why, and lifts it in one touch.
+ */
+@Composable
+private fun TraktBatteryBanner() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val trakt = (context.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).trakt
+    val status by trakt.status.collectAsState()
+    var dismissed by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) {
+        trakt.onBatteryExempted()
+    }
+    if (!status.batteryBlocked || dismissed) return
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+            Text("Trakt ne répond pas", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onErrorContainer)
+            Text(
+                "L'économie d'énergie d'Android coupe le réseau de Nyxara dès qu'il quitte l'écran : la synchro et les épisodes vus ne passent plus. " +
+                    "Autorise Nyxara à fonctionner sans restriction.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.TextButton(onClick = {
+                    val request = android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:${context.packageName}"),
+                    )
+                    runCatching { ask.launch(request) }
+                        .onFailure { ask.launch(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                }) { Text("Autoriser") }
+                androidx.compose.material3.TextButton(onClick = { dismissed = true }) { Text("Plus tard") }
+            }
         }
     }
 }

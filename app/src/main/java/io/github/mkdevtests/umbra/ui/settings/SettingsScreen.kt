@@ -445,9 +445,15 @@ private fun ColumnScope.BatteryItem() {
     val power = remember { context.getSystemService(PowerManager::class.java) }
     fun exempt() = power?.isIgnoringBatteryOptimizations(context.packageName) != false
     var exempted by remember { mutableStateOf(exempt()) }
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { exempted = exempt() }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        exempted = exempt()
+        if (exempted) (context.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).trakt.onBatteryExempted()
+    }
     if (exempted) return
-    Item("Économie d'énergie", "Elle peut couper Trakt quand Nyxara passe en arrière-plan (quitter un épisode avec Accueil). Autorise Nyxara à rester connecté.") {
+    Item(
+        "Économie d'énergie active",
+        "Android coupe le réseau de Nyxara dès qu'il quitte l'écran : Trakt peut échouer (« injoignable ») et un épisode fini en arrière-plan ne pas être marqué vu. Autorise Nyxara sans restriction.",
+    ) {
         TextButton(onClick = {
             val request = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
             runCatching { ask.launch(request) }.onFailure { ask.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
