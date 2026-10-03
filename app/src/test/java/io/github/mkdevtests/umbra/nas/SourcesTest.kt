@@ -4,11 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SourcesTest {
-    private val salon = SmbSource("192.168.1.20", listOf("Films", "Media"), id = "a", name = "Zima salon")
+    private val salon = NasSource("192.168.1.20", listOf("Films", "Media"), id = "a", name = "Zima salon")
 
     @Test
     fun sharesKeepTheirNameUnlessAnotherNasHasIt() {
-        val bureau = SmbSource("zima-2", listOf("media", "Animes"), id = "b", name = "Zima bureau").withRoots(listOf(salon))
+        val bureau = NasSource("zima-2", listOf("media", "Animes"), id = "b", name = "Zima bureau").withRoots(listOf(salon))
         assertEquals(mapOf("media" to "media (Zima bureau)"), bureau.roots)
         assertEquals("Animes", bureau.rootOf("Animes"))
 
@@ -20,7 +20,7 @@ class SourcesTest {
 
     @Test
     fun anEditedSourceKeepsItsRoots() {
-        val bureau = SmbSource("zima-2", listOf("Media"), id = "b", roots = mapOf("Media" to "Media (zima-2)"))
+        val bureau = NasSource("zima-2", listOf("Media"), id = "b", roots = mapOf("Media" to "Media (zima-2)"))
         // Renamed: the root stays, so its paths, history and corrections stay valid.
         assertEquals(mapOf("Media" to "Media (zima-2)"), bureau.copy(name = "Bureau").withRoots(listOf(salon)).roots)
         // Alone again: still the same root.
@@ -29,7 +29,7 @@ class SourcesTest {
 
     @Test
     fun suffixesStayUnique() {
-        val second = SmbSource("x", listOf("Media"), id = "b").withRoots(listOf(salon, SmbSource("y", listOf("Media (x)"), id = "c")))
+        val second = NasSource("x", listOf("Media"), id = "b").withRoots(listOf(salon, NasSource("y", listOf("Media (x)"), id = "c")))
         assertEquals(mapOf("Media" to "Media (x 2)"), second.roots)
     }
 

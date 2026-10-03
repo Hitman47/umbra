@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -36,7 +37,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.nas.NasSource
+import io.github.mkdevtests.umbra.nas.Protocol
 import io.github.mkdevtests.umbra.ui.theme.NyxaraLogo
 import kotlinx.coroutines.launch
 
@@ -49,12 +51,13 @@ private enum class SetupStep { Login, Shares }
  */
 @Composable
 fun SourceScreen(
-    initial: SmbSource?,
-    onDiscover: suspend (host: String, username: String, password: String) -> ShareDiscovery,
-    onConnect: suspend (SmbSource) -> String?,
+    initial: NasSource?,
+    onDiscover: suspend (protocol: Protocol, host: String, username: String, password: String) -> ShareDiscovery,
+    onConnect: suspend (NasSource) -> String?,
     onCancel: (() -> Unit)?,
 ) {
     var step by rememberSaveable { mutableStateOf(SetupStep.Login) }
+    var protocol by rememberSaveable { mutableStateOf(initial?.protocol ?: Protocol.Smb) }
     var name by rememberSaveable { mutableStateOf(initial?.name.orEmpty()) }
     var host by rememberSaveable { mutableStateOf(initial?.host.orEmpty()) }
     var username by rememberSaveable { mutableStateOf(initial?.username.orEmpty()) }
@@ -71,8 +74,8 @@ fun SourceScreen(
         error = null
         scope.launch {
             // Editing the same NAS keeps the previous choice; otherwise everything is included.
-            val previous = initial?.takeIf { it.host.equals(host.trim(), ignoreCase = true) }?.shares.orEmpty()
-            when (val result = onDiscover(host.trim(), username.trim(), password)) {
+            val previous = initial?.takeIf { it.protocol == protocol && it.host.equals(host.trim(), ignoreCase = true) }?.shares.orEmpty()
+            when (val result = onDiscover(protocol, host.trim(), username.trim(), password)) {
                 is ShareDiscovery.Found -> {
                     shares = result.shares
                     selected = result.shares.filter { it in previous }.ifEmpty { result.shares }
@@ -96,9 +99,10 @@ fun SourceScreen(
         error = null
         scope.launch {
             // The id, root names and excluded folders of an edited source are kept: its titles and history stay its own.
-            val source = SmbSource(
+            val source = NasSource(
                 host.trim(), shares.filter { it in selected }, username.trim(), password, initial?.domain.orEmpty(),
                 id = initial?.id.orEmpty(), name = name.trim(), roots = initial?.roots.orEmpty(), excluded = initial?.excluded.orEmpty(),
+                protocol = protocol,
             )
             error = onConnect(source)
             busy = false
@@ -120,7 +124,22 @@ fun SourceScreen(
 
         when (step) {
             SetupStep.Login -> {
-                Text("Connexion au NAS (SMB)", style = MaterialTheme.typography.titleMedium)
+                Text("Connexion au NAS", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Protocol.entries.forEach { entry ->
+                        FilterChip(selected = entry == protocol, onClick = { protocol = entry; error = null }, label = { Text(entry.label) })
+                    }
+                }
+                Text(
+                    when (protocol) {
+                        Protocol.Smb -> "Le partage de fichiers de Windows, proposé par tous les NAS."
+                        Protocol.Nfs -> "Sans compte. Dans /etc/exports, l'export doit avoir l'option « insecure »."
+                        Protocol.WebDav -> "Le lecteur lit les vidéos en HTTP, directement. L'URL est celle du dossier qui contient tes dossiers de vidéos."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = width,
+                )
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -133,30 +152,32 @@ fun SourceScreen(
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },
-                    label = { Text("Adresse du NAS") },
-                    placeholder = { Text("192.168.1.20 ou nom Tailscale") },
+                    label = { Text(if (protocol == Protocol.WebDav) "URL WebDAV" else "Adresse du NAS") },
+                    placeholder = { Text(if (protocol == Protocol.WebDav) "http://192.168.1.20:5005/" else "192.168.1.20 ou nom Tailscale") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                     modifier = width,
                 )
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("Utilisateur (vide = invité)") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    modifier = width,
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Mot de passe") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { if (!busy && host.isNotBlank()) discover() }),
-                    modifier = width,
-                )
+                if (protocol != Protocol.Nfs) {
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text("Utilisateur (vide = invité)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        modifier = width,
+                    )
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Mot de passe") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { if (!busy && host.isNotBlank()) discover() }),
+                        modifier = width,
+                    )
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (onCancel != null) TextButton(onClick = onCancel, enabled = !busy) { Text("Annuler") }
@@ -167,10 +188,21 @@ fun SourceScreen(
             }
 
             SetupStep.Shares -> {
-                Text("Partages à inclure dans la bibliothèque", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when (protocol) {
+                        Protocol.Smb -> "Partages à inclure dans la bibliothèque"
+                        Protocol.Nfs -> "Exports à inclure dans la bibliothèque"
+                        Protocol.WebDav -> "Dossiers à inclure dans la bibliothèque"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Text(
                     if (manual) {
-                        "Ce NAS ne donne pas la liste de ses partages : ajoute leur nom tel qu'il apparaît dans ZimaOS."
+                        when (protocol) {
+                            Protocol.Smb -> "Ce NAS ne donne pas la liste de ses partages : ajoute leur nom tel qu'il apparaît dans ZimaOS."
+                            Protocol.Nfs -> "Le NAS ne donne pas la liste de ses exports : ajoute le chemin exporté (/media/sdb1/Vidéos/Films)."
+                            Protocol.WebDav -> "Aucun dossier trouvé à cette URL : ajoute le nom d'un dossier."
+                        }
                     } else {
                         "Nyxara trouve tout seul les films et les épisodes, quel que soit le rangement des dossiers."
                     },
@@ -195,7 +227,7 @@ fun SourceScreen(
                 if (manual) {
                     var name by rememberSaveable { mutableStateOf("") }
                     fun add() {
-                        val share = name.trim().trim('/', '\\')
+                        val share = name.trim().let { if (protocol == Protocol.Nfs) "/" + it.trim('/') else it.trim('/', '\\') }
                         if (share.isNotEmpty() && share !in shares) {
                             shares = shares + share
                             selected = selected + share

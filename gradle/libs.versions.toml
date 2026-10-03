@@ -12,6 +12,7 @@ compose-bom = "2026.06.01"
 libmpv = "1.0.0"
 smbj = "0.15.0"
 nanohttpd = "2.3.1"
+nfsclient = "1.1.0"
 # smbj-rpc: lists the NAS shares (SRVSVC NetShareEnum).
 dcerpc = "0.12.13"
 # Coil 3.6+ pulls Compose 1.12, which needs AGP 9.1 / compileSdk 37.
@@ -36,6 +37,7 @@ compose-material3 = { module = "androidx.compose.material3:material3" }
 libmpv = { module = "dev.jdtech.mpv:libmpv", version.ref = "libmpv" }
 smbj = { module = "com.hierynomus:smbj", version.ref = "smbj" }
 nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
+nfsclient = { module = "com.emc.ecs:nfs-client", version.ref = "nfsclient" }
 dcerpc = { module = "com.rapid7.client:dcerpc", version.ref = "dcerpc" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }

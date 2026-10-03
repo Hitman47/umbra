@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Plain HTTP allowed: WebDAV sources on the home network or the tailnet
+    usually have no TLS (ZimaOS: http://<nas>:5005). Tailscale encrypts remote
+    traffic. The internet services (TMDB, TheTVDB, Trakt, GitHub) use HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -56,14 +56,14 @@ data class NasEntry(val name: String, val path: String, val isDirectory: Boolean
  *
  * Blocking API: call from a background thread.
  */
-class SmbNas(val source: SmbSource) : Closeable {
+class SmbNas(override val source: NasSource) : NasClient {
 
     /** One share over its own TCP connection and session. */
     private class ShareLink(val client: SMBClient, val share: DiskShare)
 
     private val links = HashMap<String, ShareLink>()
 
-    fun list(path: String): List<NasEntry> {
+    override fun list(path: String): List<NasEntry> {
         if (path.isEmpty()) return source.shares.map { NasEntry(it, it, isDirectory = true, size = 0) }
         val (shareName, inner) = split(path)
         return withShare(shareName) { share ->
@@ -87,7 +87,7 @@ class SmbNas(val source: SmbSource) : Closeable {
      * would list them. Throws on connection or login errors; returns null when
      * the NAS refuses to enumerate its shares (the user then types them).
      */
-    fun availableShares(): List<String>? = newClient().use { client ->
+    override fun availableShares(): List<String>? = newClient().use { client ->
         val session = login(client)
         val shares = try {
             ServerService(SMBTransportFactories.SRVSVC.getTransport(session)).shares1
@@ -107,7 +107,7 @@ class SmbNas(val source: SmbSource) : Closeable {
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */
-    fun open(path: String): NasFile {
+    override fun open(path: String): NasFile {
         val (shareName, inner) = split(path)
         return withShare(shareName) { share ->
             NasFile(share.openFile(
@@ -195,7 +195,7 @@ class SmbNas(val source: SmbSource) : Closeable {
 
 /** Short French message for errors shown to the user. */
 /** The NAS answered with an error (rights, missing folder), as opposed to not answering. */
-fun Throwable.isRefusedByNas(): Boolean = generateSequence(this) { it.cause }.any { it is com.hierynomus.mssmb2.SMBApiException }
+fun Throwable.isRefusedByNas(): Boolean = generateSequence(this) { it.cause }.any { it is com.hierynomus.mssmb2.SMBApiException || it is RefusedException }
 
 fun Throwable.toUserMessage(): String {
     val text = generateSequence(this) { it.cause }.joinToString(" ") { "${it.javaClass.simpleName} ${it.message}" }

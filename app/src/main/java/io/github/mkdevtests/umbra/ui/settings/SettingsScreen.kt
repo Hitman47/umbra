@@ -40,7 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.BuildConfig
-import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.nas.NasSource
 import io.github.mkdevtests.umbra.ui.theme.ScreenTitle
 import io.github.mkdevtests.umbra.settings.AudioLanguage
 import io.github.mkdevtests.umbra.settings.Language
@@ -58,12 +58,12 @@ fun SettingsScreen(
     store: SettingsStore,
     trakt: Trakt,
     updater: Updater,
-    sources: List<SmbSource>,
+    sources: List<NasSource>,
     imageCache: File,
     onAddSource: () -> Unit,
-    onEditSource: (SmbSource) -> Unit,
-    onRemoveSource: (SmbSource) -> Unit,
-    onIncludeFolder: (SmbSource, String) -> Unit,
+    onEditSource: (NasSource) -> Unit,
+    onRemoveSource: (NasSource) -> Unit,
+    onIncludeFolder: (NasSource, String) -> Unit,
     onOpenStats: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -116,9 +116,9 @@ fun SettingsScreen(
             }
 
             Section("Sources") {
-                var removing by remember { mutableStateOf<SmbSource?>(null) }
+                var removing by remember { mutableStateOf<NasSource?>(null) }
                 sources.forEach { source ->
-                    Item(source.label, "SMB · ${source.host} · ${source.shares.size} partage${if (source.shares.size > 1) "s" else ""}") {
+                    Item(source.label, "${source.protocol.label} · ${source.host} · ${source.shares.size} dossier${if (source.shares.size > 1) "s" else ""}") {
                         TextButton(onClick = { removing = source }) { Text("Retirer") }
                         TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
                     }

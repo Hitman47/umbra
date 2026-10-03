@@ -8,9 +8,9 @@ import coil3.disk.DiskCache
 import io.github.mkdevtests.umbra.library.LibraryRepository
 import io.github.mkdevtests.umbra.player.PlaybackLog
 import io.github.mkdevtests.umbra.nas.LocalStreamServer
+import io.github.mkdevtests.umbra.nas.NasClient
 import io.github.mkdevtests.umbra.nas.NasRouter
-import io.github.mkdevtests.umbra.nas.SmbNas
-import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.nas.NasSource
 import io.github.mkdevtests.umbra.nas.SourceStore
 import io.github.mkdevtests.umbra.settings.SettingsStore
 import io.github.mkdevtests.umbra.history.HiddenTitles
@@ -39,10 +39,10 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     var nas: NasRouter? = null
         private set
 
-    private val _sourceList = MutableStateFlow<List<SmbSource>>(emptyList())
+    private val _sourceList = MutableStateFlow<List<NasSource>>(emptyList())
 
     /** The sources, for the screens that list them. */
-    val sourceList: StateFlow<List<SmbSource>> = _sourceList.asStateFlow()
+    val sourceList: StateFlow<List<NasSource>> = _sourceList.asStateFlow()
 
     val streamServer by lazy { LocalStreamServer { nas } }
 
@@ -66,7 +66,7 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
-        nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(::SmbNas)) }
+        nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(NasClient::of)) }
         _sourceList.value = nas?.sources.orEmpty()
         updater.check()
     }
@@ -81,9 +81,12 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         }
         .build()
 
+    /** What the player opens for the NAS file at [path]: the WebDAV URL itself, else the local server's. */
+    fun playUrl(path: String): String = nas?.directUrl(path) ?: streamServer.urlFor(path)
+
     /** Adds [source], or replaces the one with its id, using [connection], an already verified connection to it. */
     @Synchronized
-    fun saveSource(source: SmbSource, connection: SmbNas) {
+    fun saveSource(source: NasSource, connection: NasClient) {
         val kept = nas?.connections.orEmpty().filter { it.source.id != source.id }
         val index = nas?.connections?.indexOfFirst { it.source.id == source.id } ?: -1
         val connections = kept.toMutableList().apply { add(if (index >= 0) index else size, connection) }
@@ -93,7 +96,7 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     @Synchronized
     fun removeSource(id: String) = switchTo(nas?.connections.orEmpty().filter { it.source.id != id })
 
-    private fun switchTo(connections: List<SmbNas>) {
+    private fun switchTo(connections: List<NasClient>) {
         sources.save(connections.map { it.source })
         val dropped = nas?.connections.orEmpty().filter { it !in connections }
         nas = connections.takeIf { it.isNotEmpty() }?.let(::NasRouter)

@@ -121,7 +121,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         return PlayerActivity.intent(getApplication(), queue)
     }
 
-    private fun url(file: String) = nyxara.streamServer.urlFor(file)
+    private fun url(file: String) = nyxara.playUrl(file)
 
     /** A few seconds before the stop, to pick up the thread. */
     private fun startOf(file: String, fromStart: Boolean): Double {

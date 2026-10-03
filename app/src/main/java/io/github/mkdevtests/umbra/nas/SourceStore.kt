@@ -26,6 +26,7 @@ private data class StoredSource(
     val domain: String = "",
     val roots: Map<String, String> = emptyMap(),
     val excluded: List<String> = emptyList(),
+    val protocol: Protocol = Protocol.Smb,
 )
 
 /**
@@ -37,25 +38,25 @@ class SourceStore(context: Context) {
     private val prefs = context.getSharedPreferences("sources", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun load(): List<SmbSource> {
+    fun load(): List<NasSource> {
         val stored = prefs.getString(KEY_LIST, null)
             ?: return listOfNotNull(loadSingle()).also { if (it.isNotEmpty()) save(it) } // keeps its new id
         return runCatching { json.decodeFromString<List<StoredSource>>(stored) }
             .onFailure { Log.w(TAG, "sources unreadable", it) }
             .getOrDefault(emptyList())
-            .map { SmbSource(it.host, it.shares, it.username, it.password.let(::decrypt).orEmpty(), it.domain, it.id, it.name, it.roots, it.excluded) }
+            .map { NasSource(it.host, it.shares, it.username, it.password.let(::decrypt).orEmpty(), it.domain, it.id, it.name, it.roots, it.excluded, it.protocol) }
     }
 
-    fun save(sources: List<SmbSource>) = prefs.edit {
-        val stored = sources.map { StoredSource(it.id, it.name, it.host, it.shares, it.username, encrypt(it.password), it.domain, it.roots, it.excluded) }
+    fun save(sources: List<NasSource>) = prefs.edit {
+        val stored = sources.map { StoredSource(it.id, it.name, it.host, it.shares, it.username, encrypt(it.password), it.domain, it.roots, it.excluded, it.protocol) }
         putString(KEY_LIST, json.encodeToString(stored))
         listOf(KEY_HOST, KEY_SHARE, KEY_SHARES, KEY_USER, KEY_PASSWORD, KEY_DOMAIN).forEach(::remove)
     }
 
     /** The single source of earlier versions. */
-    private fun loadSingle(): SmbSource? {
+    private fun loadSingle(): NasSource? {
         val host = prefs.getString(KEY_HOST, null) ?: return null
-        return SmbSource(
+        return NasSource(
             host = host,
             shares = prefs.getString(KEY_SHARES, null)?.split('\n')
                 ?: listOfNotNull(prefs.getString(KEY_SHARE, null)), // single-share format of v0.1

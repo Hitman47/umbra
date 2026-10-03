@@ -7,8 +7,9 @@ import androidx.lifecycle.viewModelScope
 import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.nas.NasEntry
 import io.github.mkdevtests.umbra.nas.NasRouter
-import io.github.mkdevtests.umbra.nas.SmbNas
-import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.nas.NasClient
+import io.github.mkdevtests.umbra.nas.Protocol
+import io.github.mkdevtests.umbra.nas.NasSource
 import io.github.mkdevtests.umbra.nas.newSourceId
 import io.github.mkdevtests.umbra.nas.toUserMessage
 import io.github.mkdevtests.umbra.nas.withRoots
@@ -59,8 +60,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<BrowserState> = _state.asStateFlow()
 
     val hasSource get() = nyxara.nas != null
-    val sources: List<SmbSource> get() = nyxara.nas?.sources.orEmpty()
-    val sourceList: StateFlow<List<SmbSource>> = nyxara.sourceList
+    val sources: List<NasSource> get() = nyxara.nas?.sources.orEmpty()
+    val sourceList: StateFlow<List<NasSource>> = nyxara.sourceList
 
     init {
         if (hasSource) open("")
@@ -125,20 +126,20 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Intent playing [video] with the subtitle files sitting next to it. */
     fun playIntent(video: NasEntry): Intent {
-        val server = nyxara.streamServer
-        val subtitles = subtitlesFor(video, listing).map { server.urlFor(it.path) }
-        return PlayerActivity.intent(getApplication(), server.urlFor(video.path), video.name, subtitles, file = video.path)
+        val subtitles = subtitlesFor(video, listing).map { nyxara.playUrl(it.path) }
+        return PlayerActivity.intent(getApplication(), nyxara.playUrl(video.path), video.name, subtitles, file = video.path)
     }
 
     /** Logs in to the NAS at [host] and lists its file shares. */
-    suspend fun discoverShares(host: String, username: String, password: String): ShareDiscovery =
+    suspend fun discoverShares(protocol: Protocol, host: String, username: String, password: String): ShareDiscovery =
         withContext(Dispatchers.IO) {
-            val nas = SmbNas(SmbSource(host, emptyList(), username, password))
+            val nas = NasClient.of(NasSource(host, emptyList(), username, password, protocol = protocol))
             try {
                 val shares = nas.availableShares()
                 if (shares.isNullOrEmpty()) ShareDiscovery.Manual else ShareDiscovery.Found(shares.sortedWith(::naturalCompare))
             } catch (e: Exception) {
-                ShareDiscovery.Failed(e.toUserMessage())
+                // An NFS server may hide its exports and still mount them: typed by hand.
+                if (protocol == Protocol.Nfs && e !is java.net.ConnectException) ShareDiscovery.Manual else ShareDiscovery.Failed(e.toUserMessage())
             } finally {
                 nas.close()
             }
@@ -148,10 +149,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
      * Connects to [source] and, if it works, adds it to the app's sources (or
      * replaces the one it edits). Returns an error message, or null on success.
      */
-    suspend fun connect(source: SmbSource): String? {
+    suspend fun connect(source: NasSource): String? {
         val others = sources.filter { it.id != source.id }
         val named = source.copy(id = source.id.ifEmpty { newSourceId() }).withRoots(others)
-        val connection = SmbNas(named)
+        val connection = NasClient.of(named)
         return try {
             // Every share must open: catches a typo in one of the names.
             withContext(Dispatchers.IO) {
@@ -176,18 +177,18 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
     fun exclude(path: String) {
         val source = nyxara.nas?.sourceOf(path) ?: return
         val updated = source.copy(excluded = (source.excluded + path).distinct())
-        nyxara.saveSource(updated, SmbNas(updated))
+        nyxara.saveSource(updated, NasClient.of(updated))
         open(path.substringBeforeLast('\\'))
     }
 
     /** Takes [folder] back into [source]. */
-    fun include(source: SmbSource, folder: String) {
+    fun include(source: NasSource, folder: String) {
         val updated = source.copy(excluded = source.excluded - folder)
-        nyxara.saveSource(updated, SmbNas(updated))
+        nyxara.saveSource(updated, NasClient.of(updated))
         refresh()
     }
 
-    fun remove(source: SmbSource) {
+    fun remove(source: NasSource) {
         nyxara.removeSource(source.id)
         if (hasSource) open("") else _state.value = BrowserState()
     }

@@ -12,19 +12,19 @@ import java.io.IOException
  *
  * Blocking API, like [SmbNas]: call from a background thread.
  */
-class NasRouter(val connections: List<SmbNas>) : Closeable {
+class NasRouter(val connections: List<NasClient>) : Closeable {
 
-    val sources: List<SmbSource> get() = connections.map { it.source }
+    val sources: List<NasSource> get() = connections.map { it.source }
 
     /** Root name → its NAS and the share's real name. */
-    private val byRoot: Map<String, Pair<SmbNas, String>> =
+    private val byRoot: Map<String, Pair<NasClient, String>> =
         connections.flatMap { nas -> nas.source.shares.map { share -> nas.source.rootOf(share).lowercase() to (nas to share) } }.toMap()
 
     /** The roots of [source], in name order. */
-    fun rootsOf(source: SmbSource): List<String> = source.shares.map(source::rootOf).sortedWith(::naturalCompare)
+    fun rootsOf(source: NasSource): List<String> = source.shares.map(source::rootOf).sortedWith(::naturalCompare)
 
     /** The source holding [path]. */
-    fun sourceOf(path: String): SmbSource? = byRoot[path.substringBefore('\\').lowercase()]?.first?.source
+    fun sourceOf(path: String): NasSource? = byRoot[path.substringBefore('\\').lowercase()]?.first?.source
 
     /** [path] is in a folder the user left out. */
     fun isExcluded(path: String) = sourceOf(path)?.isExcluded(path) == true
@@ -48,6 +48,14 @@ class NasRouter(val connections: List<SmbNas>) : Closeable {
         val (nas, share) = route(root)
         if (nas.source.isExcluded(path)) throw IOException("Dossier exclu de la bibliothèque")
         return nas.open(share + path.substring(root.length))
+    }
+
+    /** A URL the player reads [path] at by itself (WebDAV), or null: through the local server. */
+    fun directUrl(path: String): String? {
+        val root = path.substringBefore('\\')
+        val (nas, share) = byRoot[root.lowercase()] ?: return null
+        if (nas.source.isExcluded(path)) return null
+        return nas.directUrl(share + path.substring(root.length))
     }
 
     override fun close() = connections.forEach { it.close() }

@@ -6,7 +6,7 @@ import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.history.MatchFix
 import io.github.mkdevtests.umbra.nas.NasRouter
-import io.github.mkdevtests.umbra.nas.SmbSource
+import io.github.mkdevtests.umbra.nas.NasSource
 import io.github.mkdevtests.umbra.nas.toUserMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -218,7 +218,7 @@ class LibraryRepository(private val app: NyxaraApp) {
         private const val TAG = "LibraryRepository"
 
         /** The shares scanned, to tell a library of other shares: rescanned. */
-        fun keyOf(sources: List<SmbSource>) =
-            sources.map { "${it.host.trim()}/${it.shares.sorted().joinToString(",")}".lowercase() }.sorted().joinToString(";")
+        fun keyOf(sources: List<NasSource>) =
+            sources.map { "${it.protocol.label}:${it.host.trim()}/${it.shares.sorted().joinToString(",")}".lowercase() }.sorted().joinToString(";")
     }
 }

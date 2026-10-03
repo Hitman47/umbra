@@ -176,6 +176,7 @@ class PlayerActivity : ComponentActivity() {
                 at = System.currentTimeMillis(),
                 title = listOfNotNull(item.title, item.subtitle?.substringBefore(" · ")).joinToString(" "),
                 source = source?.label ?: "Appareil",
+                protocol = source?.protocol?.label ?: "Fichier",
                 network = networkLabel(),
                 route = source?.host?.let(::routeOf) ?: "Local",
                 openMs = figures.openMs,
