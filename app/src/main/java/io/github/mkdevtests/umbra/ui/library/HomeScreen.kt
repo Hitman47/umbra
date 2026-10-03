@@ -30,7 +30,7 @@ import io.github.mkdevtests.umbra.browse.BrowserViewModel
 import io.github.mkdevtests.umbra.update.UpdateBanner
 import io.github.mkdevtests.umbra.update.Updater
 
-enum class HomeTab(val label: String) { Movies("Films"), Shows("Séries"), Folders("Partages") }
+enum class HomeTab(val label: String) { Home("Accueil"), Movies("Films"), Shows("Séries"), Folders("Partages") }
 
 @Composable
 fun HomeScreen(
@@ -46,6 +46,7 @@ fun HomeScreen(
 ) {
     val library by libraryViewModel.library.collectAsState()
     val scan by libraryViewModel.scan.collectAsState()
+    val history by libraryViewModel.history.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
         Row(
@@ -75,6 +76,15 @@ fun HomeScreen(
         scan.error?.let { StatusText(it, isError = true) }
 
         when (tab) {
+            HomeTab.Home -> FeedScreen(
+                library = library,
+                scanning = scan.running,
+                history = history,
+                viewModel = libraryViewModel,
+                emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucune vidéo trouvée.",
+                onOpenMovie = onOpenMovie,
+                onOpenShow = onOpenShow,
+            )
             HomeTab.Movies -> PosterGrid(
                 items = library.movies.map { PosterItem(it.file, it.title, it.year, it.poster) },
                 emptyText = if (scan.running) "Analyse de la bibliothèque…" else "Aucun film trouvé.",

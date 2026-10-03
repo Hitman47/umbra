@@ -11,6 +11,10 @@ data class PlayItem(
     val subtitle: String? = null,
     /** External subtitle files. */
     val subtitles: List<String> = emptyList(),
+    /** NAS path, the key of the watch history; null for a file picked on the tablet. */
+    val file: String? = null,
+    /** Where to start, in seconds (resuming). */
+    val start: Double = 0.0,
 )
 
 /** One audio or subtitle track of the playing file, as the side panel shows it. */

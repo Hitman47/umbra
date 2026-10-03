@@ -11,6 +11,7 @@ import io.github.mkdevtests.umbra.nas.SmbNas
 import io.github.mkdevtests.umbra.nas.SmbSource
 import io.github.mkdevtests.umbra.nas.SourceStore
 import io.github.mkdevtests.umbra.settings.SettingsStore
+import io.github.mkdevtests.umbra.history.WatchHistory
 import io.github.mkdevtests.umbra.update.Updater
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
@@ -32,6 +33,8 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
     val library by lazy { LibraryRepository(this) }
 
     val updater by lazy { Updater(this, OkHttpClient()) }
+
+    val history by lazy { WatchHistory(this) }
 
     override fun onCreate() {
         super.onCreate()

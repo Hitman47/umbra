@@ -120,11 +120,15 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.observeProperty("eof-reached", MpvFormat.MPV_FORMAT_FLAG)
     }
 
-    /** Plays [url] with extra subtitle files: now, or as soon as a Surface is available. */
-    fun play(url: String, subtitles: List<String> = emptyList()) {
+    /** Plays [url] from [start] seconds with extra subtitle files: now, or as soon as a Surface is available. */
+    fun play(url: String, subtitles: List<String> = emptyList(), start: Double = 0.0) {
         externalSubtitles = subtitles
         _ended.value = false
         _buffering.value = true
+        // The previous file's values must not be saved as this one's progress.
+        _position.value = 0.0
+        _duration.value = 0.0
+        mpv.setPropertyString("start", if (start > 0) start.toString() else "none")
         if (surfaceAttached) {
             mpv.command(arrayOf("loadfile", url, "replace"))
         } else {

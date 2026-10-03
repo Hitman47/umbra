@@ -61,7 +61,7 @@ private fun UmbraRoot(
     val context = LocalContext.current
     val app = context.applicationContext as UmbraApp
     var editingSource by rememberSaveable { mutableStateOf(!browserViewModel.hasSource) }
-    var tab by rememberSaveable { mutableStateOf(HomeTab.Movies) }
+    var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     val stack = remember { mutableStateListOf<Detail>() }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) context.startActivity(PlayerActivity.intent(context, uri.toString(), uri.lastPathSegment ?: "Vidéo"))

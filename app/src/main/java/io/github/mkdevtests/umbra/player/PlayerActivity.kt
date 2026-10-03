@@ -65,7 +65,11 @@ import io.github.mkdevtests.umbra.UmbraApp
 import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
 import io.github.mkdevtests.umbra.settings.Settings
 import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
@@ -73,6 +77,8 @@ import kotlinx.serialization.json.Json
 class PlayerActivity : ComponentActivity() {
 
     private lateinit var player: MpvPlayer
+    private var queue: List<PlayItem> = emptyList()
+    private var index by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,13 +89,21 @@ class PlayerActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        val queue = intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }
-        if (queue.isNullOrEmpty()) return finish()
+        queue = intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }.orEmpty()
+        if (queue.isEmpty()) return finish()
         val settings = (application as UmbraApp).settings.settings.value
         player = MpvPlayer(this, settings)
-        var index by mutableIntStateOf(0)
-        fun start(item: PlayItem) = player.play(toMpvPath(item.url), item.subtitles)
         start(queue[0])
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(10_000)
+                    saveProgress()
+                }
+            }
+        }
+        // The end of a file is saved at once: it marks the episode watched.
+        lifecycleScope.launch { player.ended.collect { if (it) saveProgress() } }
 
         setContent {
             UmbraTheme {
@@ -99,6 +113,7 @@ class PlayerActivity : ComponentActivity() {
                     next = queue.getOrNull(index + 1),
                     settings = settings,
                     onNext = {
+                        saveProgress()
                         index++
                         start(queue[index])
                     },
@@ -110,7 +125,17 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        if (::player.isInitialized) player.pause()
+        if (::player.isInitialized) {
+            player.pause()
+            saveProgress()
+        }
+    }
+
+    private fun start(item: PlayItem) = player.play(toMpvPath(item.url), item.subtitles, item.start)
+
+    private fun saveProgress() {
+        val file = queue.getOrNull(index)?.file ?: return
+        (application as UmbraApp).history.save(file, player.position.value, player.duration.value)
     }
 
     override fun onDestroy() {
@@ -133,8 +158,8 @@ class PlayerActivity : ComponentActivity() {
         fun intent(context: Context, queue: List<PlayItem>): Intent =
             Intent(context, PlayerActivity::class.java).putExtra(EXTRA_QUEUE, Json.encodeToString(QUEUE, queue))
 
-        fun intent(context: Context, url: String, title: String, subtitles: List<String> = emptyList()): Intent =
-            intent(context, listOf(PlayItem(url, title, subtitles = subtitles)))
+        fun intent(context: Context, url: String, title: String, subtitles: List<String> = emptyList(), file: String? = null): Intent =
+            intent(context, listOf(PlayItem(url, title, subtitles = subtitles, file = file)))
     }
 }
 

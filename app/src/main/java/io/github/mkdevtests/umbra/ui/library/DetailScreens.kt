@@ -17,7 +17,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,6 +41,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import io.github.mkdevtests.umbra.history.Progress
+import io.github.mkdevtests.umbra.home.nextUp
+import io.github.mkdevtests.umbra.home.regularEpisodes
 import io.github.mkdevtests.umbra.library.Episode
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Show
@@ -46,6 +53,8 @@ import java.util.Locale
 @Composable
 fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
+    val history by viewModel.history.collectAsState()
+    val progress = history[movie.file]
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(movie.backdrop, onBack) }
         item {
@@ -56,7 +65,18 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, onBack: () -> U
                 meta = listOfNotNull(movie.year?.toString(), formatRuntime(movie.runtime), formatRating(movie.rating)),
                 genres = movie.genres,
             ) {
-                Button(onClick = { context.startActivity(viewModel.playIntent(movie)) }) { Text("▶  Lecture") }
+                if (progress?.inProgress == true) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = { context.startActivity(viewModel.playIntent(movie)) }) {
+                            Text("▶  Reprendre · il reste ${formatRuntime((progress.remaining / 60).toInt().coerceAtLeast(1))}")
+                        }
+                        OutlinedButton(onClick = { context.startActivity(viewModel.playIntent(movie, fromStart = true)) }) { Text("Depuis le début") }
+                    }
+                } else {
+                    Button(onClick = { context.startActivity(viewModel.playIntent(movie)) }) {
+                        Text(if (progress?.watched == true) "▶  Revoir" else "▶  Lecture")
+                    }
+                }
             }
         }
         item {
@@ -74,6 +94,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
     val context = LocalContext.current
     var selected by rememberSaveable(show.key) { mutableIntStateOf(show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1) }
     val season = show.seasons.firstOrNull { it.number == selected }
+    val history by viewModel.history.collectAsState()
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(show.backdrop, onBack) }
@@ -86,10 +107,12 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
                 meta = listOfNotNull(show.year?.toString(), "$episodes épisodes", formatRating(show.rating)),
                 genres = show.genres,
             ) {
-                val next = season?.episodes?.firstOrNull()
+                val resume = nextUp(show, history)
+                val next = resume?.episode ?: show.regularEpisodes().firstOrNull() ?: season?.episodes?.firstOrNull()
                 if (next != null) {
                     Button(onClick = { context.startActivity(viewModel.playIntent(show, next)) }) {
-                        Text("▶  S%02dE%02d".format(next.season, next.number))
+                        val code = "S%02dE%02d".format(next.season, next.number)
+                        Text(if (resume?.progress != null) "▶  Reprendre $code" else "▶  $code")
                     }
                 }
             }
@@ -115,7 +138,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit
             }
         }
         items(season?.episodes.orEmpty(), key = { "${it.season}-${it.number}" }) { episode ->
-            EpisodeRow(episode) { context.startActivity(viewModel.playIntent(show, episode)) }
+            EpisodeRow(episode, history[episode.file]) { context.startActivity(viewModel.playIntent(show, episode)) }
         }
     }
 }
@@ -164,7 +187,7 @@ private fun TitleBlock(
 }
 
 @Composable
-private fun EpisodeRow(episode: Episode, onClick: () -> Unit) {
+private fun EpisodeRow(episode: Episode, progress: Progress?, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -186,6 +209,25 @@ private fun EpisodeRow(episode: Episode, onClick: () -> Unit) {
                 )
             } else {
                 Text("E${episode.number}", style = MaterialTheme.typography.titleMedium)
+            }
+            if (progress?.inProgress == true) {
+                LinearProgressIndicator(
+                    progress = { progress.fraction },
+                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp),
+                    drawStopIndicator = {},
+                )
+            }
+            if (progress?.watched == true) {
+                Text(
+                    "✓ Vu",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                )
             }
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

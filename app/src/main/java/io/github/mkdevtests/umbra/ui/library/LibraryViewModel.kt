@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import io.github.mkdevtests.umbra.UmbraApp
+import io.github.mkdevtests.umbra.history.Progress
+import io.github.mkdevtests.umbra.home.Resume
 import io.github.mkdevtests.umbra.library.Episode
 import io.github.mkdevtests.umbra.library.Library
 import io.github.mkdevtests.umbra.library.Movie
@@ -20,6 +22,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     val library: StateFlow<Library> = repository.library
     val scan: StateFlow<ScanState> = repository.scan
+    val history: StateFlow<Map<String, Progress>> = umbra.history.progress
 
     init {
         repository.scanIfNeeded()
@@ -34,23 +37,36 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun show(key: String): Show? = library.value.shows.firstOrNull { it.key == key }
 
-    fun playIntent(movie: Movie): Intent =
-        PlayerActivity.intent(getApplication(), listOf(PlayItem(url(movie.file), movie.title, subtitles = movie.subtitles.map(::url))))
+    /** Resumes where playback stopped, unless [fromStart]. */
+    fun playIntent(movie: Movie, fromStart: Boolean = false): Intent = PlayerActivity.intent(
+        getApplication(),
+        listOf(PlayItem(url(movie.file), movie.title, subtitles = movie.subtitles.map(::url), file = movie.file, start = startOf(movie.file, fromStart))),
+    )
 
-    /** Plays [episode], then the following ones (specials only after a special). */
-    fun playIntent(show: Show, episode: Episode): Intent {
+    fun playIntent(resume: Resume): Intent = resume.movie?.let { playIntent(it) } ?: playIntent(resume.show!!, resume.episode!!)
+
+    /** Plays [episode], then the following ones (specials only after a special); each resumes where it stopped. */
+    fun playIntent(show: Show, episode: Episode, fromStart: Boolean = false): Intent {
         val episodes = show.seasons.sortedBy { it.number }
             .filter { episode.season == 0 || it.number > 0 }
             .flatMap { it.episodes }
         val start = episodes.indexOfFirst { it.file == episode.file }.coerceAtLeast(0)
         val queue = (listOf(episode) + episodes.drop(start + 1).take(MAX_QUEUE)).map { item ->
             val code = "S%02dE%02d".format(item.season, item.number)
-            PlayItem(url(item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "), item.subtitles.map(::url))
+            val start = startOf(item.file, fromStart && item.file == episode.file)
+            PlayItem(url(item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "), item.subtitles.map(::url), item.file, start)
         }
         return PlayerActivity.intent(getApplication(), queue)
     }
 
     private fun url(file: String) = umbra.streamServer.urlFor(file)
+
+    /** A few seconds before the stop, to pick up the thread. */
+    private fun startOf(file: String, fromStart: Boolean): Double {
+        if (fromStart) return 0.0
+        val progress = history.value[file]?.takeIf { it.inProgress } ?: return 0.0
+        return (progress.position - 5).coerceAtLeast(0.0)
+    }
 
     private companion object {
         /** Episodes queued after the chosen one (keeps the intent small). */

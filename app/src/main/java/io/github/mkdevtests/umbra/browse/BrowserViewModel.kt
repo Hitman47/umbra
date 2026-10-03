@@ -92,7 +92,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
     fun playIntent(video: NasEntry): Intent {
         val server = umbra.streamServer
         val subtitles = subtitlesFor(video, listing).map { server.urlFor(it.path) }
-        return PlayerActivity.intent(getApplication(), server.urlFor(video.path), video.name, subtitles)
+        return PlayerActivity.intent(getApplication(), server.urlFor(video.path), video.name, subtitles, file = video.path)
     }
 
     /** Logs in to the NAS at [host] and lists its file shares. */
