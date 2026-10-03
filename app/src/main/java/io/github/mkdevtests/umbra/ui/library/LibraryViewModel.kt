@@ -17,7 +17,16 @@ import io.github.mkdevtests.umbra.history.hideKey
 import io.github.mkdevtests.umbra.library.Found
 import io.github.mkdevtests.umbra.library.SearchFilters
 import io.github.mkdevtests.umbra.library.searchResults
+import androidx.lifecycle.viewModelScope
+import io.github.mkdevtests.umbra.trakt.TraktTarget
+import io.github.mkdevtests.umbra.trakt.withTrakt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
@@ -27,7 +36,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     val library: StateFlow<Library> = repository.library
     val scan: StateFlow<ScanState> = repository.scan
-    val history: StateFlow<Map<String, Progress>> = umbra.history.progress
+    /** Umbra's history, completed by what Trakt says was watched elsewhere. */
+    val history: StateFlow<Map<String, Progress>> =
+        combine(umbra.history.progress, umbra.trakt.data, repository.library) { local, trakt, library -> withTrakt(library, local, trakt) }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, umbra.history.progress.value)
     val hidden: StateFlow<Set<String>> = umbra.hidden.keys
 
     /** The search tab's state, kept while a title opened from it is on screen. */
@@ -36,6 +49,10 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         repository.scanIfNeeded()
+        umbra.trakt.sync()
+        viewModelScope.launch {
+            repository.library.collect { library -> umbra.trakt.setLibraryShows(library.shows.mapNotNullTo(HashSet()) { it.tmdbId }) }
+        }
     }
 
     fun rescan() = repository.startScan()
@@ -70,7 +87,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** Resumes where playback stopped, unless [fromStart]. */
     fun playIntent(movie: Movie, fromStart: Boolean = false): Intent = PlayerActivity.intent(
         getApplication(),
-        listOf(PlayItem(url(movie.file), movie.title, subtitles = movie.subtitles.map(::url), file = movie.file, start = startOf(movie.file, fromStart))),
+        listOf(
+            PlayItem(
+                url(movie.file), movie.title, subtitles = movie.subtitles.map(::url), file = movie.file, start = startOf(movie.file, fromStart),
+                trakt = movie.tmdbId?.let { TraktTarget(movieTmdb = it, label = movie.title) },
+            ),
+        ),
     )
 
     fun playIntent(resume: Resume): Intent = resume.movie?.let { playIntent(it) } ?: playIntent(resume.show!!, resume.episode!!)
@@ -84,7 +106,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         val queue = (listOf(episode) + episodes.drop(start + 1).take(MAX_QUEUE)).map { item ->
             val code = "S%02dE%02d".format(item.season, item.number)
             val start = startOf(item.file, fromStart && item.file == episode.file)
-            PlayItem(url(item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "), item.subtitles.map(::url), item.file, start)
+            // Only episodes TMDB knows under these numbers: Trakt shares TMDB's numbering.
+            val trakt = show.tmdbId?.takeIf { item.hasMetadata }?.let { TraktTarget(showTmdb = it, season = item.season, episode = item.number, label = "${show.title} $code") }
+            PlayItem(url(item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "), item.subtitles.map(::url), item.file, start, trakt)
         }
         return PlayerActivity.intent(getApplication(), queue)
     }

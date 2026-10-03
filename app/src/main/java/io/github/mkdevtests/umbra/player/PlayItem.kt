@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.player
 
+import io.github.mkdevtests.umbra.trakt.TraktTarget
 import kotlinx.serialization.Serializable
 
 /** One video of the player's queue: a film, or an episode followed by the next ones. */
@@ -15,6 +16,8 @@ data class PlayItem(
     val file: String? = null,
     /** Where to start, in seconds (resuming). */
     val start: Double = 0.0,
+    /** What it is on Trakt; null when it isn't matched surely enough to be scrobbled. */
+    val trakt: TraktTarget? = null,
 )
 
 /** One audio or subtitle track of the playing file, as the side panel shows it. */

@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -27,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.nas.SmbSource
@@ -34,6 +36,7 @@ import io.github.mkdevtests.umbra.settings.AudioLanguage
 import io.github.mkdevtests.umbra.settings.Language
 import io.github.mkdevtests.umbra.settings.SettingsStore
 import io.github.mkdevtests.umbra.settings.SubtitleSize
+import io.github.mkdevtests.umbra.trakt.Trakt
 import io.github.mkdevtests.umbra.update.UpdateBanner
 import io.github.mkdevtests.umbra.update.Updater
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +46,7 @@ import java.io.File
 @Composable
 fun SettingsScreen(
     store: SettingsStore,
+    trakt: Trakt,
     updater: Updater,
     source: SmbSource?,
     imageCache: File,
@@ -116,6 +120,8 @@ fun SettingsScreen(
                 Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
             }
 
+            TraktSection(trakt)
+
             Section("Mises à jour") {
                 if (BuildConfig.UPDATES) {
                     Item("Version installée", "${BuildConfig.VERSION_NAME} · GitHub ${Updater.REPOSITORY}${lastCheck?.let { " · $it" } ?: ""}") {
@@ -133,6 +139,40 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun TraktSection(trakt: Trakt) {
+    val status by trakt.status.collectAsState()
+    val uri = LocalUriHandler.current
+    Section("Trakt") {
+        val code = status.pendingCode
+        when {
+            !status.configured -> Item("Clé Trakt absente", "Ajoute trakt.clientId dans local.properties puis recompile.")
+            code != null -> {
+                Item("Code : ${code.userCode}", "Entre-le sur ${code.verificationUrl} (téléphone ou PC). Umbra attend la validation.") {
+                    TextButton(onClick = { uri.openUri(code.verificationUrl) }) { Text("Ouvrir") }
+                    TextButton(onClick = trakt::cancelConnect) { Text("Annuler") }
+                }
+            }
+            !status.connected -> Item("Compte", "Non connecté. Umbra lit l'historique Trakt et y ajoute ce que tu regardes ; il n'efface jamais rien.") {
+                TextButton(onClick = trakt::connect) { Text("Connecter ›") }
+            }
+            else -> {
+                val last = if (status.lastSync > 0) DateUtils.getRelativeTimeSpanString(status.lastSync).toString() else "jamais"
+                Item("Synchronisation", if (status.syncing) status.syncingShows?.let { "Séries : $it" } ?: "En cours…" else "Dernière : $last") {
+                    TextButton(onClick = { trakt.sync(force = true) }, enabled = !status.syncing) { Text("Synchroniser") }
+                }
+                Item("Envoyer ce que je regarde", "Vu à 80 % : ajouté à l'historique Trakt. Avant : point de reprise.") {
+                    Switch(checked = status.scrobble, onCheckedChange = trakt::setScrobble)
+                }
+                Item("Déconnecter", "Oublie le compte sur la tablette. Rien n'est effacé sur Trakt.") {
+                    TextButton(onClick = trakt::disconnect) { Text("Déconnecter") }
+                }
+            }
+        }
+        status.error?.let { Item("Erreur", it) }
     }
 }
 

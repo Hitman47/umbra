@@ -64,11 +64,14 @@ import androidx.core.view.WindowInsetsControllerCompat
 import io.github.mkdevtests.umbra.UmbraApp
 import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
 import io.github.mkdevtests.umbra.settings.Settings
+import io.github.mkdevtests.umbra.trakt.TraktEndpoint
 import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -103,7 +106,20 @@ class PlayerActivity : ComponentActivity() {
             }
         }
         // The end of a file is saved at once: it marks the episode watched.
-        lifecycleScope.launch { player.ended.collect { if (it) saveProgress() } }
+        lifecycleScope.launch {
+            player.ended.collect {
+                if (it) {
+                    saveProgress()
+                    scrobbler.stop()
+                }
+            }
+        }
+        // Trakt follows what is played: start when the picture moves, pause with it.
+        lifecycleScope.launch {
+            combine(player.paused, player.duration, player.ended) { paused, duration, ended -> duration > 0 && !paused && !ended }
+                .distinctUntilChanged()
+                .collect { playing -> if (playing) scrobbler.start() else scrobbler.pause() }
+        }
 
         setContent {
             UmbraTheme {
@@ -114,6 +130,7 @@ class PlayerActivity : ComponentActivity() {
                     settings = settings,
                     onNext = {
                         saveProgress()
+                        scrobbler.stop()
                         index++
                         start(queue[index])
                     },
@@ -126,12 +143,44 @@ class PlayerActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         if (::player.isInitialized) {
+            scrobbler.stop()
             player.pause()
             saveProgress()
         }
     }
 
     private fun start(item: PlayItem) = player.play(toMpvPath(item.url), item.subtitles, item.start)
+
+    private val scrobbler = object {
+        /** Trakt's view of the current file: a pause only follows a start, nothing follows a stop but a new start. */
+        private var state = "idle"
+
+        private fun send(endpoint: TraktEndpoint) {
+            val target = queue.getOrNull(index)?.trakt ?: return
+            val duration = player.duration.value
+            if (duration <= 0) return
+            val percent = (player.position.value / duration * 100).coerceIn(0.0, 100.0)
+            (application as UmbraApp).trakt.scrobble(endpoint, target, percent)
+        }
+
+        fun start() {
+            if (state == "playing") return
+            state = "playing"
+            send(TraktEndpoint.ScrobbleStart)
+        }
+
+        fun pause() {
+            if (state != "playing") return
+            state = "paused"
+            send(TraktEndpoint.ScrobblePause)
+        }
+
+        fun stop() {
+            if (state != "playing" && state != "paused") return
+            send(TraktEndpoint.ScrobbleStop)
+            state = "idle"
+        }
+    }
 
     private fun saveProgress() {
         val file = queue.getOrNull(index)?.file ?: return

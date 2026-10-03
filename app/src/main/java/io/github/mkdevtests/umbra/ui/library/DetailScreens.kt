@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -226,7 +227,7 @@ private fun TitleBlock(
     originalTitle: String?,
     meta: List<String>,
     genres: List<String>,
-    action: @Composable () -> Unit,
+    action: @Composable ColumnScope.() -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().offset(y = (-72).dp).padding(horizontal = 24.dp),
@@ -243,7 +244,7 @@ private fun TitleBlock(
             if (genres.isNotEmpty()) {
                 Text(genres.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Box(modifier = Modifier.padding(top = 6.dp)) { action() }
+            Column(modifier = Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { action() }
         }
     }
 }

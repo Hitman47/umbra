@@ -16,6 +16,8 @@ import io.github.mkdevtests.umbra.history.HistoryDatabase
 import io.github.mkdevtests.umbra.history.MatchFixes
 import io.github.mkdevtests.umbra.history.WatchHistory
 import io.github.mkdevtests.umbra.update.Updater
+import io.github.mkdevtests.umbra.trakt.Trakt
+import io.github.mkdevtests.umbra.trakt.TraktApi
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import kotlin.concurrent.thread
@@ -44,6 +46,9 @@ class UmbraApp : Application(), SingletonImageLoader.Factory {
 
     val matchFixes by lazy { MatchFixes(userData.matchFixes()) }
     val hidden by lazy { HiddenTitles(userData.hidden()) }
+    val trakt by lazy {
+        Trakt(this, TraktApi(BuildConfig.TRAKT_CLIENT_ID, BuildConfig.TRAKT_CLIENT_SECRET, "Umbra/${BuildConfig.VERSION_NAME}", OkHttpClient()))
+    }
 
     override fun onCreate() {
         super.onCreate()

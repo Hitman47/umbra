@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val umbraVersion = "0.2.4"
+val umbraVersion = "0.2.5"
 
 base {
     // APK names: umbra-debug.apk, umbra-release-unsigned.apk
@@ -37,6 +37,9 @@ android {
 
         buildConfigField("String", "TMDB_TOKEN", localProperty("tmdb.token"))
         buildConfigField("String", "THETVDB_TOKEN", localProperty("thetvdb.token"))
+        // Trakt app of the user (trakt.tv/oauth/applications); the secret is optional.
+        buildConfigField("String", "TRAKT_CLIENT_ID", localProperty("trakt.clientId"))
+        buildConfigField("String", "TRAKT_CLIENT_SECRET", localProperty("trakt.clientSecret"))
 
         // libmpv ships 4 ABIs (~100 MB); the target tablet is arm64.
         ndk { abiFilters += "arm64-v8a" }

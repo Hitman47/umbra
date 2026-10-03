@@ -34,6 +34,12 @@ import io.github.mkdevtests.umbra.ui.settings.SettingsScreen
 import io.github.mkdevtests.umbra.ui.theme.UmbraTheme
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        // Back from the player or from another app: catch up with Trakt (one small request when nothing changed).
+        (application as UmbraApp).trakt.sync()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -110,6 +116,7 @@ private fun UmbraRoot(
         is Detail.FixMatch -> library.shows.firstOrNull { it.key == detail.key }?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
         Detail.Settings -> SettingsScreen(
             store = app.settings,
+            trakt = app.trakt,
             updater = app.updater,
             source = browserViewModel.source,
             imageCache = context.cacheDir.resolve("image_cache"),
