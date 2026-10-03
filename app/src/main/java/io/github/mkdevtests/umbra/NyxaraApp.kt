@@ -98,6 +98,9 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** The Perso tab's history and lock, apart from the library. */
     val perso by lazy { io.github.mkdevtests.umbra.perso.PersoStore(this, scope) }
 
+    /** The external catalogue shown as Profils in the Perso tab: read only, kept on the device. */
+    val catalog by lazy { io.github.mkdevtests.umbra.catalog.CatalogStore(this, io.github.mkdevtests.umbra.catalog.CatalogClient(OkHttpClient()), { nas }, scope) }
+
     /** The videos of the Perso folders played last, for a shuffle that starts at once. */
     val persoTrees by lazy { io.github.mkdevtests.umbra.perso.PersoTrees(noBackupFilesDir.resolve("perso-trees")) }
 
@@ -129,6 +132,8 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(NasClient::of)) }
         _sourceList.value = nas?.sources.orEmpty()
         LocalImages.url = { path -> streamServer.imageUrl(path) }
+        streamServer.remoteImages = { key -> catalog.picture(key) }
+        catalog.syncIfDue()
         watchNetwork()
         watchForeground()
         updater.check()

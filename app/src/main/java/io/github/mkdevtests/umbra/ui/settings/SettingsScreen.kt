@@ -89,6 +89,7 @@ fun SettingsScreen(
     onExport: suspend (Uri) -> String,
     onImport: suspend (Uri) -> String,
     perso: PersoStore,
+    catalog: io.github.mkdevtests.umbra.catalog.CatalogStore,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -259,6 +260,7 @@ fun SettingsScreen(
             }
 
             PersoSection(perso)
+            CatalogSection(catalog)
 
             TraktSection(trakt)
 
@@ -327,6 +329,67 @@ private fun PersoSection(perso: PersoStore) {
         "off" -> PinDialog("Code actuel", onDismiss = { step = null }) { pin ->
             perso.unlock(pin).also { ok -> if (ok) { perso.removeLock(); step = null } }
         }
+    }
+}
+
+/** The external catalogue shown as Profils in Perso: where, how often, its state. */
+@Composable
+private fun CatalogSection(catalog: io.github.mkdevtests.umbra.catalog.CatalogStore) {
+    val address by catalog.address.collectAsState()
+    val mode by catalog.mode.collectAsState()
+    val status by catalog.status.collectAsState()
+    val index by catalog.index.collectAsState()
+    var editing by remember { mutableStateOf(false) }
+    Section("Catalogue externe") {
+        Item(
+            "Adresse",
+            if (address.configured) listOfNotNull(address.home, address.away.ifBlank { null }).joinToString(" · ") else "Aucune : la vue Profils de Perso reste cachée.",
+        ) { TextButton(onClick = { editing = true }) { Text(if (address.configured) "Modifier" else "Régler") } }
+        if (address.configured) {
+            ChipsItem("Synchronisation", null) {
+                io.github.mkdevtests.umbra.catalog.CatalogSync.entries.forEach { entry ->
+                    FilterChip(selected = mode == entry, onClick = { catalog.setMode(entry) }, label = { Text(entry.label) })
+                }
+            }
+            val state = when {
+                status.syncing -> status.progress ?: "Synchronisation…"
+                status.error != null -> status.error
+                index != null -> index!!.let { "${it.people.size} profils · ${it.data.videos.size} vidéos · ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it.data.syncedAt))}" }
+                else -> "Jamais synchronisé"
+            }
+            Item("État", state) {
+                TextButton(onClick = catalog::sync, enabled = !status.syncing) { Text("Synchroniser") }
+            }
+        }
+    }
+    if (editing) {
+        var home by remember { mutableStateOf(address.home) }
+        var away by remember { mutableStateOf(address.away) }
+        var user by remember { mutableStateOf(address.user) }
+        var password by remember { mutableStateOf(address.password) }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Catalogue externe") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(home, { home = it }, label = { Text("Adresse à la maison") }, placeholder = { Text("http://192.168.1.10:8086") }, singleLine = true)
+                    OutlinedTextField(away, { away = it }, label = { Text("Adresse hors de chez moi (facultatif)") }, singleLine = true)
+                    OutlinedTextField(user, { user = it }, label = { Text("Identifiant (facultatif)") }, singleLine = true)
+                    OutlinedTextField(
+                        password, { password = it }, label = { Text("Mot de passe (facultatif)") }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    )
+                    Text("Lecture seule : rien n'est jamais modifié dans le catalogue.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    catalog.setAddress(io.github.mkdevtests.umbra.catalog.CatalogAddress(home, away, user, password))
+                    editing = false
+                }) { Text("Enregistrer") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Annuler") } },
+        )
     }
 }
 

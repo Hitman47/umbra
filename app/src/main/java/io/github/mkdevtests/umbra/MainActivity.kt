@@ -182,6 +182,7 @@ private fun NyxaraRoot(
                 onExport = app.backups::export,
                 onImport = app.backups::import,
                 perso = app.perso,
+                catalog = app.catalog,
                 onBack = back,
             )
             Detail.Measures -> MeasuresScreen(app.measures, back)
