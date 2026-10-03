@@ -361,8 +361,9 @@ private class ReadAheadStream(
             while (true) {
                 val index = claim()
                 if (index < 0) break
-                val handle = file ?: pool.acquire().first.also { file = it }
                 val result: Any = try {
+                    // Opening another handle may fail too: the player then gets the error, not a wait.
+                    val handle = file ?: pool.acquire().first.also { file = it }
                     read(handle, index)
                 } catch (e: Throwable) {
                     failed = true
