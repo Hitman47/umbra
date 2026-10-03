@@ -19,7 +19,11 @@ class ReadOnlyTest {
         val smbUsers = sources.filter { file ->
             file.readLines().any { it.startsWith("import com.hierynomus") || it.startsWith("import com.rapid7") }
         }
-        assertEquals(listOf(smbNas), smbUsers)
+        // SmbSecurity.kt only picks smbj's crypto (hashes, ciphers): it never reaches a share.
+        val security = sources.single { it.name == "SmbSecurity.kt" }
+        assertEquals(setOf(smbNas, security), smbUsers.toSet())
+        val imports = security.readLines().filter { it.startsWith("import com.hierynomus") || it.startsWith("import com.rapid7") }
+        assertTrue("SmbSecurity.kt imports more than crypto: $imports", imports.all { it.startsWith("import com.hierynomus.security.") })
     }
 
     @Test

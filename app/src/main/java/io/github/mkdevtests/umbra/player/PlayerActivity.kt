@@ -276,7 +276,7 @@ class PlayerActivity : ComponentActivity() {
             if (videos.isEmpty()) {
                 // Downloaded: played alone, NAS or not.
                 if (offline) {
-                    queue += persoItem(request.start!!)
+                    queue += persoItem(request.start)
                     start(queue[0])
                 } else {
                     preparing = "Aucune vidéo dans ce dossier."
