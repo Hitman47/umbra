@@ -6,6 +6,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import io.github.mkdevtests.umbra.library.LibraryRepository
+import io.github.mkdevtests.umbra.library.LocalImages
 import io.github.mkdevtests.umbra.player.PlaybackLog
 import io.github.mkdevtests.umbra.nas.LocalStreamServer
 import io.github.mkdevtests.umbra.nas.NasClient
@@ -22,6 +23,7 @@ import io.github.mkdevtests.umbra.trakt.Trakt
 import io.github.mkdevtests.umbra.trakt.TraktApi
 import io.github.mkdevtests.umbra.media.MediaInfoStore
 import io.github.mkdevtests.umbra.subtitles.OpenSubtitles
+import io.github.mkdevtests.umbra.subtitles.SubtitleMemory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,7 +51,14 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** The sources, for the screens that list them. */
     val sourceList: StateFlow<List<NasSource>> = _sourceList.asStateFlow()
 
-    val streamServer by lazy { LocalStreamServer { nas } }
+    val streamServer by lazy { LocalStreamServer.bound({ nas }, imageSecret()) }
+
+    /** Part of the NAS images' URLs, the same at each launch so that their cache survives; never shared. */
+    private fun imageSecret(): String {
+        val prefs = getSharedPreferences("server", MODE_PRIVATE)
+        return prefs.getString("image_secret", null)
+            ?: java.util.UUID.randomUUID().toString().replace("-", "").also { prefs.edit().putString("image_secret", it).apply() }
+    }
 
     val library by lazy { LibraryRepository(this) }
 
@@ -77,10 +86,14 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
 
     val openSubtitles by lazy { OpenSubtitles(this, BuildConfig.OPENSUBTITLES_KEY, "Nyxara v${BuildConfig.VERSION_NAME}", OkHttpClient()) }
 
+    /** Subtitles downloaded for each video, added again when it plays. */
+    val subtitleMemory by lazy { SubtitleMemory(this) }
+
     override fun onCreate() {
         super.onCreate()
         nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(NasClient::of)) }
         _sourceList.value = nas?.sources.orEmpty()
+        LocalImages.url = { path -> streamServer.imageUrl(path) }
         updater.check()
     }
 

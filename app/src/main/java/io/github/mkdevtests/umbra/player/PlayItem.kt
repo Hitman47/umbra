@@ -28,6 +28,8 @@ data class PlayerTrack(
     val label: String,
     val detail: String,
     val selected: Boolean,
+    /** As the file says it ("fre", "en"), null when it doesn't. */
+    val language: String? = null,
 )
 
 /** What the player measured of one file; see [MpvPlayer.figures]. */

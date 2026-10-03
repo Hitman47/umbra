@@ -49,6 +49,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.Eagerly, nyxara.history.progress.value)
     val hidden: StateFlow<Set<String>> = nyxara.hidden.keys
 
+    /** folder.jpg and the like, found next to the videos by the last scan. */
+    val localArt = repository.localArt
+
     /** The search tab's state, kept while a title opened from it is on screen. */
     val searchQuery = MutableStateFlow("")
     val searchFilters = MutableStateFlow(SearchFilters())
@@ -73,6 +76,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun resetMatch(groups: List<String>) = repository.resetMatch(groups)
 
     val matchFixes = nyxara.matchFixes.fixes
+
+    /** When the library on the device was written last. */
+    val savedAt = repository.savedAt
 
     /** Called once a NAS source is added, edited or removed. */
     fun onSourcesChanged() = repository.onSourcesChanged()

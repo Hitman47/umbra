@@ -82,6 +82,10 @@ class LibraryScanner(
     var offline: Set<String> = emptySet()
         private set
 
+    /** The images found next to the videos by the last [scan]. */
+    var localArt = LocalArt()
+        private set
+
     /** A video found on the NAS; [folders] are the folder names between the share and the file. */
     private class VideoFile(val entry: NasEntry, val folders: List<String>, val subtitles: List<String>)
 
@@ -142,6 +146,7 @@ class LibraryScanner(
     /** The videos of every share; a share whose NAS doesn't answer is added to [offline] instead. */
     private suspend fun walk(offline: MutableSet<String>): List<VideoFile> = coroutineScope {
         val found = ConcurrentLinkedQueue<VideoFile>()
+        val art = ConcurrentLinkedQueue<LocalArt>()
         val folders = AtomicInteger()
 
         fun visit(path: String, names: List<String>) {
@@ -156,9 +161,13 @@ class LibraryScanner(
                         emptyList()
                     }
                 }
-                entries.filter { it.isVideo && !it.isExtra() }.forEach { video ->
+                val videos = entries.filter { it.isVideo && !it.isExtra() }
+                videos.forEach { video ->
                     found += VideoFile(video, names, subtitlesFor(video, entries).map { it.path })
                 }
+                // folder.jpg and the like: the folder's or a video's own artwork.
+                val images = entries.filter { !it.isDirectory && isImageName(it.name) }.map { it.path }
+                if (images.isNotEmpty()) art += folderArt(path, images, videos.map { it.path })
                 onProgress("Exploration du NAS : ${folders.incrementAndGet()} dossiers, ${found.size} vidéos")
                 if (names.size < MAX_DEPTH) {
                     entries.filter { it.isDirectory && !it.isSkipped() }.forEach { visit(it.path, names + it.name) }
@@ -167,8 +176,11 @@ class LibraryScanner(
         }
 
         list("").forEach { share -> visit(share.path, emptyList()) }
-        found
-    }.toList()
+        found to art
+    }.let { (found, art) ->
+        localArt = LocalArt(art.flatMap { it.posters.entries }.associate { it.toPair() }, art.flatMap { it.backdrops.entries }.associate { it.toPair() })
+        found.toList()
+    }
 
     /**
      * [path]'s entries, or none for a folder the NAS refuses (rights). A NAS

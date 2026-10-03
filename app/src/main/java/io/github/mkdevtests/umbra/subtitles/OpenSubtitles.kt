@@ -35,6 +35,8 @@ data class OnlineSubtitle(
     val hashMatch: Boolean,
     val hearingImpaired: Boolean,
     val machineTranslated: Boolean,
+    /** Made for the same release as the file (group, or source and resolution): likely in sync. */
+    val sameRelease: Boolean = false,
 )
 
 /** What is searched: the file's hash and size, and TMDB's ids when the title is known. */
@@ -66,7 +68,8 @@ data class OpenSubtitlesStatus(
 class OpenSubtitles(context: Context, private val apiKey: String, private val userAgent: String, private val http: OkHttpClient) {
 
     private val prefs = context.getSharedPreferences("opensubtitles", Context.MODE_PRIVATE)
-    private val folder = context.cacheDir.resolve("subtitles")
+    /** Kept with the app's files: a subtitle chosen once comes back with its video. */
+    private val folder = context.filesDir.resolve("subtitles")
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -129,10 +132,12 @@ class OpenSubtitles(context: Context, private val apiKey: String, private val us
             }
             val hashed = byHash?.await().orEmpty().filter { it.hashMatch }
             val titled = byTitle.await()
+            val file = releaseTraits(query.fileName)
             (hashed + titled).distinctBy { it.fileId }
+                .map { it.copy(sameRelease = it.hashMatch || sameRelease(file, releaseTraits(it.release))) }
                 .sortedWith(
                     compareByDescending<OnlineSubtitle> { it.hashMatch }
-                        .thenBy { languages.indexOf(it.language).let { index -> if (index < 0) languages.size else index } }
+                        .thenByDescending { it.sameRelease }
                         .thenBy { it.machineTranslated }
                         .thenByDescending { it.downloads },
                 )

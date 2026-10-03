@@ -11,6 +11,7 @@ import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
 import io.github.mkdevtests.umbra.settings.Settings
 import io.github.mkdevtests.umbra.settings.Track
 import io.github.mkdevtests.umbra.settings.chooseTracks
+import io.github.mkdevtests.umbra.subtitles.OnlineTrack
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +36,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     private var pendingFile: String? = null
     private var surfaceAttached = false
     private var externalSubtitles: List<String> = emptyList()
+    private var onlineSubtitles: List<OnlineTrack> = emptyList()
 
     private val _position = MutableStateFlow(0.0)
     val position: StateFlow<Double> = _position.asStateFlow()
@@ -150,8 +152,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     }
 
     /** Plays [url] from [start] seconds with extra subtitle files: now, or as soon as a Surface is available. */
-    fun play(url: String, subtitles: List<String> = emptyList(), start: Double = 0.0) {
+    fun play(url: String, subtitles: List<String> = emptyList(), start: Double = 0.0, online: List<OnlineTrack> = emptyList()) {
         externalSubtitles = subtitles
+        onlineSubtitles = online
         _ended.value = false
         _buffering.value = true
         // The previous file's values must not be saved as this one's progress.
@@ -229,8 +232,13 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     /** Sound later (positive) or earlier, in seconds. */
     fun shiftAudio(seconds: Double) = mpv.command(arrayOf("add", "audio-delay", seconds.toString()))
 
-    /** Adds a subtitle file (downloaded) and shows it. */
-    fun addSubtitles(path: String) = mpv.command(arrayOf("sub-add", path, "select"))
+    /** Adds a downloaded subtitle file and shows it, in place of the one downloaded before in its language. */
+    fun addSubtitles(track: OnlineTrack) {
+        readTracks().filter { it.type == "sub" && it.external && it.title == track.title }.forEach {
+            mpv.command(arrayOf("sub-remove", it.id.toString()))
+        }
+        mpv.command(arrayOf("sub-add", track.path, "select", track.title, track.language))
+    }
 
     /** No video decoding while only the sound plays (background): the picture comes back with [enabled]. */
     fun setVideoEnabled(enabled: Boolean) = mpv.setPropertyString("vid", if (enabled) "auto" else "no")
@@ -361,6 +369,8 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 if (loadedMs == null) loadedMs = SystemClock.elapsedRealtime() - loadAt
                 // mpv only finds subtitles next to local files: add the NAS ones by hand.
                 externalSubtitles.forEach { mpv.command(arrayOf("sub-add", it, "auto")) }
+                // Subtitles downloaded for this video before: back, named, so the profile can pick them.
+                onlineSubtitles.forEach { mpv.command(arrayOf("sub-add", it.path, "auto", it.title, it.language)) }
                 selectTracks()
                 publishTracks()
                 publishChapters()
@@ -452,7 +462,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 "externe".takeIf { external },
                 "par défaut".takeIf { default },
             )
-            return PlayerTrack(id, label, detail.joinToString(" · "), selected)
+            return PlayerTrack(id, label, detail.joinToString(" · "), selected, lang)
         }
     }
 

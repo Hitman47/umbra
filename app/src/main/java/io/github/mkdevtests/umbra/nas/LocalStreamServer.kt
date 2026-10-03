@@ -3,6 +3,8 @@ package io.github.mkdevtests.umbra.nas
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.InputStream
+import io.github.mkdevtests.umbra.library.isImageName
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.UUID
 import kotlin.concurrent.thread
@@ -19,7 +21,12 @@ import java.util.concurrent.atomic.AtomicLong
  * Files are exposed under random tokens, so nothing else on the device can
  * guess a URL and browse the NAS through this server.
  */
-class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) {
+class LocalStreamServer(
+    /** In the images' URLs: kept across launches, so that their cache survives, and unknown to other apps. */
+    private val imageSecret: String = UUID.randomUUID().toString().replace("-", ""),
+    port: Int = 0,
+    private val nas: () -> NasRouter?,
+) : NanoHTTPD(HOST, port) {
 
     /** A file served under a token: [key] names it in the stats ("Films\Dune.mkv", "nfs:Films\Dune.mkv"). */
     private class Target(val key: String, val name: String, val pool: HandlePool)
@@ -54,6 +61,37 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
         return "http://$HOST:$listeningPort/$token/${URLEncoder.encode(name, "UTF-8").replace("+", "%20")}"
     }
 
+    /** The URL of the NAS image at [path] (folder.jpg…), the same at every launch when the port is free. */
+    fun imageUrl(path: String): String {
+        synchronized(this) { if (!isAlive) start(SOCKET_READ_TIMEOUT, true) }
+        return "http://$HOST:$listeningPort/$IMAGES/$imageSecret/${URLEncoder.encode(path, "UTF-8").replace("+", "%20")}"
+    }
+
+    private fun serveImage(encoded: String): Response {
+        val path = URLDecoder.decode(encoded, "UTF-8")
+        if (!isImageName(path)) return text(Response.Status.FORBIDDEN, "Not an image")
+        return try {
+            val bytes = (nas() ?: return text(Response.Status.NOT_FOUND, "No NAS")).open(path).use { file ->
+                if (file.size > MAX_IMAGE) return text(Response.Status.FORBIDDEN, "Too big")
+                val buffer = ByteArray(file.size.toInt())
+                var filled = 0
+                while (filled < buffer.size) {
+                    val count = file.read(buffer, filled.toLong(), filled, buffer.size - filled)
+                    if (count <= 0) break
+                    filled += count
+                }
+                buffer.copyOf(filled)
+            }
+            newFixedLengthResponse(Response.Status.OK, imageType(path), bytes.inputStream(), bytes.size.toLong()).apply {
+                // The image loader keeps it on disk: the NAS is asked once.
+                addHeader("Cache-Control", "max-age=2592000")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "image $path", e)
+            text(Response.Status.NOT_FOUND, e.toUserMessage())
+        }
+    }
+
     /** Closes the handles kept open, when the player goes away. */
     fun closeIdle() {
         pools.values.forEach { it.closeAll() }
@@ -61,6 +99,10 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
     }
 
     override fun serve(session: IHTTPSession): Response {
+        val parts = session.uri.trimStart('/').split('/', limit = 3)
+        if (parts.size == 3 && parts[0] == IMAGES) {
+            return if (parts[1] == imageSecret) serveImage(parts[2]) else text(Response.Status.NOT_FOUND, "Unknown image")
+        }
         val token = session.uri.trimStart('/').substringBefore('/')
         val target = files[token] ?: return text(Response.Status.NOT_FOUND, "Unknown file")
 
@@ -107,12 +149,35 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
     private fun text(status: Response.Status, message: String) =
         newFixedLengthResponse(status, MIME_PLAINTEXT, message)
 
-    private companion object {
-        const val TAG = "LocalStreamServer"
-        const val HOST = "127.0.0.1"
+    companion object {
+        private const val TAG = "LocalStreamServer"
+        private const val HOST = "127.0.0.1"
+        private const val IMAGES = "img"
+        private const val MAX_IMAGE = 16L shl 20
+
+        /** Port tried first, so that image URLs (and their cache) stay the same from one launch to the next. */
+        private const val PREFERRED_PORT = 47913
+
+        /** A server on [PREFERRED_PORT], or any free port when it is taken. */
+        fun bound(nas: () -> NasRouter?, imageSecret: String): LocalStreamServer {
+            val preferred = LocalStreamServer(imageSecret, PREFERRED_PORT, nas)
+            return try {
+                preferred.start(SOCKET_READ_TIMEOUT, true)
+                preferred
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "port $PREFERRED_PORT taken", e)
+                LocalStreamServer(imageSecret, nas = nas)
+            }
+        }
+
+        private fun imageType(path: String) = when (path.substringAfterLast('.').lowercase()) {
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            else -> "image/jpeg"
+        }
 
         /** Inclusive byte range for a "Range: bytes=a-b" header, whole file if absent, null if invalid. */
-        fun parseRange(header: String?, size: Long): Pair<Long, Long>? {
+        private fun parseRange(header: String?, size: Long): Pair<Long, Long>? {
             if (header == null) return 0L to size - 1
             val spec = header.removePrefix("bytes=").substringBefore(',').trim()
             val first = spec.substringBefore('-').trim()
@@ -124,7 +189,7 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
             return if (start in 0..end && start < size) start to end else null
         }
 
-        fun mimeType(path: String) = when (path.substringAfterLast('.').lowercase()) {
+        private fun mimeType(path: String) = when (path.substringAfterLast('.').lowercase()) {
             "mkv" -> "video/x-matroska"
             "mp4", "m4v" -> "video/mp4"
             "webm" -> "video/webm"

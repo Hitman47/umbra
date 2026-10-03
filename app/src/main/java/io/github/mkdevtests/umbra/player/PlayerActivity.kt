@@ -27,7 +27,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -76,17 +76,21 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
-import io.github.mkdevtests.umbra.settings.SEEK_STEPS
-import io.github.mkdevtests.umbra.settings.SUBTITLE_LANGUAGES
-import io.github.mkdevtests.umbra.settings.seekStepLabel
+import io.github.mkdevtests.umbra.settings.Language
 import io.github.mkdevtests.umbra.subtitles.OnlineSubtitle
+import io.github.mkdevtests.umbra.subtitles.OnlineTrack
+import io.github.mkdevtests.umbra.subtitles.OpenSubtitlesStatus
+import io.github.mkdevtests.umbra.subtitles.subtitleLanguageName
 import io.github.mkdevtests.umbra.subtitles.SubtitleQuery
 import io.github.mkdevtests.umbra.subtitles.movieHash
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
@@ -96,7 +100,10 @@ import io.github.mkdevtests.umbra.ui.theme.NyxaraTheme
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
@@ -189,8 +196,7 @@ class PlayerActivity : ComponentActivity() {
                     next = queue.getOrNull(index + 1),
                     settings = settings,
                     inPip = inPip,
-                    online = onlineSubtitles(),
-                    onSeekStep = { step -> app.settings.update { it.copy(seekStep = step) } },
+                    onlineHook = onlineSubtitles(),
                     onNext = ::playNext,
                     onPip = ::enterPip,
                     onBack = ::finish,
@@ -292,6 +298,7 @@ class PlayerActivity : ComponentActivity() {
         val languages = settings.onlineSubtitleLanguages
         return OnlineSubtitlesHook(
             languages = languages,
+            status = app.openSubtitles.status,
             search = {
                 val item = queue[index]
                 val read = item.stream ?: item.file
@@ -309,13 +316,18 @@ class PlayerActivity : ComponentActivity() {
                     languages,
                 )
             },
-            add = { subtitle -> player.addSubtitles(app.openSubtitles.download(subtitle).absolutePath) },
+            add = { subtitle ->
+                val track = OnlineTrack(app.openSubtitles.download(subtitle).absolutePath, subtitle.language)
+                player.addSubtitles(track)
+                // Back with the video next time, without downloading it again.
+                queue[index].file?.let { app.subtitleMemory.remember(it, track.language, track.path) }
+            },
         )
     }
 
     private fun start(item: PlayItem) {
         (item.stream ?: item.file)?.let { (application as NyxaraApp).streamServer.resetStats(it) }
-        player.play(toMpvPath(item.url), item.subtitles, item.start)
+        player.play(toMpvPath(item.url), item.subtitles, item.start, online = item.file?.let(app.subtitleMemory::of).orEmpty())
     }
 
     /** The queue index already measured: one measure per file. */
@@ -461,9 +473,69 @@ private val SPEEDS = listOf(0.75, 1.0, 1.25, 1.5, 2.0)
 /** What the player needs to search subtitles online and add one. */
 class OnlineSubtitlesHook(
     val languages: List<String>,
+    val status: StateFlow<OpenSubtitlesStatus>,
     val search: suspend () -> List<OnlineSubtitle>,
     val add: suspend (OnlineSubtitle) -> Unit,
 )
+
+/**
+ * Online subtitles of the playing file: searched once, then the best one of a
+ * language in one touch, the next one if it isn't in sync, or any from the list.
+ */
+private class OnlineSubtitles(private val hook: OnlineSubtitlesHook, private val scope: CoroutineScope) {
+    val languages get() = hook.languages
+    val status get() = hook.status
+    var results by mutableStateOf<List<OnlineSubtitle>?>(null)
+    var busy by mutableStateOf<String?>(null)
+    var error by mutableStateOf<String?>(null)
+    /** The subtitle just added, offered to swap for the next one. */
+    var added by mutableStateOf<OnlineSubtitle?>(null)
+    private val tried = mutableMapOf<String, MutableSet<Int>>()
+
+    private suspend fun found(): List<OnlineSubtitle> = results ?: hook.search().also { results = it }
+
+    /** The best subtitle of [language] not tried yet. */
+    fun best(language: String) = run("Recherche en ${subtitleLanguageName(language).lowercase()}…") {
+        val candidate = found().firstOrNull { it.language == language && it.fileId !in tried[language].orEmpty() }
+            ?: throw IllegalStateException(
+                if (tried[language].isNullOrEmpty()) "Rien en ${subtitleLanguageName(language).lowercase()} pour cette vidéo." else "Plus d'autre choix en ${subtitleLanguageName(language).lowercase()}.",
+            )
+        add(candidate)
+    }
+
+    fun next() = added?.let { best(it.language) }
+
+    fun choose(subtitle: OnlineSubtitle) = run("Téléchargement…") { add(subtitle) }
+
+    fun hasNext(subtitle: OnlineSubtitle) =
+        results.orEmpty().any { it.language == subtitle.language && it.fileId !in tried[subtitle.language].orEmpty() }
+
+    /** Loads the list for the choice window. */
+    fun load() = run("Recherche…") { found() }
+
+    private suspend fun add(subtitle: OnlineSubtitle) {
+        tried.getOrPut(subtitle.language) { mutableSetOf() } += subtitle.fileId
+        hook.add(subtitle)
+        added = subtitle
+    }
+
+    private fun run(label: String, block: suspend () -> Unit) {
+        if (busy != null) return
+        busy = label
+        error = null
+        scope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = e.message ?: e.toString()
+            } finally {
+                busy = null
+            }
+        }
+    }
+}
 
 /** A jump shown on the side of the picture; jumps in a row add up ("+1 min 30"). */
 private data class SeekFlash(val seconds: Int, val at: Long)
@@ -478,8 +550,7 @@ private fun PlayerScreen(
     next: PlayItem?,
     settings: Settings,
     inPip: Boolean,
-    online: OnlineSubtitlesHook?,
-    onSeekStep: (Int) -> Unit,
+    onlineHook: OnlineSubtitlesHook?,
     onNext: () -> Unit,
     onPip: () -> Unit,
     onBack: () -> Unit,
@@ -492,13 +563,41 @@ private fun PlayerScreen(
     val fill by player.fill.collectAsState()
     val ended by player.ended.collectAsState()
     val chapters by player.chapters.collectAsState()
+    val audioTracks by player.audioTracks.collectAsState()
+    val subtitleTracks by player.subtitleTracks.collectAsState()
 
     var controlsVisible by remember { mutableStateOf(true) }
     var panelOpen by remember { mutableStateOf(false) }
     var speedMenu by remember { mutableStateOf(false) }
-    var stepMenu by remember { mutableStateOf(false) }
-    var step by remember { mutableIntStateOf(settings.seekStep) }
     var flash by remember { mutableStateOf<SeekFlash?>(null) }
+    // A swipe across the picture under way: the time it would land on.
+    var swipeTarget by remember { mutableStateOf<Double?>(null) }
+    val scope = rememberCoroutineScope()
+    val online = remember(item, onlineHook) { onlineHook?.let { OnlineSubtitles(it, scope) } }
+    var choosing by remember { mutableStateOf(false) }
+    // No subtitles in the profile's language in the file: offered once to look online.
+    var offerOnline by remember(item) { mutableStateOf<String?>(null) }
+    LaunchedEffect(item, audioTracks.isNotEmpty()) {
+        if (online == null || audioTracks.isEmpty()) return@LaunchedEffect
+        delay(1_500)
+        val wanted = settings.subtitles ?: return@LaunchedEffect
+        val code = ONLINE_CODES[wanted]?.takeIf { it in online.languages } ?: return@LaunchedEffect
+        val heard = audioTracks.firstOrNull { it.selected }?.language
+        if (wanted.matches(heard)) return@LaunchedEffect
+        if (player.subtitleTracks.value.none { wanted.matches(it.language) }) offerOnline = code
+    }
+    LaunchedEffect(online?.added) {
+        if (online?.added != null) {
+            delay(12_000)
+            online.added = null
+        }
+    }
+    LaunchedEffect(offerOnline) {
+        if (offerOnline != null) {
+            delay(12_000)
+            offerOnline = null
+        }
+    }
     var showInfo by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
     // While dragging, the slider shows the finger position, not mpv's.
@@ -509,16 +608,27 @@ private fun PlayerScreen(
     val autoSkipped = remember(item) { mutableSetOf<Int>() }
     val skip = skippableAt(chapters, position, duration)
 
-    fun jump(direction: Int) {
-        player.seekBy(direction * step)
+    /** Jumps [seconds] (negative: back); jumps in a row add up on the screen. */
+    fun jump(seconds: Int) {
+        player.seekBy(seconds)
         val now = SystemClock.uptimeMillis()
         val previous = flash
-        val total = if (previous != null && now - previous.at < 1_200 && previous.seconds.sign == direction) previous.seconds + direction * step else direction * step
+        val total = if (previous != null && now - previous.at < 1_200 && previous.seconds.sign == seconds.sign) previous.seconds + seconds else seconds
         flash = SeekFlash(total, now)
     }
 
-    LaunchedEffect(controlsVisible, paused, panelOpen, speedMenu, stepMenu) {
-        if (controlsVisible && !paused && !panelOpen && !speedMenu && !stepMenu) {
+    /** Held ⏪ or ⏩: jumps again and again, further and further, until released. */
+    fun holdJump(direction: Int): Job = scope.launch {
+        val start = SystemClock.uptimeMillis()
+        delay(HOLD_DELAY_MS)
+        while (true) {
+            jump(direction * holdStep(SystemClock.uptimeMillis() - start))
+            delay(HOLD_TICK_MS)
+        }
+    }
+
+    LaunchedEffect(controlsVisible, paused, panelOpen, speedMenu, swipeTarget) {
+        if (controlsVisible && !paused && !panelOpen && !speedMenu && swipeTarget == null) {
             delay(4_000)
             controlsVisible = false
         }
@@ -558,10 +668,35 @@ private fun PlayerScreen(
                     // Double tap on a side: jump back or ahead; in the middle: pause.
                     onDoubleTap = { offset ->
                         when {
-                            offset.x < size.width / 3f -> jump(-1)
-                            offset.x > size.width * 2f / 3f -> jump(1)
+                            offset.x < size.width / 3f -> jump(-SHORT_JUMP)
+                            offset.x > size.width * 2f / 3f -> jump(SHORT_JUMP)
                             else -> player.togglePause()
                         }
+                    },
+                )
+            }
+            // A swipe across the picture: seconds for a short one, minutes for a long one; applied on release.
+            .pointerInput(Unit) {
+                var from = 0.0
+                var dragged = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        from = player.position.value
+                        dragged = 0f
+                        // Not while the track panel is open: its rows are under the finger.
+                        swipeTarget = from.takeIf { !panelOpen }
+                    },
+                    onDragEnd = {
+                        swipeTarget?.let { target -> if (abs(target - from) >= 1) player.seekTo(target) }
+                        swipeTarget = null
+                    },
+                    onDragCancel = { swipeTarget = null },
+                    onHorizontalDrag = { change, amount ->
+                        if (swipeTarget == null) return@detectHorizontalDragGestures
+                        change.consume()
+                        dragged += amount
+                        val end = player.duration.value.takeIf { it > 0 } ?: Double.MAX_VALUE
+                        swipeTarget = (from + swipeSeconds(dragged / size.width)).coerceIn(0.0, end)
                     },
                 )
             },
@@ -590,9 +725,23 @@ private fun PlayerScreen(
             )
         }
 
+        swipeTarget?.let { target ->
+            val delta = (target - position).toInt()
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 28.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(formatTime(target), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.SemiBold)
+                Text((if (delta < 0) "−" else "+") + durationLabel(delta), color = Color.White.copy(alpha = 0.75f), fontSize = 16.sp)
+            }
+        }
+
         flash?.let {
             Text(
-                (if (it.seconds < 0) "⏪  −" else "+") + durationLabel(abs(it.seconds)) + if (it.seconds > 0) "  ⏩" else "",
+                (if (it.seconds < 0) "⏪  −" else "+") + durationLabel(it.seconds) + if (it.seconds > 0) "  ⏩" else "",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -619,38 +768,23 @@ private fun PlayerScreen(
                     TextButton(onClick = { showInfo = !showInfo }) { Text("Infos", color = Color.White) }
                 }
 
-                Box(modifier = Modifier.align(Alignment.Center)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(40.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalArrangement = Arrangement.spacedBy(40.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SeekButton(-1, onJump = ::jump, onHold = ::holdJump)
+                    Surface(
+                        onClick = { player.togglePause() },
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.18f),
+                        modifier = Modifier.size(88.dp),
                     ) {
-                        SeekButton(-step, onClick = { jump(-1) }, onLongClick = { stepMenu = true })
-                        Surface(
-                            onClick = { player.togglePause() },
-                            shape = CircleShape,
-                            color = Color.White.copy(alpha = 0.18f),
-                            modifier = Modifier.size(88.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(if (paused) "▶" else "❚❚", color = Color.White, fontSize = 34.sp)
-                            }
-                        }
-                        SeekButton(step, onClick = { jump(1) }, onLongClick = { stepMenu = true })
-                    }
-                    // The jump's length: a long press on ⏪ or ⏩, remembered for the next videos.
-                    DropdownMenu(expanded = stepMenu, onDismissRequest = { stepMenu = false }) {
-                        Text("Saut", fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                        SEEK_STEPS.forEach { choice ->
-                            DropdownMenuItem(
-                                text = { Text((if (choice == step) "✓ " else "    ") + "± " + seekStepLabel(choice)) },
-                                onClick = {
-                                    step = choice
-                                    onSeekStep(choice)
-                                    stepMenu = false
-                                },
-                            )
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(if (paused) "▶" else "❚❚", color = Color.White, fontSize = 34.sp)
                         }
                     }
+                    SeekButton(1, onJump = ::jump, onHold = ::holdJump)
                 }
 
                 Column(
@@ -705,8 +839,35 @@ private fun PlayerScreen(
             exit = slideOutHorizontally { it },
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
-            TrackPanel(player, settings, online)
+            TrackPanel(player, settings, online) { choosing = true; online?.load() }
         }
+
+        // What happened online: added (in sync? the next one), searching, a failure, or an offer.
+        val banner = online?.let { state ->
+            when {
+                state.busy != null -> Banner(state.busy!!)
+                state.error != null -> Banner(state.error!!, actions = listOf("OK" to { state.error = null }))
+                state.added != null -> state.added!!.let { added ->
+                    Banner(
+                        "Sous-titres ${subtitleLanguageName(added.language).lowercase()} ajoutés" + if (added.hashMatch) " · faits pour ce fichier" else "",
+                        actions = listOfNotNull(
+                            ("Décalés ? Essayer le suivant" to { state.next(); Unit }).takeIf { state.hasNext(added) },
+                            "OK" to { state.added = null },
+                        ),
+                    )
+                }
+                offerOnline != null -> offerOnline!!.let { code ->
+                    Banner(
+                        "Pas de sous-titres ${subtitleLanguageName(code).lowercase()} dans ce fichier",
+                        actions = listOf("Chercher en ligne" to { offerOnline = null; state.best(code) }, "Non merci" to { offerOnline = null }),
+                    )
+                }
+                else -> null
+            }
+        }
+        banner?.let { OnlineBanner(it, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 72.dp)) }
+
+        if (choosing && online != null) OnlineChoices(online) { choosing = false }
 
         // The next episode: at the credits, in the last seconds, or at the end.
         val credits = skip?.kind == ChapterKind.Credits
@@ -734,26 +895,35 @@ private fun PlayerScreen(
     }
 }
 
-/** ⏪ or ⏩ with its length; a long press changes the length. */
+/** ⏪ or ⏩: a tap jumps 10 s, holding it goes on further and further until released. */
 @Composable
-private fun SeekButton(seconds: Int, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun SeekButton(direction: Int, onJump: (Int) -> Unit, onHold: (Int) -> Job) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .pointerInput(direction) {
+                detectTapGestures(
+                    onPress = {
+                        val holding = onHold(direction)
+                        val started = SystemClock.uptimeMillis()
+                        tryAwaitRelease()
+                        holding.cancel()
+                        // Released before the repeat began: a single jump.
+                        if (SystemClock.uptimeMillis() - started < HOLD_DELAY_MS) onJump(direction * SHORT_JUMP)
+                    },
+                )
+            }
             .padding(horizontal = 18.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text((if (seconds < 0) "⏪ −" else "+") + seekStepLabel(abs(seconds)) + if (seconds > 0) " ⏩" else "", color = Color.White, fontSize = 20.sp)
+        Text(if (direction < 0) "⏪ 10" else "10 ⏩", color = Color.White, fontSize = 22.sp)
     }
 }
 
-/** "45 s", "1 min", "1 min 30". */
-private fun durationLabel(seconds: Int) = when {
-    seconds < 60 -> "$seconds s"
-    seconds % 60 == 0 -> "${seconds / 60} min"
-    else -> "${seconds / 60} min ${"%02d".format(seconds % 60)}"
-}
+/** Held ⏪ ⏩: the first repeat after this delay, then one jump per tick. */
+private const val HOLD_DELAY_MS = 450L
+private const val HOLD_TICK_MS = 350L
+
 
 @Composable
 private fun Pill(text: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
@@ -770,17 +940,12 @@ private fun Pill(text: String, active: Boolean, modifier: Modifier = Modifier, o
 
 /** Side panel: audio and subtitle tracks, their delays, subtitles found online. */
 @Composable
-private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubtitlesHook?) {
+private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubtitles?, onChooseOnline: () -> Unit) {
     val audio by player.audioTracks.collectAsState()
     val subtitles by player.subtitleTracks.collectAsState()
     val delay by player.subtitleDelay.collectAsState()
     val audioDelay by player.audioDelay.collectAsState()
     val subtitlesOn = subtitles.any { it.selected }
-    val scope = rememberCoroutineScope()
-    var results by remember { mutableStateOf<List<OnlineSubtitle>?>(null) }
-    var searching by remember { mutableStateOf(false) }
-    var adding by remember { mutableStateOf<Int?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -802,50 +967,11 @@ private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubt
         TrackRow("Désactivés", null, !subtitlesOn) { player.selectSubtitles(NO_SUBTITLES) }
 
         if (online != null) {
-            val found = results
-            if (found == null) {
-                TrackRow(
-                    if (searching) "Recherche en ligne…" else "Chercher en ligne…",
-                    "OpenSubtitles · " + online.languages.joinToString(", ") { subtitleLanguageName(it) },
-                    false,
-                ) {
-                    if (searching) return@TrackRow
-                    searching = true
-                    error = null
-                    scope.launch {
-                        runCatching { online.search() }
-                            .onSuccess { results = it }
-                            .onFailure { error = it.message ?: it.toString() }
-                        searching = false
-                    }
-                }
-            } else {
-                PanelTitle("En ligne · OpenSubtitles")
-                if (found.isEmpty()) PanelNote("Rien dans ces langues pour ce titre.")
-                found.take(MAX_ONLINE).forEach { subtitle ->
-                    val label = subtitleLanguageName(subtitle.language) + if (subtitle.hashMatch) "  ·  ✓ fait pour ce fichier" else ""
-                    val detail = listOfNotNull(
-                        subtitle.release.take(80),
-                        "${subtitle.downloads} téléchargements",
-                        "malentendants".takeIf { subtitle.hearingImpaired },
-                        "traduction automatique".takeIf { subtitle.machineTranslated },
-                        "téléchargement…".takeIf { adding == subtitle.fileId },
-                    ).joinToString(" · ")
-                    TrackRow(label, detail, false) {
-                        if (adding != null) return@TrackRow
-                        adding = subtitle.fileId
-                        error = null
-                        scope.launch {
-                            runCatching { online.add(subtitle) }
-                                .onSuccess { results = null }
-                                .onFailure { error = it.message ?: it.toString() }
-                            adding = null
-                        }
-                    }
-                }
-                TrackRow("Fermer la recherche", null, false) { results = null }
+            PanelTitle("Sous-titres en ligne")
+            online.languages.forEach { code ->
+                TrackRow("Ajouter le meilleur en ${subtitleLanguageName(code).lowercase()}", "Choisi pour ce fichier, activé tout de suite", false) { online.best(code) }
             }
-            error?.let { PanelNote("Erreur : $it") }
+            TrackRow("Voir tous les choix…", quota(online.status.collectAsState().value), false, onClick = onChooseOnline)
         }
 
         PanelTitle("Décalage sous-titres")
@@ -881,11 +1007,6 @@ private fun DelayRow(value: Double, enabled: Boolean, stepSeconds: Double = 0.1,
     }
 }
 
-private const val MAX_ONLINE = 30
-
-/** "fr" → "Français", "pt-BR" → "Portugais (Brésil)". */
-private fun subtitleLanguageName(code: String): String =
-    SUBTITLE_LANGUAGES[code] ?: java.util.Locale.forLanguageTag(code).getDisplayName(java.util.Locale.FRENCH).replaceFirstChar { it.uppercase() }.ifEmpty { code }
 
 @Composable
 private fun PanelTitle(text: String) {
@@ -964,4 +1085,108 @@ private fun formatTime(seconds: Double): String {
     val m = (total % 3600) / 60
     val s = total % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+/** The profile's subtitle language as OpenSubtitles names it. */
+private val ONLINE_CODES = mapOf(Language.French to "fr", Language.English to "en")
+
+private class Banner(val text: String, val actions: List<Pair<String, () -> Unit>> = emptyList())
+
+@Composable
+private fun OnlineBanner(banner: Banner, modifier: Modifier) {
+    Surface(color = PanelColor, shape = RoundedCornerShape(16.dp), modifier = modifier.widthIn(max = 640.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (banner.actions.isEmpty()) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            Text(banner.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f, fill = false))
+            banner.actions.forEachIndexed { i, (label, action) -> Pill(label, active = i == 0, onClick = action) }
+        }
+    }
+}
+
+/** "4 téléchargements restants aujourd'hui", what the account allows, or nothing yet. */
+private fun quota(status: OpenSubtitlesStatus): String? = when {
+    status.remaining != null -> "${status.remaining} téléchargement${if (status.remaining > 1) "s" else ""} restant${if (status.remaining > 1) "s" else ""} aujourd'hui"
+    status.allowed != null -> "${status.allowed} téléchargements par jour"
+    else -> "OpenSubtitles"
+}
+
+/** Every subtitle found, by language: the best three, then the rest on demand. */
+@Composable
+private fun OnlineChoices(online: OnlineSubtitles, onClose: () -> Unit) {
+    val status by online.status.collectAsState()
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(color = PanelColor, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth(0.85f).fillMaxHeight(0.9f)) {
+            Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                Row(modifier = Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Sous-titres en ligne", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        quota(status)?.let { Text(it, color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp) }
+                    }
+                    TextButton(onClick = onClose) { Text("Fermer") }
+                }
+                val results = online.results
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(top = 8.dp)) {
+                    when {
+                        results == null && online.error != null -> PanelNote("Erreur : ${online.error}")
+                        results == null -> PanelNote("Recherche…")
+                    }
+                    results?.let { found ->
+                        online.languages.forEach { code ->
+                            val ofLanguage = found.filter { it.language == code }
+                            var all by remember(code) { mutableStateOf(false) }
+                            PanelTitle(subtitleLanguageName(code) + "  ·  ${ofLanguage.size}")
+                            if (ofLanguage.isEmpty()) PanelNote("Rien dans cette langue pour cette vidéo.")
+                            (if (all) ofLanguage else ofLanguage.take(3)).forEach { subtitle ->
+                                ChoiceRow(subtitle) { online.choose(subtitle); onClose() }
+                            }
+                            if (!all && ofLanguage.size > 3) TrackRow("Voir les ${ofLanguage.size - 3} autres", null, false) { all = true }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One subtitle: what makes it likely in sync, then its release name and how popular it is. */
+@Composable
+private fun ChoiceRow(subtitle: OnlineSubtitle, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            when {
+                subtitle.hashMatch -> Label("✓ Synchronisé avec ce fichier", highlight = true)
+                subtitle.sameRelease -> Label("Même version que ce fichier", highlight = true)
+            }
+            if (subtitle.hearingImpaired) Label("Malentendants")
+            if (subtitle.machineTranslated) Label("Traduction automatique")
+            Text("↓ " + formatCount(subtitle.downloads), color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+        }
+        Text(subtitle.release, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun Label(text: String, highlight: Boolean = false) {
+    Text(
+        text,
+        color = if (highlight) Color.Black else Color.White,
+        fontSize = 12.sp,
+        modifier = Modifier
+            .background(if (highlight) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+    )
+}
+
+/** 950, "12 k", "1,2 M". */
+private fun formatCount(count: Int) = when {
+    count >= 1_000_000 -> "%.1f M".format(count / 1e6).replace('.', ',')
+    count >= 1_000 -> "${count / 1_000} k"
+    else -> count.toString()
 }

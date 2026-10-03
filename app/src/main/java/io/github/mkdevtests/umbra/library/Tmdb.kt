@@ -149,8 +149,13 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
         private const val BASE_URL = "https://api.themoviedb.org/3/"
         private const val LANGUAGE = "fr-FR"
 
-        /** Full image URL; sizes: w185/w342/w500 posters, w300 stills, w1280 backdrops. */
-        fun image(path: String?, size: String): String? = path?.let { "https://image.tmdb.org/t/p/$size$it" }
+        /**
+         * Full image URL; sizes: w185/w342/w500 posters, w300 stills, w1280 backdrops.
+         * An image of the NAS ([LOCAL_ART]) is served by the app itself, whatever the size.
+         */
+        fun image(path: String?, size: String): String? = path?.let {
+            if (it.startsWith(LOCAL_ART)) LocalImages.url(it.removePrefix(LOCAL_ART)) else "https://image.tmdb.org/t/p/$size$it"
+        }
     }
 }
 
@@ -299,3 +304,8 @@ data class TmdbEpisode(
     @SerialName("air_date") val airDate: String? = null,
     val runtime: Int? = null,
 )
+
+/** Where the screens get the NAS images from: set by the app once its local server exists. */
+object LocalImages {
+    @Volatile var url: (String) -> String? = { null }
+}

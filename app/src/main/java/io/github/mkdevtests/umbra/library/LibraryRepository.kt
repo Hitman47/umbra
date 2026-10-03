@@ -15,7 +15,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -37,7 +40,19 @@ class LibraryRepository(private val app: NyxaraApp) {
     private val rematch = java.util.Collections.synchronizedSet(HashSet<String>())
 
     private val _library = MutableStateFlow(Library())
-    val library: StateFlow<Library> = _library.asStateFlow()
+
+    /** Images found next to the videos (folder.jpg…), kept apart: TMDB's artwork stays in the database. */
+    private val artFile = File(app.filesDir, "local-art.json")
+    private val _localArt = MutableStateFlow(runCatching { Json.decodeFromString(LocalArt.serializer(), artFile.readText()) }.getOrDefault(LocalArt()))
+    val localArt: StateFlow<LocalArt> = _localArt.asStateFlow()
+
+    /** The library as shown: NAS images in place of TMDB's where the NAS has some. */
+    val library: StateFlow<Library> = combine(_library, _localArt) { library, art -> library.withLocalArt(art) }
+        .stateIn(scope, SharingStarted.Eagerly, Library())
+
+    /** When the library on the device was written last: what the next launch starts from. */
+    private val _savedAt = MutableStateFlow<Long?>(null)
+    val savedAt: StateFlow<Long?> = _savedAt.asStateFlow()
 
     private val _scan = MutableStateFlow(ScanState())
     val scan: StateFlow<ScanState> = _scan.asStateFlow()
@@ -46,6 +61,7 @@ class LibraryRepository(private val app: NyxaraApp) {
         val stored = runCatching { dao.load() ?: importLegacyFile() }
             .onFailure { Log.w(TAG, "library unreadable, rescanning", it) }
             .getOrNull() ?: return@launch
+        _savedAt.value = stored.scannedAt
         // An older format is shown until the rescan it triggers; its TMDB matches are reused.
         _library.value = if (stored.version == Library.VERSION) stored.sorted() else stored.copy(scannedAt = 0)
     }
@@ -163,8 +179,23 @@ class LibraryRepository(private val app: NyxaraApp) {
                 val result = scanner.scan(previous, key)
                 _library.value = result
                 extras.clear() // "in the library" may have changed
-                save(result)
+                try {
+                    save(result)
+                    // Read back: the next launch starts from what is on the device, not from memory.
+                    check(dao.meta()?.scannedAt == result.scannedAt) { "relecture différente" }
+                    _savedAt.value = result.scannedAt
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "library not saved", e)
+                    _scan.value = ScanState(error = "Bibliothèque non enregistrée sur l'appareil (${e.message ?: e}) : le prochain lancement repartira de l'ancienne.")
+                    return@launch
+                }
                 numberings.save()
+                // A share that didn't answer keeps its images as they were.
+                val art = scanner.localArt + _localArt.value.under(scanner.offline)
+                _localArt.value = art
+                runCatching { artFile.writeText(Json.encodeToString(LocalArt.serializer(), art)) }.onFailure { Log.w(TAG, "local art not saved", it) }
                 rematch -= again
                 Log.i(
                     TAG,

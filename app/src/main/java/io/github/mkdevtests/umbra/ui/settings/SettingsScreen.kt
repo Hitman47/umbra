@@ -44,9 +44,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.browse.naturalCompare
 import io.github.mkdevtests.umbra.library.shortcutRoots
-import io.github.mkdevtests.umbra.settings.SEEK_STEPS
-import io.github.mkdevtests.umbra.settings.SUBTITLE_LANGUAGES
-import io.github.mkdevtests.umbra.settings.seekStepLabel
+import io.github.mkdevtests.umbra.subtitles.SUBTITLE_LANGUAGES
 import io.github.mkdevtests.umbra.subtitles.OpenSubtitles
 import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.nas.NasSource
@@ -56,6 +54,7 @@ import io.github.mkdevtests.umbra.settings.Language
 import io.github.mkdevtests.umbra.settings.SettingsStore
 import io.github.mkdevtests.umbra.settings.SubtitleSize
 import io.github.mkdevtests.umbra.trakt.Trakt
+import io.github.mkdevtests.umbra.ui.library.LibraryViewModel
 import io.github.mkdevtests.umbra.update.UpdateBanner
 import io.github.mkdevtests.umbra.update.Updater
 import kotlinx.coroutines.Dispatchers
@@ -75,8 +74,13 @@ fun SettingsScreen(
     onRemoveSource: (NasSource) -> Unit,
     onEditFolders: (NasSource) -> Unit,
     onOpenStats: () -> Unit,
+    library: LibraryViewModel,
+    onOpenCorrections: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val savedAt by library.savedAt.collectAsState()
+    val fixes by library.matchFixes.collectAsState()
+    val scan by library.scan.collectAsState()
     val settings by store.settings.collectAsState()
     val lastCheck by updater.lastCheck.collectAsState()
     var cacheSize by remember { mutableStateOf<Long?>(null) }
@@ -173,15 +177,22 @@ fun SettingsScreen(
                 Item("Actualiser au lancement", "Seuls les fichiers nouveaux ou modifiés sont analysés.") {
                     Switch(checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
                 }
+                Item(
+                    "Bibliothèque enregistrée",
+                    listOfNotNull(
+                        savedAt?.let { "Analyse du ${DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME)}" } ?: "Pas encore",
+                        "point de départ du prochain lancement",
+                        scan.error,
+                    ).joinToString(" · "),
+                )
+                Item("Corrections de matching", if (fixes.isEmpty()) "Aucune" else "${fixes.size} dossier${if (fixes.size > 1) "s" else ""} corrigé${if (fixes.size > 1) "s" else ""}") {
+                    TextButton(onClick = onOpenCorrections) { Text("Voir ›") }
+                }
                 Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
             }
 
             Section("Lecture") {
-                ChipsItem("Saut ⏪ ⏩", "Aussi au double appui sur les bords de l'image. Modifiable pendant la lecture : appui long sur ⏪ ou ⏩.") {
-                    SEEK_STEPS.forEach { step ->
-                        FilterChip(selected = settings.seekStep == step, onClick = { store.update { it.copy(seekStep = step) } }, label = { Text(seekStepLabel(step)) })
-                    }
-                }
+                Item("Avancer, reculer", "Double appui sur un bord : 10 s. Maintenir ⏪ ou ⏩ : de plus en plus loin. Glisser sur l'image : des secondes aux minutes selon la longueur du geste.")
                 Item("Passer les génériques tout seul", "Sinon, un bouton « Passer » apparaît pendant le générique (fichiers avec chapitres).") {
                     Switch(checked = settings.autoSkip, onCheckedChange = { on -> store.update { it.copy(autoSkip = on) } })
                 }

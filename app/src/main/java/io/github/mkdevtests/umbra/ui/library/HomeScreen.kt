@@ -211,7 +211,10 @@ private fun HomeContent(
                 noun = "série",
                 onLongClick = { menu(TitleTarget(it.key, isShow = true)) },
             )
-            HomeTab.Folders -> BrowserScreen(browserViewModel, fullLibrary, onOpenMovie, onOpenShow, onExcluded = libraryViewModel::onFolderExcluded)
+            HomeTab.Folders -> {
+                val art by libraryViewModel.localArt.collectAsState()
+                BrowserScreen(browserViewModel, fullLibrary, art, onOpenMovie, onOpenShow, onExcluded = libraryViewModel::onFolderExcluded)
+            }
             HomeTab.Search -> SearchScreen(fullLibrary, libraryViewModel, onOpenMovie, onOpenShow, onLongPress = menu)
         }
     }

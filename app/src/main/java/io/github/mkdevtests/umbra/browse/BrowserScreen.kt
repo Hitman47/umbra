@@ -41,7 +41,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.library.Episode
 import io.github.mkdevtests.umbra.nas.NasEntry
+import io.github.mkdevtests.umbra.library.LOCAL_ART
 import io.github.mkdevtests.umbra.library.Library
+import io.github.mkdevtests.umbra.library.LocalArt
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.ui.library.Poster
@@ -67,6 +69,8 @@ private class PathIndex(library: Library) {
 fun BrowserScreen(
     viewModel: BrowserViewModel,
     library: Library,
+    /** folder.jpg and the like, found by the last scan: covers of the folders the library doesn't name. */
+    art: LocalArt,
     onOpenMovie: (String) -> Unit,
     onOpenShow: (String) -> Unit,
     /** A folder was just left out: its titles leave the library. */
@@ -183,12 +187,16 @@ fun BrowserScreen(
                             movie != null -> Tile(movie.title, movie.year?.toString(), onClick = { onOpenMovie(movie.file) }, onLongClick = open) {
                                 Poster(movie.poster, movie.title, modifier = Modifier.fillMaxWidth())
                             }
-                            entry.isDirectory -> Tile(entry.name, null, onClick = open, onLongClick = longPress) { GlyphCard { folder(it) } }
+                            entry.isDirectory -> Tile(entry.name, null, onClick = open, onLongClick = longPress) {
+                                val cover = art.posters[entry.path]
+                                if (cover != null) Poster(LOCAL_ART + cover, entry.name, modifier = Modifier.fillMaxWidth()) else GlyphCard { folder(it) }
+                            }
                             else -> {
                                 val episode = index.episodeByFile[entry.path]
                                 val code = episode?.let { "S%02dE%02d".format(it.season, it.number) }
                                 Tile(episode?.title ?: entry.name, listOfNotNull(code, formatSize(entry.size)).joinToString(" · "), onClick = open) {
-                                    GlyphCard { play(it) }
+                                    val cover = art.posters[entry.path]
+                                    if (cover != null) Poster(LOCAL_ART + cover, entry.name, modifier = Modifier.fillMaxWidth()) else GlyphCard { play(it) }
                                 }
                             }
                         }
