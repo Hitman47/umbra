@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The constellation alone, cropped to its stars: the logo inside the app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="60"
+    android:viewportHeight="60">
+    <group
+        android:translateX="-29"
+        android:translateY="-24">
+        <path
+            android:fillAlpha="0.28"
+            android:pathData="M40,34 L75,54 L40,74 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="30" android:startY="28" android:endX="82" android:endY="84">
+                    <item android:offset="0" android:color="#FFC4B1FF" />
+                    <item android:offset="0.5" android:color="#FF8B5CF6" />
+                    <item android:offset="1" android:color="#FFE36BF5" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M40,34 L75,54 L40,74 Z"
+            android:strokeWidth="3.2"
+            android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="30" android:startY="28" android:endX="82" android:endY="84">
+                    <item android:offset="0" android:color="#FFC4B1FF" />
+                    <item android:offset="0.5" android:color="#FF8B5CF6" />
+                    <item android:offset="1" android:color="#FFE36BF5" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:fillColor="#FFF3EDFF"
+            android:pathData="M75,45 Q75,54 84,54 Q75,54 75,63 Q75,54 66,54 Q75,54 75,45 Z M40,27 Q40,34 47,34 Q40,34 40,41 Q40,34 33,34 Q40,34 40,27 Z M40,68 Q40,74 46,74 Q40,74 40,80 Q40,74 34,74 Q40,74 40,68 Z" />
+    </group>
+</vector>

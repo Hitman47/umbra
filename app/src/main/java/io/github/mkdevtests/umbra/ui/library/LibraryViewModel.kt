@@ -77,6 +77,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     val matchFixes = nyxara.matchFixes.fixes
 
+    /** Former show key → its key now: a page open on a corrected show follows it. */
+    val movedShows = repository.moved
+
     /** How the last scan matched each group of episodes. */
     val decisions = repository.decisions
 

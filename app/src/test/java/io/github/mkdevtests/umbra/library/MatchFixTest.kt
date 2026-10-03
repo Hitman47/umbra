@@ -18,6 +18,8 @@ import org.junit.Test
 
 /** A match correction, through the whole scanner: NAS and TMDB faked. */
 class MatchFixTest {
+    private var listed = 0
+
     private val files = (1..12).map { "Anime\\Thriller\\Kakegurui\\Saison 1\\Kakegurui - %02d.mkv".format(it) } +
         (1..12).map { "Anime\\Thriller\\Kakegurui\\Saison 2\\Kakegurui xx - %02d.mkv".format(it) }
 
@@ -25,6 +27,7 @@ class MatchFixTest {
         override val source = NasSource("nas", listOf("Anime"))
         override val currentHost = "nas"
         override fun list(path: String): List<NasEntry> {
+            listed++
             if (path.isEmpty()) return listOf(NasEntry("Anime", "Anime", true, 0))
             val prefix = "$path\\"
             return files.filter { it.startsWith(prefix) }.map { it.removePrefix(prefix).substringBefore('\\') }.distinct().map { name ->
@@ -52,6 +55,19 @@ class MatchFixTest {
         Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
             .body(body.toResponseBody("application/json".toMediaType())).build()
     }).build()
+
+    @Test
+    fun aCorrectionAppliesAtOnceWithoutTheNas() {
+        val first = scan(Library(), emptyMap())
+        val groups = first.shows.single().groups.toSet()
+        val fixes = groups.associateWith { MatchFix(it, 1) }
+        listed = 0
+        val fixed = runBlocking { LibraryScanner(NasRouter(listOf(fakeNas)), Tmdb("t", http), fixes) {}.rematch(first, groups, 1) }
+        assertEquals(0, listed)
+        assertEquals(listOf("tmdb:1"), fixed.shows.map { it.key })
+        assertEquals(listOf(12, 12), fixed.shows.single().seasons.map { it.episodes.size })
+        assertEquals(groups.toList(), fixed.shows.single().groups)
+    }
 
     private fun scan(previous: Library, fixes: Map<String, MatchFix>) = runBlocking {
         LibraryScanner(NasRouter(listOf(fakeNas)), Tmdb("t", http), fixes) {}.scan(previous, "k")

@@ -179,6 +179,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
     val infos by viewModel.mediaInfo.collectAsState()
     LaunchedEffect(season) { viewModel.requestMediaInfo(season?.episodes.orEmpty().map { it.file to it.fileSize }) }
 
+    val scan by viewModel.scan.collectAsState()
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(show.backdrop, onBack) }
         item {
@@ -202,6 +203,21 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                 val seen = io.github.mkdevtests.umbra.history.seenOf(show, history)
                 MarkButton(seen.all, all = true) { viewModel.markWatched(show, !seen.all) }
                 HideButton(isHidden) { viewModel.setHidden(show, !isHidden) }
+            }
+        }
+        // A correction being applied, or a scan: the page changes when it ends.
+        if (scan.running || scan.error != null) {
+            item {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (scan.running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    (scan.progress ?: scan.error)?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (scan.running) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
         item {

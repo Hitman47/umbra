@@ -144,6 +144,37 @@ class LibraryScanner(
         )
     }
 
+    /**
+     * A correction applied at once, without walking the NAS: the shows holding
+     * [groups], and the one the correction names ([tmdbId]), are made again
+     * from the files [previous] knows, with the same rules as a whole scan.
+     */
+    suspend fun rematch(previous: Library, groups: Set<String>, tmdbId: Int?): Library {
+        val affected = previous.shows.filter { show -> show.groups.any { it in groups } || (tmdbId != null && show.tmdbId == tmdbId) }
+        if (affected.isEmpty()) return previous
+        val all = previous.videoFiles()
+        val keys = affected.mapTo(HashSet()) { it.key }
+        val files = affected.flatMapTo(HashSet()) { show -> show.seasons.flatMap { it.episodes }.map { it.file } + show.duplicates.map(EpisodeCopy::pathOf) }
+        val episodes = all.filter { it.entry.path in files }.mapNotNull(::episodeOf)
+        val shows = scanShows(episodes, previous.shows, videoCounts(all))
+        return previous.copy(
+            shows = (previous.shows.filter { it.key !in keys } + shows).sortedWith { a, b -> naturalCompare(a.title, b.title) },
+        )
+    }
+
+    /** The videos of [this] library as the NAS walk found them: films, their copies, episodes and theirs. */
+    private fun Library.videoFiles(): List<VideoFile> {
+        fun video(path: String, size: Long, modified: Long, subtitles: List<String>): VideoFile {
+            val parts = path.split('\\')
+            return VideoFile(NasEntry(parts.last(), path, isDirectory = false, size = size, modified = modified), parts.drop(1).dropLast(1), subtitles)
+        }
+        return movies.flatMap { movie -> listOf(video(movie.file, movie.fileSize, movie.modified, movie.subtitles)) + movie.copies.map { video(it.file, it.size, it.modified, emptyList()) } } +
+            shows.flatMap { show ->
+                show.seasons.flatMap { it.episodes }.map { video(it.file, it.fileSize, it.modified, it.subtitles) } +
+                    show.duplicates.mapNotNull(EpisodeCopy::decode).map { video(it.file, it.size, 0, emptyList()) }
+            }
+    }
+
     // --- Walking the shares ---
 
     /** The videos of every share; a share whose NAS doesn't answer is added to [offline] instead. */

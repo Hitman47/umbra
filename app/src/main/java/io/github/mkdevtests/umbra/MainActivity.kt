@@ -112,6 +112,9 @@ private fun NyxaraRoot(
     val sources by browserViewModel.sourceList.collectAsState()
     // Read here so that a scan redraws the open detail screen with the new library.
     val library by libraryViewModel.library.collectAsState()
+    val moved by libraryViewModel.movedShows.collectAsState()
+    // A corrected show changes key ("tmdb:2" → "tmdb:1"): its page stays open on the new one.
+    fun showOf(key: String) = library.shows.firstOrNull { it.key == key } ?: moved[key]?.let { now -> library.shows.firstOrNull { it.key == now } }
     BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
     val back = { stack.removeAt(stack.lastIndex); Unit }
     val links = DetailLinks(
@@ -143,12 +146,12 @@ private fun NyxaraRoot(
                 onOpenSettings = { stack.add(Detail.Settings) },
             )
             is Detail.MovieDetail -> library.movies.firstOrNull { it.file == detail.file }?.let { MovieDetailScreen(it, libraryViewModel, links, back) } ?: back()
-            is Detail.ShowDetail -> library.shows.firstOrNull { it.key == detail.key }?.let {
-                ShowDetailScreen(it, libraryViewModel, links, back, onFixMatch = { stack.add(Detail.FixMatch(detail.key)) })
+            is Detail.ShowDetail -> showOf(detail.key)?.let { show ->
+                ShowDetailScreen(show, libraryViewModel, links, back, onFixMatch = { stack.add(Detail.FixMatch(show.key)) })
             } ?: back()
             is Detail.Saga -> SagaScreen(detail.id, libraryViewModel, links.titleLinks, back)
             is Detail.Shortcut -> ShortcutScreen(detail.root, libraryViewModel, links.titleLinks, back)
-            is Detail.FixMatch -> library.shows.firstOrNull { it.key == detail.key }?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
+            is Detail.FixMatch -> showOf(detail.key)?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
             Detail.Settings -> SettingsScreen(
                 store = app.settings,
                 trakt = app.trakt,

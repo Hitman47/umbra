@@ -10,6 +10,7 @@ import io.github.mkdevtests.umbra.nas.NasSource
 import io.github.mkdevtests.umbra.nas.toUserMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -123,22 +124,96 @@ class LibraryRepository(private val app: NyxaraApp) {
     /** TMDB seasons of a show, to place a folder in one of them. */
     suspend fun seasonsOf(tmdbId: Int): List<TmdbSeasonSummary> = tmdb.show(tmdbId).seasons
 
-    /** Saves the user's choice for [groups] and rescans, which applies it. */
+    /** Saves the user's choice for [groups] and applies it at once; every later scan applies it too. */
     fun fixMatch(groups: List<String>, tmdbId: Int?, season: Int?, firstEpisode: Int) {
         scope.launch {
             app.matchFixes.save(groups.map { MatchFix(it, tmdbId, season, firstEpisode) })
             rematch -= groups.toSet()
-            restartScan()
+            applyNow(groups.toSet(), tmdbId)
         }
     }
 
-    /** Back to the automatic match for [groups]. */
+    /** Back to the automatic match for [groups], at once. */
     fun resetMatch(groups: List<String>) {
         scope.launch {
             app.matchFixes.remove(groups)
             rematch += groups
-            restartScan()
+            applyNow(groups.toSet(), null)
         }
+    }
+
+    /** Former show key → the key its files are under now, when a correction or a scan moved them. */
+    private val _moved = MutableStateFlow<Map<String, String>>(emptyMap())
+    val moved: StateFlow<Map<String, String>> = _moved.asStateFlow()
+
+    /**
+     * Makes again only the shows a correction touches, from the files already
+     * known: a few TMDB requests, no walk through the NAS. A whole scan under
+     * way started without the correction: it starts again instead.
+     */
+    private suspend fun applyNow(groups: Set<String>, tmdbId: Int?) {
+        val nas = app.nas ?: return
+        // Started lazily under the lock: a whole scan can't start in between.
+        val job = synchronized(this) {
+            if (scanJob?.isActive == true) null else scope.launch(start = CoroutineStart.LAZY) { correct(nas, groups, tmdbId) }.also { scanJob = it }
+        } ?: return restartScan()
+        job.start()
+        job.join()
+    }
+
+    private suspend fun correct(nas: NasRouter, groups: Set<String>, tmdbId: Int?) {
+        run {
+            loadJob.join()
+            _scan.value = ScanState(running = true, progress = "Correction du matching…")
+            try {
+                val fixes = app.matchFixes.load()
+                val again = synchronized(rematch) { rematch.toSet() }
+                val numberings = NumberingCache(File(app.filesDir, "tvdb-numbering.json"))
+                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings) { _scan.value = ScanState(running = true, progress = it) }
+                val before = _library.value
+                val result = scanner.rematch(before, groups, tmdbId).copy(scannedAt = System.currentTimeMillis())
+                _library.value = result
+                noteMoves(before, result)
+                extras.clear()
+                if (!persist(result)) return@run
+                numberings.save()
+                rematch -= again.intersect(groups)
+                val redone = scanner.decisions.associateBy { it.group }
+                _decisions.value = (_decisions.value.filter { it.group !in redone } + redone.values).sortedBy { it.group.lowercase() }
+                runCatching { journalFile.writeText(Json.encodeToString(ListSerializer(MatchDecision.serializer()), _decisions.value)) }
+                _scan.value = ScanState()
+            } catch (e: CancellationException) {
+                _scan.value = ScanState()
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "correction failed", e)
+                _scan.value = ScanState(error = "Correction pas appliquée : ${e.toUserMessage()}. La prochaine analyse l'appliquera.")
+            }
+        }
+    }
+
+    /** Shows whose key changed ("tmdb:2" now "tmdb:1"): their open pages follow their files. */
+    private fun noteMoves(before: Library, after: Library) {
+        val keys = after.shows.mapTo(HashSet()) { it.key }
+        val showOfFile = after.shows.flatMap { show -> show.seasons.flatMap { it.episodes }.map { it.file to show.key } }.toMap()
+        val moves = before.shows.filter { it.key !in keys }.mapNotNull { show ->
+            show.seasons.flatMap { it.episodes }.firstNotNullOfOrNull { showOfFile[it.file] }?.let { show.key to it }
+        }.toMap()
+        if (moves.isNotEmpty()) _moved.value = _moved.value.mapValues { (_, to) -> moves[to] ?: to } + moves
+    }
+
+    /** Writes [library] and reads it back: false, with the error shown, when the device didn't keep it. */
+    private suspend fun persist(library: Library): Boolean = try {
+        save(library)
+        check(dao.meta()?.scannedAt == library.scannedAt) { "relecture différente" }
+        _savedAt.value = library.scannedAt
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.e(TAG, "library not saved", e)
+        _scan.value = ScanState(error = "Bibliothèque non enregistrée sur l'appareil (${e.message ?: e}) : le prochain lancement repartira de l'ancienne.")
+        false
     }
 
     /** A running scan was started without the latest correction: start over. */
@@ -186,19 +261,10 @@ class LibraryRepository(private val app: NyxaraApp) {
                 val tvdbRequests = tvdb?.requests?.get() ?: 0
                 val result = scanner.scan(previous, key)
                 _library.value = result
+                noteMoves(previous, result)
                 extras.clear() // "in the library" may have changed
-                try {
-                    save(result)
-                    // Read back: the next launch starts from what is on the device, not from memory.
-                    check(dao.meta()?.scannedAt == result.scannedAt) { "relecture différente" }
-                    _savedAt.value = result.scannedAt
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.e(TAG, "library not saved", e)
-                    _scan.value = ScanState(error = "Bibliothèque non enregistrée sur l'appareil (${e.message ?: e}) : le prochain lancement repartira de l'ancienne.")
-                    return@launch
-                }
+                // Read back: the next launch starts from what is on the device, not from memory.
+                if (!persist(result)) return@launch
                 numberings.save()
                 val journal = scanner.decisions.sortedBy { it.group.lowercase() }
                 _decisions.value = journal
