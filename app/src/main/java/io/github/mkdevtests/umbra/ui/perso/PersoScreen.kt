@@ -64,6 +64,27 @@ fun PersoScreen(viewModel: PersoViewModel) {
         PersoLockScreen(viewModel.store)
         return
     }
+    val app = LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
+    val address by app.catalog.address.collectAsState()
+    var profiles by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    if (!address.configured) {
+        PersoFolders(viewModel)
+        return
+    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.FilterChip(selected = !profiles, onClick = { profiles = false }, label = { Text("Dossiers") })
+            androidx.compose.material3.FilterChip(selected = profiles, onClick = { profiles = true }, label = { Text("Profils") })
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            if (profiles) ProfilesScreen(app) else PersoFolders(viewModel)
+        }
+    }
+}
+
+/** The Perso folders, browsed as they are. */
+@Composable
+private fun PersoFolders(viewModel: PersoViewModel) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val folders by viewModel.folders.collectAsState()
