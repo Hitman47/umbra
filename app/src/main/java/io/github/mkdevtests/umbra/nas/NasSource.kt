@@ -30,7 +30,12 @@ data class NasSource(
     /** Folders left out, as app paths ("Media\Photos"): not scanned, browsed nor played. */
     val excluded: List<String> = emptyList(),
     val protocol: Protocol = Protocol.Smb,
+    /** Where the NAS is reached when [host] doesn't answer: its Tailscale address, away from home (SMB, NFS). */
+    val fallbackHost: String = "",
 ) {
+    /** [host], then [fallbackHost] if any. */
+    fun hosts(): List<String> = listOf(host, fallbackHost).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
     /** The name, else the NAS's address ("nas:5005" for a WebDAV URL). */
     val label get() = name.ifBlank { host.substringAfter("://").substringBefore('/') }
 

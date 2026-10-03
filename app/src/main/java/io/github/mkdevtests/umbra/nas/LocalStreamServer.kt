@@ -3,10 +3,12 @@ package io.github.mkdevtests.umbra.nas
 import android.net.Uri
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
-import java.io.BufferedInputStream
 import java.io.InputStream
 import java.util.UUID
+import kotlin.concurrent.thread
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -90,7 +92,7 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
         val length = end - start + 1
         val partial = session.headers.containsKey("range")
 
-        val body = BufferedInputStream(RangeStream(file, target.pool, start, length, stat), READ_SIZE)
+        val body = ReadAheadStream(file, target.pool, start, length, stat)
         return newFixedLengthResponse(
             if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK,
             mimeType(target.name),
@@ -108,12 +110,6 @@ class LocalStreamServer(private val nas: () -> NasRouter?) : NanoHTTPD(HOST, 0) 
     private companion object {
         const val TAG = "LocalStreamServer"
         const val HOST = "127.0.0.1"
-
-        /**
-         * NanoHTTPD copies in 16 KiB chunks; reading the NAS that way would
-         * cost one network round trip per 16 KiB. Buffer 1 MiB per SMB read.
-         */
-        const val READ_SIZE = 1 shl 20
 
         /** Inclusive byte range for a "Range: bytes=a-b" header, whole file if absent, null if invalid. */
         fun parseRange(header: String?, size: Long): Pair<Long, Long>? {
@@ -183,16 +179,69 @@ class StreamStats {
     val megabytes get() = bytes.get() / 1_000_000
 }
 
-/** Reads [length] bytes of a NAS file from [offset]; closing it gives the handle back to [pool]. */
-private class RangeStream(
+/**
+ * Reads [length] bytes of a NAS file from [offset] on its own thread, a few
+ * blocks ahead of the player: the NAS works while the previous block is sent.
+ * The first block is small, so that the player gets its first bytes at once
+ * (it asks for a new range at each seek and while it opens a file).
+ * The handle goes back to [pool] once the reading thread is done with it.
+ */
+private class ReadAheadStream(
     private val file: RemoteFile,
     private val pool: HandlePool,
-    private var offset: Long,
-    private var remaining: Long,
+    private val offset: Long,
+    private val length: Long,
     private val stats: StreamStats,
 ) : InputStream() {
-    private var failed = false
-    private var closed = false
+    private val blocks = ArrayBlockingQueue<Any>(AHEAD)
+    @Volatile private var stopped = false
+    private var current: ByteArray? = null
+    private var position = 0
+    private var ended = false
+
+    init {
+        thread(name = "nas-read", isDaemon = true) { fill() }
+    }
+
+    private fun fill() {
+        var failed = false
+        try {
+            var next = offset
+            var remaining = length
+            var block = FIRST_BLOCK
+            while (remaining > 0 && !stopped) {
+                val size = minOf(block.toLong(), remaining).toInt()
+                val buffer = ByteArray(size)
+                val started = System.nanoTime()
+                var filled = 0
+                while (filled < size) {
+                    val count = file.read(buffer, next + filled, filled, size - filled)
+                    if (count <= 0) break
+                    filled += count
+                }
+                if (filled == 0) break
+                stats.read(filled, System.nanoTime() - started)
+                put(if (filled == size) buffer else buffer.copyOf(filled))
+                next += filled
+                remaining -= filled
+                if (filled < size) break // end of the file
+                block = BLOCK
+            }
+            put(END)
+        } catch (e: Throwable) {
+            failed = true
+            put(e)
+        } finally {
+            if (failed) pool.discard(file) else pool.release(file)
+        }
+    }
+
+    /** Waits for room, unless the player went away. */
+    private fun put(item: Any) {
+        while (!stopped) {
+            if (blocks.offer(item, 100, TimeUnit.MILLISECONDS)) return
+        }
+    }
 
     override fun read(): Int {
         val one = ByteArray(1)
@@ -200,24 +249,41 @@ private class RangeStream(
     }
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
-        if (remaining <= 0) return -1
-        val started = System.nanoTime()
-        val count = try {
-            file.read(b, offset, off, minOf(len.toLong(), remaining).toInt())
-        } catch (e: Exception) {
-            failed = true
-            throw e
+        if (ended) return -1
+        var block = current
+        if (block == null || position >= block.size) {
+            when (val item = blocks.take()) {
+                END -> {
+                    ended = true
+                    return -1
+                }
+                is Throwable -> throw (item as? java.io.IOException ?: java.io.IOException(item))
+                else -> {
+                    block = item as ByteArray
+                    current = block
+                    position = 0
+                }
+            }
         }
-        if (count <= 0) return -1
-        stats.read(count, System.nanoTime() - started)
-        offset += count
-        remaining -= count
+        val count = minOf(len, block.size - position)
+        System.arraycopy(block, position, b, off, count)
+        position += count
         return count
     }
 
+    override fun available(): Int = current?.let { it.size - position } ?: 0
+
     override fun close() {
-        if (closed) return
-        closed = true
-        if (failed) pool.discard(file) else pool.release(file)
+        stopped = true
+        blocks.clear()
+    }
+
+    private companion object {
+        val END = Any()
+
+        /** Small, to answer fast; then [BLOCK] bytes per NAS read, [AHEAD] blocks ahead at most. */
+        const val FIRST_BLOCK = 128 * 1024
+        const val BLOCK = 1 shl 20
+        const val AHEAD = 4
     }
 }

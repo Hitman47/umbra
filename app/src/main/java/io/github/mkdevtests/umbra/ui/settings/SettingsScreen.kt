@@ -118,7 +118,8 @@ fun SettingsScreen(
             Section("Sources") {
                 var removing by remember { mutableStateOf<NasSource?>(null) }
                 sources.forEach { source ->
-                    Item(source.label, "${source.protocol.label} · ${source.host} · ${source.shares.size} dossier${if (source.shares.size > 1) "s" else ""}") {
+                    val addresses = source.hosts().joinToString(" ou ")
+                    Item(source.label, "${source.protocol.label} · $addresses · ${source.shares.size} dossier${if (source.shares.size > 1) "s" else ""}") {
                         TextButton(onClick = { removing = source }) { Text("Retirer") }
                         TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
                     }

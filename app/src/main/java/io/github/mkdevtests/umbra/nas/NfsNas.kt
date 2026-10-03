@@ -21,8 +21,16 @@ class NfsNas(override val source: NasSource) : NasClient {
     /** One mount per export, made on first use. */
     private val mounts = HashMap<String, Nfs3>()
 
+    @Volatile private var address: String? = null
+
+    override val currentHost: String get() = address ?: source.host
+
+    /** Mounted at the address that answers (local, else Tailscale); forgotten after a failure, to choose again. */
     private fun mount(export: String): Nfs3 = synchronized(mounts) {
-        mounts.getOrPut(export) { explained(export) { Nfs3(source.host.trim(), export, CredentialUnix(UID, GID, null), RETRIES) } }
+        mounts.getOrPut(export) {
+            val host = address ?: firstReachable(source.hosts(), NFS_PORT).also { address = it }
+            explained(export) { Nfs3(host, export, CredentialUnix(UID, GID, null), RETRIES) }
+        }
     }
 
     private fun split(path: String): Pair<String, String> {
@@ -100,6 +108,9 @@ class NfsNas(override val source: NasSource) : NasClient {
     } catch (e: FileNotFoundException) {
         throw e
     } catch (e: Exception) {
+        // The NAS may have moved (Wi-Fi to mobile, Tailscale): mount again, at the address that answers.
+        synchronized(mounts) { mounts.clear() }
+        address = null
         val status = Regex("""(?:state|status)\D{0,3}(\d+)""").find(e.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
         throw when (status) {
             13 -> RefusedException(
@@ -115,6 +126,7 @@ class NfsNas(override val source: NasSource) : NasClient {
         const val UID = 0
         const val GID = 0
         const val RETRIES = 3
+        const val NFS_PORT = 2049
         const val DIR_COUNT = 8 * 1024
         const val MAX_COUNT = 64 * 1024
     }

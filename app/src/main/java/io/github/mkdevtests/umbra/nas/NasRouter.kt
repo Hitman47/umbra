@@ -26,6 +26,9 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
     /** The source holding [path]. */
     fun sourceOf(path: String): NasSource? = byRoot[path.substringBefore('\\').lowercase()]?.first?.source
 
+    /** The address the NAS of [path] is reached at now (local or Tailscale). */
+    fun hostOf(path: String): String? = byRoot[path.substringBefore('\\').lowercase()]?.first?.currentHost
+
     /** [path] is in a folder the user left out. */
     fun isExcluded(path: String) = sourceOf(path)?.isExcluded(path) == true
 

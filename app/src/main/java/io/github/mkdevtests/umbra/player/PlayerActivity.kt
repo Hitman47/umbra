@@ -178,7 +178,7 @@ class PlayerActivity : ComponentActivity() {
                 source = source?.label ?: "Appareil",
                 protocol = source?.protocol?.label ?: "Fichier",
                 network = networkLabel(),
-                route = source?.host?.let(::routeOf) ?: "Local",
+                route = item.file?.let { app.nas?.hostOf(it) }?.let(::routeOf) ?: "Local",
                 openMs = figures.openMs,
                 loadedMs = figures.loadedMs,
                 seeksMs = figures.seeksMs,

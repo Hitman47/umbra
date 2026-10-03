@@ -172,9 +172,30 @@ class SmbNas(override val source: NasSource) : NasClient {
             .build(),
     )
 
+    /** The address chosen last, and when: asked again after a minute (the phone may have left home). */
+    @Volatile private var chosen: Pair<String, Long>? = null
+
+    override val currentHost: String get() = chosen?.first ?: source.host
+
+    private fun address(): String {
+        chosen?.takeIf { System.currentTimeMillis() - it.second < ADDRESS_TTL }?.let { return it.first }
+        return firstReachable(source.hosts(), SMBClient.DEFAULT_PORT).also { chosen = it to System.currentTimeMillis() }
+    }
+
+    /** Logs in at the address that answers; if it fails, at the other one (local, Tailscale). */
     private fun login(client: SMBClient): Session {
-        val host = source.host.substringBefore(':').trim()
-        val port = source.host.substringAfter(':', "").toIntOrNull() ?: SMBClient.DEFAULT_PORT
+        val first = address()
+        return try {
+            login(client, first)
+        } catch (e: Exception) {
+            val other = source.hosts().firstOrNull { it != first } ?: throw e
+            login(client, other).also { chosen = other to System.currentTimeMillis() }
+        }
+    }
+
+    private fun login(client: SMBClient, address: String): Session {
+        val host = address.substringBefore(':').trim()
+        val port = address.substringAfter(':', "").toIntOrNull() ?: SMBClient.DEFAULT_PORT
         val auth = if (source.username.isBlank()) {
             AuthenticationContext.anonymous()
         } else {
@@ -189,6 +210,7 @@ class SmbNas(override val source: NasSource) : NasClient {
     }
 
     private companion object {
+        const val ADDRESS_TTL = 60_000L
         const val TAG = "SmbNas"
     }
 }

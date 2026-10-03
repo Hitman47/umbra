@@ -27,6 +27,7 @@ private data class StoredSource(
     val roots: Map<String, String> = emptyMap(),
     val excluded: List<String> = emptyList(),
     val protocol: Protocol = Protocol.Smb,
+    val fallbackHost: String = "",
 )
 
 /**
@@ -44,11 +45,11 @@ class SourceStore(context: Context) {
         return runCatching { json.decodeFromString<List<StoredSource>>(stored) }
             .onFailure { Log.w(TAG, "sources unreadable", it) }
             .getOrDefault(emptyList())
-            .map { NasSource(it.host, it.shares, it.username, it.password.let(::decrypt).orEmpty(), it.domain, it.id, it.name, it.roots, it.excluded, it.protocol) }
+            .map { NasSource(it.host, it.shares, it.username, it.password.let(::decrypt).orEmpty(), it.domain, it.id, it.name, it.roots, it.excluded, it.protocol, it.fallbackHost) }
     }
 
     fun save(sources: List<NasSource>) = prefs.edit {
-        val stored = sources.map { StoredSource(it.id, it.name, it.host, it.shares, it.username, encrypt(it.password), it.domain, it.roots, it.excluded, it.protocol) }
+        val stored = sources.map { StoredSource(it.id, it.name, it.host, it.shares, it.username, encrypt(it.password), it.domain, it.roots, it.excluded, it.protocol, it.fallbackHost) }
         putString(KEY_LIST, json.encodeToString(stored))
         listOf(KEY_HOST, KEY_SHARE, KEY_SHARES, KEY_USER, KEY_PASSWORD, KEY_DOMAIN).forEach(::remove)
     }

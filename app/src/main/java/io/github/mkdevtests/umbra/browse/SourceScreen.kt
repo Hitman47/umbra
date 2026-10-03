@@ -60,6 +60,7 @@ fun SourceScreen(
     var protocol by rememberSaveable { mutableStateOf(initial?.protocol ?: Protocol.Smb) }
     var name by rememberSaveable { mutableStateOf(initial?.name.orEmpty()) }
     var host by rememberSaveable { mutableStateOf(initial?.host.orEmpty()) }
+    var fallbackHost by rememberSaveable { mutableStateOf(initial?.fallbackHost.orEmpty()) }
     var username by rememberSaveable { mutableStateOf(initial?.username.orEmpty()) }
     var password by remember { mutableStateOf(initial?.password.orEmpty()) }
     var shares by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -103,6 +104,7 @@ fun SourceScreen(
                 host.trim(), shares.filter { it in selected }, username.trim(), password, initial?.domain.orEmpty(),
                 id = initial?.id.orEmpty(), name = name.trim(), roots = initial?.roots.orEmpty(), excluded = initial?.excluded.orEmpty(),
                 protocol = protocol,
+                fallbackHost = if (protocol == Protocol.WebDav) "" else fallbackHost.trim(),
             )
             error = onConnect(source)
             busy = false
@@ -158,6 +160,18 @@ fun SourceScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                     modifier = width,
                 )
+                if (protocol != Protocol.WebDav) {
+                    OutlinedTextField(
+                        value = fallbackHost,
+                        onValueChange = { fallbackHost = it },
+                        label = { Text("Adresse Tailscale (facultatif)") },
+                        placeholder = { Text("100.x.y.z ou nas.tailnet.ts.net") },
+                        supportingText = { Text("Utilisée quand l'adresse locale ne répond pas : une seule source chez toi et ailleurs.") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                        modifier = width,
+                    )
+                }
                 if (protocol != Protocol.Nfs) {
                     OutlinedTextField(
                         value = username,

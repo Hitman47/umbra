@@ -22,6 +22,9 @@ interface NasClient : Closeable {
     /** A URL the player can read [path] at by itself (WebDAV), or null to go through the app's local server. */
     fun directUrl(path: String): String? = null
 
+    /** The address in use: [NasSource.host], or its fallback when the NAS is reached that way. */
+    val currentHost: String get() = source.host
+
     /** The shares the NAS offers, or null when it won't say (the user types them). Throws if it can't be reached. */
     fun availableShares(): List<String>?
 
@@ -32,6 +35,19 @@ interface NasClient : Closeable {
             Protocol.WebDav -> WebDavNas(source)
         }
     }
+}
+
+/**
+ * The first of [hosts] that answers on [port]: the local address at home,
+ * the Tailscale one elsewhere. The first when none answers (its error is the one to show).
+ */
+fun firstReachable(hosts: List<String>, port: Int, timeoutMs: Int = 1_500): String {
+    if (hosts.size <= 1) return hosts.firstOrNull().orEmpty()
+    return hosts.firstOrNull { host ->
+        runCatching {
+            java.net.Socket().use { it.connect(java.net.InetSocketAddress(host.substringBefore(':'), host.substringAfter(':', "").toIntOrNull() ?: port), timeoutMs) }
+        }.isSuccess
+    } ?: hosts.first()
 }
 
 /** The NAS refuses this folder or file (rights): skipped by a scan, unlike a NAS that doesn't answer. */

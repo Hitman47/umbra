@@ -80,4 +80,17 @@ class ProtocolsTest {
         put(bytes)
         repeat((4 - bytes.size % 4) % 4) { put(0) }
     }
+
+    @Test
+    fun theFirstAddressThatAnswers() {
+        ServerSocket(0).use { listening ->
+            val closed = ServerSocket(0).let { val port = it.localPort; it.close(); port }
+            val local = "127.0.0.1:$closed"
+            val tailscale = "127.0.0.1:${listening.localPort}"
+            assertEquals(tailscale, firstReachable(listOf(local, tailscale), 445, 500))
+            assertEquals(tailscale, firstReachable(listOf(tailscale, local), 445, 500))
+            assertEquals(local, firstReachable(listOf(local), 445, 500)) // alone: no probing
+            assertEquals(listOf("nas", "100.64.1.2"), NasSource(" nas ", emptyList(), fallbackHost = "100.64.1.2").hosts())
+        }
+    }
 }

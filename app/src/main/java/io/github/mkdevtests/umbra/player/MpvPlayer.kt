@@ -113,6 +113,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.setOptionString("demuxer-lavf-analyzeduration", "1")
         // A connection cut mid-file (Wi-Fi roaming, NAS reconnect) resumes where it stopped.
         mpv.setOptionString("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=4")
+        // Seeks, and the resume point, land on the nearest keyframe: a precise seek decodes
+        // everything from the keyframe before, up to 4-5 s measured on a resumed film.
+        mpv.setOptionString("hr-seek", "no")
         mpv.setOptionString("cache", "yes")
         mpv.setOptionString("demuxer-max-bytes", "64MiB")
         mpv.setOptionString("demuxer-max-back-bytes", "32MiB")
