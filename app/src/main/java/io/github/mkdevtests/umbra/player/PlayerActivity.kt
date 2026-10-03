@@ -72,6 +72,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -678,10 +686,30 @@ private fun PlayerScreen(
         }
     }
 
+    // The remote (Android TV) or a keyboard: ⏪ ⏩ and pause without the controls, the controls on any other key.
+    val keys = remember { FocusRequester() }
+    LaunchedEffect(controlsVisible, panelOpen) { if (!controlsVisible && !panelOpen) runCatching { keys.requestFocus() } }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(keys)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.MediaPlayPause, Key.Spacebar -> { player.togglePause(); true }
+                    Key.MediaPlay -> { if (player.paused.value) player.togglePause(); true }
+                    Key.MediaPause -> { if (!player.paused.value) player.togglePause(); true }
+                    Key.MediaFastForward -> { jump(REMOTE_LONG_JUMP); true }
+                    Key.MediaRewind -> { jump(-REMOTE_LONG_JUMP); true }
+                    Key.DirectionLeft -> if (!controlsVisible && !panelOpen) { jump(-SHORT_JUMP); true } else false
+                    Key.DirectionRight -> if (!controlsVisible && !panelOpen) { jump(SHORT_JUMP); true } else false
+                    Key.DirectionCenter, Key.Enter -> if (!controlsVisible && !panelOpen) { player.togglePause(); controlsVisible = true; true } else false
+                    Key.DirectionUp, Key.DirectionDown, Key.Menu -> if (!controlsVisible && !panelOpen) { controlsVisible = true; true } else false
+                    else -> false
+                }
+            }
+            .focusable()
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { if (panelOpen) panelOpen = false else controlsVisible = !controlsVisible },
@@ -939,6 +967,9 @@ private fun SeekButton(direction: Int, onJump: (Int) -> Unit, onHold: (Int) -> J
         Text(if (direction < 0) "⏪ 10" else "10 ⏩", color = Color.White, fontSize = 22.sp)
     }
 }
+
+/** ⏩ ⏪ of a remote: further than a double tap. */
+private const val REMOTE_LONG_JUMP = 30
 
 /** Held ⏪ ⏩: the first repeat after this delay, then one jump per tick. */
 private const val HOLD_DELAY_MS = 450L

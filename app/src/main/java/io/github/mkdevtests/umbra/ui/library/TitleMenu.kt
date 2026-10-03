@@ -145,6 +145,16 @@ fun EpisodeMenu(
         onMark = { viewModel.markWatched(show, it, listOf(episode)) },
         onDismiss = onDismiss,
     ) {
+        val downloads by viewModel.downloads.collectAsState()
+        if (downloads.none { it.key == episode.file }) {
+            MenuRow(NyxaraIcons.Download, "Télécharger l'épisode") { onDismiss(); viewModel.download(show, listOf(episode)) }
+            val following = episodesFrom(show, episode).take(DOWNLOAD_AHEAD)
+            if (following.size > 1) {
+                MenuRow(NyxaraIcons.Download, "Télécharger les ${following.size} prochains épisodes") { onDismiss(); viewModel.download(show, following) }
+            }
+        } else {
+            MenuRow(NyxaraIcons.Close, "Supprimer de la tablette") { onDismiss(); viewModel.removeDownload(episode.file) }
+        }
         if (before.size > 1 && before.any { history[it.file]?.watched != true }) {
             MenuRow(NyxaraIcons.Check, "Marquer vus jusqu'ici (${before.size} épisodes)") {
                 onDismiss()
@@ -152,6 +162,17 @@ fun EpisodeMenu(
             }
         }
     }
+}
+
+/** Episodes downloaded at once from the menu: for a trip. */
+private const val DOWNLOAD_AHEAD = 5
+
+/** [episode] and the ones after it, in order (specials after a special only). */
+fun episodesFrom(show: Show, episode: Episode): List<Episode> {
+    val all = show.seasons.sortedBy { it.number }
+        .filter { if (episode.season == 0) it.number == 0 else it.number > 0 }
+        .flatMap { season -> season.episodes.sortedBy { it.number } }
+    return all.drop(all.indexOfFirst { it.file == episode.file }.coerceAtLeast(0))
 }
 
 /** The episodes of [show] in order up to [episode]: its season's for a special. */

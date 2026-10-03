@@ -35,6 +35,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,8 +78,21 @@ fun SettingsScreen(
     onOpenStats: () -> Unit,
     library: LibraryViewModel,
     onOpenCorrections: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onTestNetwork: suspend () -> String,
+    onExport: suspend (Uri) -> String,
+    onImport: suspend (Uri) -> String,
     onBack: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    var networkResult by remember { mutableStateOf<String?>(null) }
+    var backupResult by remember { mutableStateOf<String?>(null) }
+    val exportTo = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        uri?.let { scope.launch { backupResult = runCatching { onExport(it) }.getOrElse { e -> "Échec : ${e.message}" } } }
+    }
+    val importFrom = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { scope.launch { backupResult = runCatching { onImport(it) }.getOrElse { e -> "Échec : ${e.message}" } } }
+    }
     val savedAt by library.savedAt.collectAsState()
     val fixes by library.matchFixes.collectAsState()
     val scan by library.scan.collectAsState()
@@ -185,6 +200,12 @@ fun SettingsScreen(
                         scan.error,
                     ).joinToString(" · "),
                 )
+                Item("Actualiser hors de chez moi", "Au lancement, même à travers Tailscale (plus lent). Sinon seulement à la maison.") {
+                    Switch(checked = settings.scanAway, onCheckedChange = { on -> store.update { it.copy(scanAway = on) } })
+                }
+                Item("Téléchargements", "Films et épisodes copiés sur la tablette, pour les regarder sans le NAS.") {
+                    TextButton(onClick = onOpenDownloads) { Text("Voir ›") }
+                }
                 Item("Corrections de matching", if (fixes.isEmpty()) "Aucune" else "${fixes.size} dossier${if (fixes.size > 1) "s" else ""} corrigé${if (fixes.size > 1) "s" else ""}") {
                     TextButton(onClick = onOpenCorrections) { Text("Voir ›") }
                 }
@@ -210,6 +231,21 @@ fun SettingsScreen(
                         if (on && android.os.Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     })
                 }
+                Item("Version plus légère hors de chez moi", "Par Tailscale ou en données mobiles : la version jusqu'au 1080p plutôt que la 4K. Toujours modifiable sur la fiche.") {
+                    Switch(checked = settings.lighterAway, onCheckedChange = { on -> store.update { it.copy(lighterAway = on) } })
+                }
+                Item("Mode nuit", "Dialogues plus forts, explosions plus douces, à chaque lecture. Aussi dans le lecteur : Audio et sous-titres.") {
+                    Switch(checked = settings.nightAudio, onCheckedChange = { on -> store.update { it.copy(nightAudio = on) } })
+                }
+                Item("Amélioration anime (Anime4K)", "Traits plus nets sur les dessins animés, à chaque lecture. Demande plus à la tablette.") {
+                    Switch(checked = settings.animeUpscale, onCheckedChange = { on -> store.update { it.copy(animeUpscale = on) } })
+                }
+                Item("Tester le débit", networkResult ?: "Lit un gros film comme la lecture le ferait : aller-retour, débit, et ce qu'ils permettent. À faire chez soi puis dehors.") {
+                    TextButton(onClick = {
+                        networkResult = "Test en cours…"
+                        scope.launch { networkResult = onTestNetwork() }
+                    }) { Text("Tester") }
+                }
                 Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
                     TextButton(onClick = onOpenStats) { Text("Voir ›") }
                 }
@@ -217,7 +253,20 @@ fun SettingsScreen(
 
             TraktSection(trakt)
 
-            OpenSubtitlesSection(openSubtitles, settings.onlineSubtitleLanguages) { languages -> store.update { it.copy(onlineSubtitleLanguages = languages) } }
+            Section("Sauvegarde") {
+                Item(
+                    "Historique, corrections, réglages",
+                    backupResult ?: "Dans un fichier que tu gardes où tu veux (jamais sur le NAS) ; à importer sur une autre tablette ou après une réinstallation. Les mots de passe des NAS n'y sont pas.",
+                ) {
+                    TextButton(onClick = { exportTo.launch("nyxara-sauvegarde.json") }) { Text("Exporter") }
+                    TextButton(onClick = { importFrom.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }) { Text("Importer") }
+                }
+            }
+
+            OpenSubtitlesSection(
+                openSubtitles, settings.onlineSubtitleLanguages, settings.autoOnlineSubtitles,
+                onAuto = { on -> store.update { it.copy(autoOnlineSubtitles = on) } },
+            ) { languages -> store.update { it.copy(onlineSubtitleLanguages = languages) } }
 
             Section("Mises à jour") {
                 if (BuildConfig.UPDATES) {
@@ -276,7 +325,7 @@ private fun TraktSection(trakt: Trakt) {
 
 /** Subtitles searched online from the player: the languages, and an optional account for more downloads. */
 @Composable
-private fun OpenSubtitlesSection(service: OpenSubtitles, languages: List<String>, onLanguages: (List<String>) -> Unit) {
+private fun OpenSubtitlesSection(service: OpenSubtitles, languages: List<String>, auto: Boolean, onAuto: (Boolean) -> Unit, onLanguages: (List<String>) -> Unit) {
     val status by service.status.collectAsState()
     Section("Sous-titres en ligne") {
         if (!status.configured) {
@@ -292,6 +341,9 @@ private fun OpenSubtitlesSection(service: OpenSubtitles, languages: List<String>
                     label = { Text(name) },
                 )
             }
+        }
+        Item("Chercher tout seul", "Si le fichier n'a pas de sous-titres dans ta langue : le meilleur est ajouté dès le début, sans rien demander.") {
+            Switch(checked = auto, onCheckedChange = onAuto)
         }
         val user = status.user
         if (user != null) {

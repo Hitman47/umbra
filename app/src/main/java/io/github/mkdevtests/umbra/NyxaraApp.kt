@@ -12,6 +12,7 @@ import io.github.mkdevtests.umbra.nas.LocalStreamServer
 import io.github.mkdevtests.umbra.nas.NasClient
 import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.NasSource
+import io.github.mkdevtests.umbra.nas.withRoots
 import io.github.mkdevtests.umbra.nas.SourceStore
 import io.github.mkdevtests.umbra.settings.SettingsStore
 import io.github.mkdevtests.umbra.history.HiddenTitles
@@ -87,6 +88,9 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
 
     val openSubtitles by lazy { OpenSubtitles(this, BuildConfig.OPENSUBTITLES_KEY, "Nyxara v${BuildConfig.VERSION_NAME}", OkHttpClient()) }
 
+    /** Videos copied to the device, played from there even without the NAS. */
+    val downloads by lazy { io.github.mkdevtests.umbra.download.Downloads(this) }
+
     /** Subtitles downloaded for each video, added again when it plays. */
     val subtitleMemory by lazy { SubtitleMemory(this) }
 
@@ -159,6 +163,15 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         val connections = kept.toMutableList().apply { add(if (index >= 0) index else size, connection) }
         switchTo(connections)
     }
+
+    /** NAS restored from a backup, without their passwords: they connect once these are typed. */
+    @Synchronized
+    fun addSources(added: List<NasSource>) {
+        val existing = nas?.connections.orEmpty()
+        switchTo(existing + added.map { it.withRoots(existing.map { c -> c.source }) }.map(NasClient::of))
+    }
+
+    val backups by lazy { io.github.mkdevtests.umbra.history.BackupManager(this) }
 
     @Synchronized
     fun removeSource(id: String) = switchTo(nas?.connections.orEmpty().filter { it.source.id != id })

@@ -103,6 +103,13 @@ class WatchHistory(private val dao: ProgressDao) {
     }
 
     /** Called by the player while it plays [file]; ignored until mpv knows the duration. */
+    /** Entries from a backup, newer than this device's ones. */
+    fun restore(entries: List<Progress>) {
+        if (entries.isEmpty()) return
+        _progress.update { saved -> saved + entries.associateBy { it.file } }
+        scope.launch { runCatching { entries.forEach { dao.save(it) } }.onFailure { Log.w(TAG, "restore not saved", it) } }
+    }
+
     fun save(file: String, position: Double, duration: Double) {
         if (duration <= 0) return
         val entry = Progress(file, position.coerceIn(0.0, duration), duration, System.currentTimeMillis())

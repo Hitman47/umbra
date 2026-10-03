@@ -66,6 +66,7 @@ import io.github.mkdevtests.umbra.library.universesOf
 import io.github.mkdevtests.umbra.history.without
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.ui.theme.NyxaraLogo
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.update.UpdateBanner
 import io.github.mkdevtests.umbra.update.Updater
 
@@ -467,7 +468,7 @@ private fun SortMenu(sort: GridSort, onSort: (GridSort) -> Unit) {
 /** A poster with its title and year below, its badge in the corner. A long press opens [onLongClick]'s menu. */
 @Composable
 internal fun PosterCard(item: PosterItem, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
-    Column(modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    Column(modifier = modifier.focusRing().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box {
             Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth())
             item.badge?.let { CornerBadge(it, Modifier.align(Alignment.TopEnd)) }

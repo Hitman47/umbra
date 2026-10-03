@@ -162,6 +162,31 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         return preferredVersion(key, versions)
     }
 
+    /** The offline copies (Réglages › Téléchargements). */
+    val downloads = nyxara.downloads.list
+
+    /** Copies the film to the device, in the version it would play in. */
+    fun download(movie: Movie) {
+        val version = versionFor(movie.file, movie.versions)
+        nyxara.downloads.add(movie.file, version.file, movie.title, version.size, if (version.file == movie.file) movie.subtitles else emptyList())
+    }
+
+    /** Copies [episodes] of [show] to the device, in order. */
+    fun download(show: Show, episodes: List<Episode>) = episodes.forEach { episode ->
+        val version = versionFor(episode.file, show.versionsOf(episode))
+        nyxara.downloads.add(
+            episode.file, version.file, "${show.title} S%02dE%02d".format(episode.season, episode.number), version.size,
+            if (version.file == episode.file) episode.subtitles else emptyList(),
+        )
+    }
+
+    fun removeDownload(key: String) = nyxara.downloads.remove(key)
+
+    /** Room left where the downloads go. */
+    fun freeSpace(): Long = nyxara.downloads.folder.usableSpace
+
+    fun retryDownload(key: String) = nyxara.downloads.retry(key)
+
     /** The NAS's name of a file, to tell versions on two NAS apart. */
     fun sourceLabel(file: String): String? = nyxara.nas?.sourceOf(file)?.label
 
@@ -170,6 +195,18 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
      * chosen (the last one by default). Progress is kept on the film, whatever the version.
      */
     fun playIntent(movie: Movie, fromStart: Boolean = false, version: Version? = null): Intent {
+        // Copied to the device: played from there, NAS or not.
+        nyxara.downloads.localFile(movie.file)?.takeIf { version == null }?.let { local ->
+            return PlayerActivity.intent(
+                getApplication(),
+                listOf(
+                    PlayItem(
+                        local.local, movie.title, subtitles = local.localSubtitles, file = movie.file, start = startOf(movie.file, fromStart),
+                        trakt = movie.tmdbId?.let { TraktTarget(movieTmdb = it, label = movie.title) },
+                    ),
+                ),
+            )
+        }
         val played = version ?: versionFor(movie.file, movie.versions)
         val own = played.file == movie.file
         return PlayerActivity.intent(
@@ -202,6 +239,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             // Only episodes TMDB knows under these numbers: Trakt shares TMDB's numbering.
             val trakt = show.tmdbId?.takeIf { item.hasMetadata }?.let { TraktTarget(showTmdb = it, season = item.season, episode = item.number, label = "${show.title} $code") }
             val other = played.file.takeIf { item.file == episode.file && it != episode.file }
+            nyxara.downloads.localFile(item.file)?.takeIf { version == null || item.file != episode.file }?.let { local ->
+                return@map PlayItem(local.local, show.title, listOfNotNull(code, item.title).joinToString(" · "), local.localSubtitles, item.file, start, trakt)
+            }
             PlayItem(
                 url(other ?: item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "),
                 if (other == null) item.subtitles.map(::url) else emptyList(), item.file, start, trakt, stream = other,

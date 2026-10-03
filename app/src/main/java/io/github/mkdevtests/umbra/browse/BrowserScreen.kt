@@ -48,6 +48,7 @@ import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.ui.library.Poster
 import io.github.mkdevtests.umbra.ui.library.PosterShape
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import java.util.Locale
 
 /** What the library knows about the NAS paths, to show posters while browsing. */
@@ -209,7 +210,7 @@ fun BrowserScreen(
 
 @Composable
 private fun Tile(title: String, caption: String?, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, artwork: @Composable () -> Unit) {
-    Column(modifier = Modifier.combinedClickable(onLongClick = onLongClick, onClick = onClick)) {
+    Column(modifier = Modifier.focusRing().combinedClickable(onLongClick = onLongClick, onClick = onClick)) {
         artwork()
         Text(
             title,

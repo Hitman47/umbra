@@ -67,6 +67,7 @@ import io.github.mkdevtests.umbra.ui.theme.GlowButton
 import io.github.mkdevtests.umbra.ui.theme.Night
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.ui.theme.SectionHeader
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import kotlinx.coroutines.delay
 import kotlin.random.Random
 
@@ -366,7 +367,7 @@ private fun HeroPage(item: Featured, wide: Boolean) {
 @Composable
 private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: () -> Unit, onLongPress: () -> Unit) {
     Column(
-        modifier = Modifier.width(if (wide) 300.dp else 260.dp).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
+        modifier = Modifier.width(if (wide) 300.dp else 260.dp).focusRing(RoundedCornerShape(16.dp)).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
@@ -419,6 +420,7 @@ private fun Shortcuts(roots: List<String>, onOpen: (String) -> Unit) {
         items(roots, key = { it }) { root ->
             Row(
                 modifier = Modifier
+                    .focusRing(RoundedCornerShape(16.dp))
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .clickable { onOpen(root) }

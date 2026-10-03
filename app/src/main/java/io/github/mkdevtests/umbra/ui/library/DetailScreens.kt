@@ -67,6 +67,8 @@ import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.Tmdb
 import io.github.mkdevtests.umbra.library.Version
 import io.github.mkdevtests.umbra.library.describeVersion
+import io.github.mkdevtests.umbra.download.Download
+import io.github.mkdevtests.umbra.download.DownloadState
 import io.github.mkdevtests.umbra.library.LinkRow
 import io.github.mkdevtests.umbra.library.characterRow
 import io.github.mkdevtests.umbra.library.directorRow
@@ -86,6 +88,7 @@ import io.github.mkdevtests.umbra.ui.theme.GlassIconButton
 import io.github.mkdevtests.umbra.ui.theme.GlowButton
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.ui.theme.Tag
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import java.util.Locale
 
 /** Where a page leads: another title of the library, or the search for a person. */
@@ -137,6 +140,7 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
                     )
                 }
                 MarkButton(progress?.watched == true) { viewModel.markWatched(movie, progress?.watched != true) }
+                DownloadButton(viewModel, movie.file) { viewModel.download(movie) }
                 HideButton(isHidden) { viewModel.setHidden(movie, !isHidden) }
             }
         }
@@ -177,6 +181,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
     }
     var picking by remember(show.key) { mutableStateOf<Episode?>(null) }
     var pressed by remember(show.key) { mutableStateOf<Episode?>(null) }
+    val downloads by viewModel.downloads.collectAsState()
     val season = show.seasons.firstOrNull { it.number == selected }
     val history by viewModel.history.collectAsState()
     val hidden by viewModel.hidden.collectAsState()
@@ -259,12 +264,16 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                         Icon(if (allSeen) NyxaraIcons.Close else NyxaraIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text(if (allSeen) "  Marquer la saison non vue" else "  Marquer la saison vue")
                     }
+                    TextButton(onClick = { viewModel.download(show, shown.episodes) }) {
+                        Icon(NyxaraIcons.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  Télécharger la saison")
+                    }
                 }
             }
         }
         items(season?.episodes.orEmpty(), key = { "${it.season}-${it.number}" }) { episode ->
             val versions = show.versionsOf(episode)
-            EpisodeRow(episode, history[episode.file], versions.size, infos[episode.file], onLongClick = { pressed = episode }) {
+            EpisodeRow(episode, history[episode.file], versions.size, infos[episode.file], downloads.firstOrNull { it.key == episode.file }, onLongClick = { pressed = episode }) {
                 // Several files of this episode: which one, first.
                 if (versions.size > 1) picking = episode else context.startActivity(viewModel.playIntent(show, episode))
             }
@@ -497,6 +506,40 @@ private fun MarkButton(watched: Boolean, all: Boolean = false, onClick: () -> Un
     }
 }
 
+/** Copy to the device: offered, under way (cancel), done (delete) or failed (try again). */
+@Composable
+private fun DownloadButton(viewModel: LibraryViewModel, key: String, onDownload: () -> Unit) {
+    val downloads by viewModel.downloads.collectAsState()
+    val download = downloads.firstOrNull { it.key == key }
+    TextButton(
+        onClick = {
+            when (download?.state) {
+                null -> onDownload()
+                DownloadState.Failed -> viewModel.retryDownload(key)
+                else -> viewModel.removeDownload(key)
+            }
+        },
+    ) {
+        Icon(if (download?.state == DownloadState.Done) NyxaraIcons.Close else NyxaraIcons.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(
+            "  " + when (download?.state) {
+                null -> "Télécharger"
+                DownloadState.Done -> "Sur la tablette · supprimer"
+                DownloadState.Failed -> "Échec · réessayer"
+                else -> "${downloadLabel(download)} · annuler"
+            },
+        )
+    }
+}
+
+/** "Sur la tablette", "Téléchargement 45 %", "En attente". */
+internal fun downloadLabel(download: Download): String = when (download.state) {
+    DownloadState.Done -> "⬇ Sur la tablette"
+    DownloadState.Running -> "⬇ Téléchargement ${(download.fraction * 100).toInt()} %"
+    DownloadState.Queued -> "⬇ En attente"
+    DownloadState.Failed -> "⬇ Échec : ${download.error ?: "?"}"
+}
+
 /** Hides the title from the lists, or shows it again. */
 @Composable
 private fun HideButton(hidden: Boolean, onClick: () -> Unit) {
@@ -588,9 +631,9 @@ private fun TitleBlock(
 }
 
 @Composable
-private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, media: MediaInfo?, onLongClick: () -> Unit, onClick: () -> Unit) {
+private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, media: MediaInfo?, download: Download?, onLongClick: () -> Unit, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 24.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().focusRing(RoundedCornerShape(12.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Box(
@@ -631,6 +674,7 @@ private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, med
             if (meta.isNotEmpty()) {
                 Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            download?.let { Text(downloadLabel(it), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary) }
             media?.compactLine()?.ifEmpty { null }?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

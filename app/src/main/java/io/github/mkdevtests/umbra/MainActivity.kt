@@ -37,6 +37,7 @@ import io.github.mkdevtests.umbra.ui.library.ShortcutScreen
 import io.github.mkdevtests.umbra.ui.library.ShowDetailScreen
 import io.github.mkdevtests.umbra.ui.library.UniverseScreen
 import io.github.mkdevtests.umbra.ui.settings.CorrectionsScreen
+import io.github.mkdevtests.umbra.ui.settings.DownloadsScreen
 import io.github.mkdevtests.umbra.ui.settings.FoldersScreen
 import io.github.mkdevtests.umbra.ui.settings.MeasuresScreen
 import io.github.mkdevtests.umbra.ui.settings.SettingsScreen
@@ -73,6 +74,7 @@ private sealed interface Detail {
     data object Settings : Detail
     data object Measures : Detail
     data object Corrections : Detail
+    data object Downloads : Detail
     data class Folders(val sourceId: String) : Detail
 }
 
@@ -175,9 +177,14 @@ private fun NyxaraRoot(
                 onOpenStats = { stack.add(Detail.Measures) },
                 library = libraryViewModel,
                 onOpenCorrections = { stack.add(Detail.Corrections) },
+                onOpenDownloads = { stack.add(Detail.Downloads) },
+                onTestNetwork = app::testNetwork,
+                onExport = app.backups::export,
+                onImport = app.backups::import,
                 onBack = back,
             )
             Detail.Measures -> MeasuresScreen(app.measures, back)
+            Detail.Downloads -> DownloadsScreen(libraryViewModel, back)
             Detail.Corrections -> CorrectionsScreen(libraryViewModel, onOpenShow = { stack.add(Detail.ShowDetail(it)) }, onBack = back)
             is Detail.Folders -> sources.firstOrNull { it.id == detail.sourceId }?.let { source ->
                 FoldersScreen(

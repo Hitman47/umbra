@@ -61,6 +61,11 @@ class SettingsStore(context: Context) {
     private val _settings = MutableStateFlow(load())
     val settings: StateFlow<Settings> = _settings.asStateFlow()
 
+    /** Read again from the preferences: a backup was just restored. */
+    fun reload() {
+        _settings.value = load()
+    }
+
     fun update(change: (Settings) -> Settings) {
         val updated = change(_settings.value)
         _settings.value = updated

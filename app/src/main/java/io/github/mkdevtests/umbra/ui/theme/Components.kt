@@ -21,6 +21,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -146,4 +150,15 @@ fun Tag(text: String, modifier: Modifier = Modifier) {
             .background(Color.White.copy(alpha = 0.08f))
             .padding(horizontal = 10.dp, vertical = 4.dp),
     )
+}
+
+/**
+ * A ring around what the remote is on (Android TV, a keyboard): a touch
+ * screen never shows it. Put it before the clickable it follows.
+ */
+fun Modifier.focusRing(shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(14.dp)): Modifier = composed {
+    var focused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    this
+        .onFocusChanged { focused = it.hasFocus }
+        .then(if (focused) Modifier.border(3.dp, Night.Violet, shape) else Modifier)
 }
