@@ -32,6 +32,8 @@ data class NasSource(
     val protocol: Protocol = Protocol.Smb,
     /** Where the NAS is reached when [host] doesn't answer: its Tailscale address, away from home (SMB, NFS). */
     val fallbackHost: String = "",
+    /** Folders of the Perso tab, as app paths: played as plain videos, out of the library. */
+    val personal: List<String> = emptyList(),
 ) {
     /** [host], then [fallbackHost] if any. */
     fun hosts(): List<String> = listOf(host, fallbackHost).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -39,12 +41,18 @@ data class NasSource(
     /** The name, else the NAS's address ("nas:5005" for a WebDAV URL). */
     val label get() = name.ifBlank { host.substringAfter("://").substringBefore('/') }
 
-    /** [path] is an excluded folder or inside one. */
-    fun isExcluded(path: String) = excluded.any { path.equals(it, ignoreCase = true) || path.startsWith("$it\\", ignoreCase = true) }
+    /** [path] is an excluded folder or inside one; a Perso folder never is. */
+    fun isExcluded(path: String) = !isPersonal(path) && excluded.any { path.within(it) }
+
+    /** [path] is a Perso folder or inside one. */
+    fun isPersonal(path: String) = personal.any { path.within(it) }
 
     /** First folder of the app's paths for [share]. */
     fun rootOf(share: String) = roots[share] ?: defaultRoot(share)
 }
+
+/** [this] is [folder] or inside it. */
+fun String.within(folder: String) = equals(folder, ignoreCase = true) || startsWith("$folder\\", ignoreCase = true)
 
 /** A share's name in the app's paths: its own for SMB, the last folder of an NFS export or a WebDAV folder ("Films"). */
 fun defaultRoot(share: String): String =

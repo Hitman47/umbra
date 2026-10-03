@@ -62,6 +62,12 @@ import io.github.mkdevtests.umbra.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import io.github.mkdevtests.umbra.perso.PersoStore
+import io.github.mkdevtests.umbra.ui.perso.MAX_PIN
+import io.github.mkdevtests.umbra.ui.perso.MIN_PIN
+import io.github.mkdevtests.umbra.ui.perso.PinDots
+import io.github.mkdevtests.umbra.ui.perso.PinPad
+import io.github.mkdevtests.umbra.ui.perso.fingerprintAvailable
 
 @Composable
 fun SettingsScreen(
@@ -82,6 +88,7 @@ fun SettingsScreen(
     onTestNetwork: suspend () -> String,
     onExport: suspend (Uri) -> String,
     onImport: suspend (Uri) -> String,
+    perso: PersoStore,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -251,6 +258,8 @@ fun SettingsScreen(
                 }
             }
 
+            PersoSection(perso)
+
             TraktSection(trakt)
 
             Section("Sauvegarde") {
@@ -286,6 +295,63 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+/** The Perso tab's lock: a PIN, the fingerprint as a shortcut. */
+@Composable
+private fun PersoSection(perso: PersoStore) {
+    val context = LocalContext.current
+    val lock by perso.lock.collectAsState()
+    // "new": choosing a PIN, then "confirm" it; "off": the current PIN asked to remove the lock.
+    var step by remember { mutableStateOf<String?>(null) }
+    var chosen by remember { mutableStateOf("") }
+    Section("Perso") {
+        Item("Verrouiller l'onglet Perso", if (lock.enabled) "Code demandé à chaque retour dans l'appli." else "Un code (4 à 8 chiffres) avant d'afficher Perso.") {
+            Switch(checked = lock.enabled, onCheckedChange = { on -> step = if (on) "new" else "off" })
+        }
+        if (lock.enabled) {
+            Item("Changer le code") { TextButton(onClick = { step = "new" }) { Text("Changer") } }
+            if (fingerprintAvailable(context)) {
+                Item("Empreinte digitale", "Déverrouille Perso sans taper le code.") {
+                    Switch(checked = lock.fingerprint, onCheckedChange = perso::setFingerprint)
+                }
+            }
+        }
+        Item("Historique à part", "Reprise et lectures de Perso restent sur cet appareil : ni Trakt, ni sauvegarde.")
+    }
+    when (step) {
+        "new" -> PinDialog("Nouveau code", onDismiss = { step = null }) { pin -> chosen = pin; step = "confirm"; true }
+        "confirm" -> PinDialog("Confirmer le code", onDismiss = { step = null }) { pin ->
+            (pin == chosen).also { same -> if (same) { perso.setPin(pin); step = null } }
+        }
+        "off" -> PinDialog("Code actuel", onDismiss = { step = null }) { pin ->
+            perso.unlock(pin).also { ok -> if (ok) { perso.removeLock(); step = null } }
+        }
+    }
+}
+
+/** Asks a PIN; [onPin] says whether it is accepted, a refused one is asked again. */
+@Composable
+private fun PinDialog(title: String, onDismiss: () -> Unit, onPin: (String) -> Boolean) {
+    var pin by remember(title) { mutableStateOf("") }
+    var wrong by remember(title) { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
+                PinDots(pin.length, wrong)
+                PinPad(
+                    onDigit = { digit -> wrong = false; if (pin.length < MAX_PIN) pin += digit },
+                    onErase = { pin = pin.dropLast(1); wrong = false },
+                    onValidate = {
+                        if (pin.length >= MIN_PIN && onPin(pin)) pin = "" else { wrong = true; pin = "" }
+                    },
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
 }
 
 @Composable

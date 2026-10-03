@@ -304,10 +304,10 @@ class LibraryRepository(private val app: NyxaraApp) {
         }
     }
 
-    /** Only the titles stored on the shares of [nas], out of the excluded folders. */
+    /** Only the titles stored on the shares of [nas], out of the excluded and Perso folders. */
     private fun Library.within(nas: NasRouter?): Library {
         val roots = nas?.let { router -> router.sources.flatMap(router::rootsOf) }.orEmpty().mapTo(HashSet()) { it.lowercase() }
-        fun kept(file: String) = file.substringBefore('\\').lowercase() in roots && nas?.isExcluded(file) != true
+        fun kept(file: String) = file.substringBefore('\\').lowercase() in roots && nas?.isExcluded(file) != true && nas?.isPersonal(file) != true
         return copy(
             movies = movies.filter { kept(it.file) },
             shows = shows.mapNotNull { show ->

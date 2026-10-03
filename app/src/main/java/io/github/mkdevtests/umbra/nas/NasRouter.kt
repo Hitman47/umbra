@@ -32,18 +32,26 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
     /** [path] is in a folder the user left out. */
     fun isExcluded(path: String) = sourceOf(path)?.isExcluded(path) == true
 
-    /** The entries at [path]; excluded folders left out, unless [withExcluded] (to choose what to follow). */
-    fun list(path: String, withExcluded: Boolean = false): List<NasEntry> {
+    /** [path] is in a folder of the Perso tab. */
+    fun isPersonal(path: String) = sourceOf(path)?.isPersonal(path) == true
+
+    /**
+     * The entries at [path]; excluded folders left out, unless [withExcluded]
+     * (to choose what to follow), and the Perso folders unless [withPersonal]
+     * (the Perso tab): they never show among the library's.
+     */
+    fun list(path: String, withExcluded: Boolean = false, withPersonal: Boolean = false): List<NasEntry> {
         if (path.isEmpty()) {
             return sources.flatMap(::rootsOf).sortedWith(::naturalCompare).map { NasEntry(it, it, isDirectory = true, size = 0) }
         }
         val root = path.substringBefore('\\')
         val (nas, share) = route(root)
         if (!withExcluded && nas.source.isExcluded(path)) return emptyList()
+        if (!withPersonal && nas.source.isPersonal(path)) return emptyList()
         val prefix = "$share\\"
         return nas.list(share + path.substring(root.length))
             .map { entry -> entry.copy(path = root + "\\" + entry.path.removePrefix(prefix)) }
-            .filterNot { !withExcluded && nas.source.isExcluded(it.path) }
+            .filterNot { (!withExcluded && nas.source.isExcluded(it.path)) || (!withPersonal && nas.source.isPersonal(it.path)) }
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */

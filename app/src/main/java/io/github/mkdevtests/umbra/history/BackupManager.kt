@@ -24,7 +24,7 @@ class BackupManager(private val app: NyxaraApp) {
                 app.getSharedPreferences(name, Context.MODE_PRIVATE).all.mapNotNull { (key, value) -> encodePref(value)?.let { key to it } }.toMap()
             },
             sources = app.sources.load().map {
-                BackupSource(it.id, it.name, it.host, it.shares, it.username, it.domain, it.roots, it.excluded, it.protocol.name, it.fallbackHost)
+                BackupSource(it.id, it.name, it.host, it.shares, it.username, it.domain, it.roots, it.excluded + it.personal, it.protocol.name, it.fallbackHost)
             },
         )
         app.contentResolver.openOutputStream(uri, "wt")?.use { it.write(json.encodeToString(Backup.serializer(), backup).toByteArray()) }

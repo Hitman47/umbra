@@ -103,6 +103,7 @@ fun SourceScreen(
             val source = NasSource(
                 host.trim(), shares.filter { it in selected }, username.trim(), password, initial?.domain.orEmpty(),
                 id = initial?.id.orEmpty(), name = name.trim(), roots = initial?.roots.orEmpty(), excluded = initial?.excluded.orEmpty(),
+                personal = initial?.personal.orEmpty(),
                 protocol = protocol,
                 fallbackHost = if (protocol == Protocol.WebDav) "" else fallbackHost.trim(),
             )

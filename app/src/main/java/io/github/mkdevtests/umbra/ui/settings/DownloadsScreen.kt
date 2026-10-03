@@ -31,7 +31,9 @@ import io.github.mkdevtests.umbra.ui.theme.ScreenTitle
 /** The videos copied to the device: progress, room taken, delete or try again. */
 @Composable
 fun DownloadsScreen(viewModel: LibraryViewModel, onBack: () -> Unit) {
-    val downloads by viewModel.downloads.collectAsState()
+    val all by viewModel.downloads.collectAsState()
+    // Perso's own are listed in the Perso tab, behind its lock.
+    val downloads = all.filterNot { it.key.startsWith("perso:") }
     val used = remember(downloads) { downloads.sumOf { if (it.state == DownloadState.Done) it.size else it.done } }
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
         ScreenTitle("Téléchargements", onBack)

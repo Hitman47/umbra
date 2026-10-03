@@ -50,3 +50,7 @@ data class PlayerFigures(
     /** Seconds. */
     val duration: Double,
 )
+
+/** A Perso folder to play: its whole tree, shuffled or in order, from [start] if given; [only]: [start] alone (downloaded). */
+@Serializable
+data class PersoRequest(val folder: String, val shuffle: Boolean, val start: String? = null, val only: Boolean = false)

@@ -13,6 +13,7 @@ import io.github.mkdevtests.umbra.nas.NasClient
 import io.github.mkdevtests.umbra.nas.NasRouter
 import io.github.mkdevtests.umbra.nas.NasSource
 import io.github.mkdevtests.umbra.nas.withRoots
+import io.github.mkdevtests.umbra.nas.within
 import io.github.mkdevtests.umbra.nas.SourceStore
 import io.github.mkdevtests.umbra.settings.SettingsStore
 import io.github.mkdevtests.umbra.history.HiddenTitles
@@ -94,12 +95,39 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** Subtitles downloaded for each video, added again when it plays. */
     val subtitleMemory by lazy { SubtitleMemory(this) }
 
+    /** The Perso tab's history and lock, apart from the library. */
+    val perso by lazy { io.github.mkdevtests.umbra.perso.PersoStore(this, scope) }
+
+    /** Durations of the Perso videos, kept apart from the library's media infos and out of the backups. */
+    val persoMedia by lazy { MediaInfoStore(noBackupFilesDir.resolve("perso-media.json"), { nas }, scope) }
+
+    /** Activities on screen: none left, the Perso tab locks again. */
+    private var started = 0
+
+    private fun watchForeground() = registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+        override fun onActivityStarted(activity: android.app.Activity) {
+            started++
+        }
+
+        override fun onActivityStopped(activity: android.app.Activity) {
+            started--
+            if (started <= 0 && !activity.isChangingConfigurations) perso.relock()
+        }
+
+        override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) = Unit
+        override fun onActivityResumed(activity: android.app.Activity) = Unit
+        override fun onActivityPaused(activity: android.app.Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) = Unit
+        override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+    })
+
     override fun onCreate() {
         super.onCreate()
         nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(NasClient::of)) }
         _sourceList.value = nas?.sources.orEmpty()
         LocalImages.url = { path -> streamServer.imageUrl(path) }
         watchNetwork()
+        watchForeground()
         updater.check()
     }
 
@@ -169,6 +197,26 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     fun addSources(added: List<NasSource>) {
         val existing = nas?.connections.orEmpty()
         switchTo(existing + added.map { it.withRoots(existing.map { c -> c.source }) }.map(NasClient::of))
+    }
+
+    /** Moves [path] to the Perso tab: out of the library, played as plain videos. */
+    fun addPersonal(path: String) {
+        val source = nas?.sourceOf(path) ?: return
+        if (source.isPersonal(path)) return
+        val updated = source.copy(personal = source.personal.filterNot { it.within(path) } + path)
+        saveSource(updated, NasClient.of(updated))
+        library.onFolderExcluded()
+    }
+
+    /** Takes [path] out of the Perso tab: back to the library, or left out of it ([exclude]). */
+    fun removePersonal(path: String, exclude: Boolean) {
+        val source = nas?.sourceOf(path) ?: return
+        val updated = source.copy(
+            personal = source.personal.filterNot { it.equals(path, ignoreCase = true) },
+            excluded = if (exclude) source.excluded.filterNot { it.within(path) } + path else source.excluded,
+        )
+        saveSource(updated, NasClient.of(updated))
+        if (!exclude) library.onSourcesChanged()
     }
 
     val backups by lazy { io.github.mkdevtests.umbra.history.BackupManager(this) }

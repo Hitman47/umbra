@@ -181,6 +181,7 @@ private fun NyxaraRoot(
                 onTestNetwork = app::testNetwork,
                 onExport = app.backups::export,
                 onImport = app.backups::import,
+                perso = app.perso,
                 onBack = back,
             )
             Detail.Measures -> MeasuresScreen(app.measures, back)

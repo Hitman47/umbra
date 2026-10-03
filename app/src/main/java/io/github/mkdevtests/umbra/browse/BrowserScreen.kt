@@ -76,6 +76,8 @@ fun BrowserScreen(
     onOpenShow: (String) -> Unit,
     /** A folder was just left out: its titles leave the library. */
     onExcluded: () -> Unit,
+    /** A folder moved to the Perso tab. */
+    onPersonal: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
@@ -96,6 +98,7 @@ fun BrowserScreen(
                 Column {
                     TextButton(onClick = { menu = null; viewModel.open(entry.path) }) { Text("Ouvrir le dossier") }
                     if (canExclude) {
+                        TextButton(onClick = { menu = null; onPersonal(entry.path) }) { Text("Déplacer dans Perso") }
                         TextButton(onClick = { menu = null; excluding = entry.path }) {
                             Text("Exclure de la bibliothèque", color = MaterialTheme.colorScheme.error)
                         }

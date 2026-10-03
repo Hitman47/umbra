@@ -76,6 +76,7 @@ enum class HomeTab(val label: String, val icon: ImageVector) {
     Shows("Séries", NyxaraIcons.Tv),
     Search("Recherche", NyxaraIcons.Search),
     Folders("Dossiers", NyxaraIcons.Folder),
+    Perso("Perso", NyxaraIcons.Person),
 }
 
 /** The library's screens under one navigation: a bar at the bottom of a phone, a rail on the side of a tablet. */
@@ -217,9 +218,15 @@ private fun HomeContent(
             )
             HomeTab.Folders -> {
                 val art by libraryViewModel.localArt.collectAsState()
-                BrowserScreen(browserViewModel, fullLibrary, art, onOpenMovie, onOpenShow, onExcluded = libraryViewModel::onFolderExcluded)
+                val context = androidx.compose.ui.platform.LocalContext.current
+                BrowserScreen(
+                    browserViewModel, fullLibrary, art, onOpenMovie, onOpenShow,
+                    onExcluded = libraryViewModel::onFolderExcluded,
+                    onPersonal = { (context.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).addPersonal(it); browserViewModel.refresh() },
+                )
             }
             HomeTab.Search -> SearchScreen(fullLibrary, libraryViewModel, onOpenMovie, onOpenShow, onLongPress = menu)
+            HomeTab.Perso -> io.github.mkdevtests.umbra.ui.perso.PersoScreen(androidx.lifecycle.viewmodel.compose.viewModel())
         }
     }
 }

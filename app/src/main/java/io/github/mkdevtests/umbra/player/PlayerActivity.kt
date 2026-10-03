@@ -63,6 +63,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -121,14 +122,33 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import io.github.mkdevtests.umbra.nas.toUserMessage
+import io.github.mkdevtests.umbra.perso.PersoFolderState
+import io.github.mkdevtests.umbra.perso.PersoOrder
+import io.github.mkdevtests.umbra.perso.PersoVideo
+import io.github.mkdevtests.umbra.perso.firstOf
+import io.github.mkdevtests.umbra.perso.videosUnder
+import io.github.mkdevtests.umbra.ui.perso.persoDownloadKey
 import kotlin.math.abs
 import kotlin.math.sign
 
-/** Full-screen player. Plays the queue in [EXTRA_QUEUE]: a film, or an episode and the ones after it. */
+/**
+ * Full-screen player. Plays the queue in [EXTRA_QUEUE]: a film, or an episode
+ * and the ones after it; or a Perso folder ([EXTRA_PERSO]), its queue built
+ * here from its whole tree, endless, with its own history.
+ */
 class PlayerActivity : ComponentActivity() {
 
     private lateinit var player: MpvPlayer
-    private var queue: List<PlayItem> = emptyList()
+    private val queue = mutableStateListOf<PlayItem>()
+
+    /** The Perso folder played, null for the library's videos. */
+    private var perso: PersoRequest? = null
+    private var persoOrder: PersoOrder? = null
+    private var persoVideos: Map<String, PersoVideo> = emptyMap()
+
+    /** While a Perso folder is walked: what is happening, or why it can't play. */
+    private var preparing by mutableStateOf<String?>(null)
     private var index by mutableIntStateOf(0)
     private val app get() = application as NyxaraApp
     private val settings get() = app.settings.settings.value
@@ -154,11 +174,12 @@ class PlayerActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        queue = intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }.orEmpty()
-        if (queue.isEmpty()) return finish()
+        perso = intent.getStringExtra(EXTRA_PERSO)?.let { Json.decodeFromString(PersoRequest.serializer(), it) }
+        queue += intent.getStringExtra(EXTRA_QUEUE)?.let { Json.decodeFromString(QUEUE, it) }.orEmpty()
+        if (queue.isEmpty() && perso == null) return finish()
         player = MpvPlayer(this, settings)
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
-        start(queue[0])
+        perso?.let(::preparePerso) ?: start(queue[0])
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
@@ -173,8 +194,8 @@ class PlayerActivity : ComponentActivity() {
                 if (it) {
                     saveProgress()
                     scrobbler.stop()
-                    // Out of sight, nobody sees the countdown: the next episode starts at once.
-                    if ((background || inPip) && index + 1 < queue.size) playNext()
+                    // Out of sight, nobody sees the countdown: the next episode starts at once. Perso: always.
+                    if ((background || inPip || perso != null) && index + 1 < queue.size) playNext()
                 }
             }
         }
@@ -212,19 +233,88 @@ class PlayerActivity : ComponentActivity() {
 
         setContent {
             NyxaraTheme {
-                PlayerScreen(
-                    player = player,
-                    item = queue[index],
-                    next = queue.getOrNull(index + 1),
-                    settings = settings,
-                    inPip = inPip,
-                    onlineHook = onlineSubtitles(),
-                    onNext = ::playNext,
-                    onPip = ::enterPip,
-                    onBack = ::finish,
-                )
+                val item = queue.getOrNull(index)
+                if (item == null) {
+                    Preparing(preparing ?: "Préparation…", onBack = ::finish)
+                } else {
+                    PlayerScreen(
+                        player = player,
+                        item = item,
+                        next = queue.getOrNull(index + 1),
+                        settings = settings,
+                        inPip = inPip,
+                        onlineHook = if (perso == null) onlineSubtitles() else null,
+                        onNext = ::playNext,
+                        onPip = ::enterPip,
+                        onBack = ::finish,
+                        perso = perso != null,
+                        onPrevious = if (perso != null && index > 0) ::playPrevious else null,
+                    )
+                }
             }
         }
+    }
+
+    /** Walks the Perso folder, then plays: the video asked, or where it stopped, or the next in its order. */
+    private fun preparePerso(request: PersoRequest) {
+        lifecycleScope.launch {
+            val nas = app.nas
+            val offline = request.start?.let { app.downloads.localFile(persoDownloadKey(it)) } != null
+            val videos = if (request.only || nas == null) {
+                emptyList()
+            } else {
+                try {
+                    videosUnder(nas, request.folder)
+                } catch (e: Exception) {
+                    if (!offline) {
+                        preparing = "Lecture impossible : ${e.toUserMessage()}"
+                        return@launch
+                    }
+                    emptyList()
+                }
+            }
+            if (videos.isEmpty()) {
+                // Downloaded: played alone, NAS or not.
+                if (offline) {
+                    queue += persoItem(request.start!!)
+                    start(queue[0])
+                } else {
+                    preparing = "Aucune vidéo dans ce dossier."
+                }
+                return@launch
+            }
+            persoVideos = videos.associateBy { it.path }
+            val files = videos.map { it.path }
+            val state = app.perso.folder(request.folder)
+            val order = PersoOrder(files, request.shuffle, state.played)
+            val first = firstOf(order, files, request.shuffle, request.start, state) { app.perso.progress.value[it] }
+            persoOrder = order
+            queue += persoItem(first)
+            queue += persoItem(order.next())
+            start(queue[0])
+        }
+    }
+
+    /** A Perso video: from the device when downloaded, where it stopped. */
+    private fun persoItem(path: String): PlayItem {
+        val local = app.downloads.localFile(persoDownloadKey(path))
+        return PlayItem(
+            url = local?.local ?: app.playUrl(path),
+            title = path.substringAfterLast('\\').substringBeforeLast('.'),
+            subtitle = path.substringBeforeLast('\\').substringAfterLast('\\'),
+            subtitles = local?.localSubtitles ?: persoVideos[path]?.subtitles.orEmpty().map(app::playUrl),
+            file = path,
+            start = app.perso.resumeAt(path),
+        )
+    }
+
+    private fun playPrevious() {
+        if (index == 0) return
+        saveProgress()
+        index--
+        queue[index] = persoItem(queue[index].file!!)
+        start(queue[index])
+        updateBackground()
     }
 
     private fun playNext() {
@@ -232,7 +322,16 @@ class PlayerActivity : ComponentActivity() {
         scrobbler.stop()
         recordMeasure()
         index++
+        if (perso != null) {
+            // Where it stopped now, not when it was queued; the order always one video ahead.
+            queue[index] = persoItem(queue[index].file!!)
+            persoOrder?.let { order -> if (index + 1 == queue.size) queue += persoItem(order.next()) }
+        }
         start(queue[index])
+        updateBackground()
+    }
+
+    private fun updateBackground() {
         if (background) {
             BackgroundPlayback.title = queue[index].title
             BackgroundPlayback.subtitle = queue[index].subtitle
@@ -246,7 +345,7 @@ class PlayerActivity : ComponentActivity() {
         saveProgress()
         // The small window, or the sound alone out of sight: playback goes on.
         if (isInPictureInPictureMode) return
-        if (settings.backgroundAudio && player.isPlaying && !isFinishing) {
+        if (settings.backgroundAudio && player.isPlaying && !isFinishing && index < queue.size) {
             background = true
             BackgroundPlayback.title = queue[index].title
             BackgroundPlayback.subtitle = queue[index].subtitle
@@ -351,7 +450,8 @@ class PlayerActivity : ComponentActivity() {
         (item.stream ?: item.file)?.let { (application as NyxaraApp).streamServer.resetStats(it) }
         val read = item.stream ?: item.file
         val remote = read?.let { app.nas?.hostOf(it) }?.let(::isTailnet) == true
-        player.play(toMpvPath(item.url), item.subtitles, item.start, online = item.file?.let(app.subtitleMemory::of).orEmpty(), remote = remote)
+        val online = if (perso == null) item.file?.let(app.subtitleMemory::of).orEmpty() else emptyList()
+        player.play(toMpvPath(item.url), item.subtitles, item.start, online = online, remote = remote)
     }
 
     /** The queue index already measured: one measure per file. */
@@ -359,7 +459,8 @@ class PlayerActivity : ComponentActivity() {
 
     /** Keeps what this file cost to open, seek and play, for Réglages › Mesures de lecture. */
     private fun recordMeasure() {
-        if (measured == index) return
+        // Perso stays out of the measures: their titles would show there.
+        if (measured == index || perso != null) return
         val item = queue.getOrNull(index) ?: return
         val figures = player.figures()
         if (figures.openMs == null) return // never played: nothing to measure
@@ -454,7 +555,18 @@ class PlayerActivity : ComponentActivity() {
 
     private fun saveProgress() {
         val file = queue.getOrNull(index)?.file ?: return
-        (application as NyxaraApp).history.save(file, player.position.value, player.duration.value)
+        val request = perso
+        if (request == null) {
+            app.history.save(file, player.position.value, player.duration.value)
+            return
+        }
+        // Perso: its own history, never the library's nor Trakt's.
+        app.perso.save(file, player.position.value, player.duration.value)
+        persoOrder?.let { order ->
+            // The video queued after this one isn't played yet.
+            val upcoming = queue.drop(index + 1).mapNotNullTo(HashSet()) { it.file }
+            app.perso.saveFolder(request.folder, PersoFolderState(last = file, played = order.played.filter { it !in upcoming }))
+        }
     }
 
     override fun onDestroy() {
@@ -480,12 +592,18 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_QUEUE = "queue"
+        private const val EXTRA_PERSO = "perso"
         private const val ACTION_PIP_TOGGLE = "io.github.mkdevtests.umbra.PIP_TOGGLE"
         private const val PREFETCH_BEFORE_END = 90.0
         private val QUEUE = ListSerializer(PlayItem.serializer())
 
         fun intent(context: Context, queue: List<PlayItem>): Intent =
             Intent(context, PlayerActivity::class.java).putExtra(EXTRA_QUEUE, Json.encodeToString(QUEUE, queue))
+
+        /** Plays the Perso [folder] and its subfolders, shuffled or in order, from [start] if given; [only]: [start] alone. */
+        fun persoIntent(context: Context, folder: String, shuffle: Boolean, start: String? = null, only: Boolean = false): Intent =
+            Intent(context, PlayerActivity::class.java)
+                .putExtra(EXTRA_PERSO, Json.encodeToString(PersoRequest.serializer(), PersoRequest(folder, shuffle, start, only)))
 
         fun intent(context: Context, url: String, title: String, subtitles: List<String> = emptyList(), file: String? = null): Intent =
             intent(context, listOf(PlayItem(url, title, subtitles = subtitles, file = file)))
@@ -579,6 +697,9 @@ private fun PlayerScreen(
     onNext: () -> Unit,
     onPip: () -> Unit,
     onBack: () -> Unit,
+    /** A Perso video: no next-episode countdown, the next one starts at once; previous and next buttons. */
+    perso: Boolean = false,
+    onPrevious: (() -> Unit)? = null,
 ) {
     val position by player.position.collectAsState()
     val duration by player.duration.collectAsState()
@@ -875,7 +996,8 @@ private fun PlayerScreen(
                         }
                         Pill(if (fill) "Format : remplir" else "Format : entier", active = fill) { player.toggleFill() }
                         Spacer(Modifier.weight(1f))
-                        if (next != null) Pill("Épisode suivant ›", active = false, onClick = onNext)
+                        if (onPrevious != null) Pill("‹ Précédente", active = false, onClick = onPrevious)
+                        if (next != null) Pill(if (perso) "Suivante ›" else "Épisode suivant ›", active = false, onClick = onNext)
                     }
                 }
             }
@@ -920,7 +1042,7 @@ private fun PlayerScreen(
         // The next episode: at the credits, in the last seconds, or at the end.
         val credits = skip?.kind == ChapterKind.Credits
         val tail = !hasCredits(chapters, duration) && duration > 300 && position > 0 && duration - position <= TAIL_SECONDS
-        if (next != null && !nextCancelled && (ended || (settings.nextEpisodeCountdown && (credits || tail)))) {
+        if (!perso && next != null && !nextCancelled && (ended || (settings.nextEpisodeCountdown && (credits || tail)))) {
             NextUp(
                 next = next,
                 seconds = when {
@@ -932,7 +1054,7 @@ private fun PlayerScreen(
                 onCancel = { nextCancelled = true; controlsVisible = true },
                 modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(32.dp),
             )
-        } else if (skip != null && !(skip.kind == ChapterKind.Credits && (skip.last || next != null))) {
+        } else if (skip != null && !(skip.kind == ChapterKind.Credits && (skip.last || (next != null && !perso)))) {
             // Intro, or credits followed by more of the film: a button jumps past them.
             Pill(
                 if (skip.kind == ChapterKind.Intro) "Passer l'intro  ⏭" else "Passer le générique  ⏭",
@@ -1101,6 +1223,18 @@ private fun TrackRow(label: String, detail: String?, selected: Boolean, onClick:
             if (!detail.isNullOrEmpty()) Text(detail, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
         }
         if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+    }
+}
+
+/** A Perso folder being walked before it plays, or why it can't. */
+@Composable
+private fun Preparing(text: String, onBack: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (text == "Préparation…") CircularProgressIndicator(color = Color.White)
+            Text(text, color = Color.White, fontSize = 16.sp)
+            TextButton(onClick = onBack) { Text("Fermer") }
+        }
     }
 }
 
