@@ -21,6 +21,7 @@ Defaults are those of the Zima NAS: 192.168.1.131, WebDAV on port 5005, NFS expo
 
 import argparse
 import getpass
+import io
 import json
 import random
 import socket
@@ -60,6 +61,157 @@ def mbps(byte_count, seconds):
 
 class Failure(Exception):
     """A protocol that can't reach the file, with what to do about it."""
+
+
+def install_xdrlib():
+    """pyNfsClient needs xdrlib, removed from Python 3.13: an equivalent, if missing."""
+    try:
+        import xdrlib  # noqa: F401  (Python <= 3.12)
+        return
+    except ImportError:
+        pass
+    import types
+    xdr = types.ModuleType("xdrlib")
+
+    class Error(Exception):
+        def __init__(self, msg):
+            super().__init__(msg)
+            self.msg = msg
+
+    class ConversionError(Error):
+        pass
+
+    def pad(n):
+        return (4 - n % 4) % 4
+
+    class Packer:
+        def __init__(self):
+            self.reset()
+
+        # A BytesIO, as in the standard xdrlib: pyNfsClient writes to it directly.
+        def reset(self):
+            self.__buf = io.BytesIO()
+
+        def get_buffer(self):
+            return self.__buf.getvalue()
+
+        get_buf = get_buffer
+
+        def _put(self, fmt, x):
+            try:
+                self.__buf.write(struct.pack(fmt, x))
+            except struct.error as e:
+                raise ConversionError(str(e))
+
+        def pack_uint(self, x): self._put(">L", x)
+        def pack_int(self, x): self._put(">l", x)
+        pack_enum = pack_int
+        def pack_bool(self, x): self.__buf.write(b"\0\0\0\1" if x else b"\0\0\0\0")
+        def pack_uhyper(self, x): self._put(">Q", x)
+        def pack_hyper(self, x): self._put(">q", x)
+        def pack_float(self, x): self._put(">f", x)
+        def pack_double(self, x): self._put(">d", x)
+
+        def pack_fstring(self, n, s):
+            if n < 0:
+                raise ValueError("fstring size must be nonnegative")
+            data = bytes(s[:n])
+            self.__buf.write(data + b"\0" * (n - len(data) + pad(n)))
+
+        pack_fopaque = pack_fstring
+
+        def pack_string(self, s):
+            self.pack_uint(len(s))
+            self.pack_fstring(len(s), s)
+
+        pack_opaque = pack_string
+        pack_bytes = pack_string
+
+        def pack_list(self, items, pack_item):
+            for item in items:
+                self.pack_uint(1)
+                pack_item(item)
+            self.pack_uint(0)
+
+        def pack_farray(self, n, items, pack_item):
+            if len(items) != n:
+                raise ValueError("wrong array size")
+            for item in items:
+                pack_item(item)
+
+        def pack_array(self, items, pack_item):
+            self.pack_uint(len(items))
+            self.pack_farray(len(items), items, pack_item)
+
+    class Unpacker:
+        def __init__(self, data):
+            self.reset(data)
+
+        def reset(self, data):
+            self.__buf = bytes(data)
+            self.__pos = 0
+
+        def get_position(self): return self.__pos
+        def set_position(self, position): self.__pos = position
+        def get_buffer(self): return self.__buf
+
+        def done(self):
+            if self.__pos < len(self.__buf):
+                raise Error("unextracted data remains")
+
+        def _get(self, fmt, size):
+            i = self.__pos
+            self.__pos = j = i + size
+            data = self.__buf[i:j]
+            if len(data) < size:
+                raise EOFError
+            return struct.unpack(fmt, data)[0]
+
+        def unpack_uint(self): return self._get(">L", 4)
+        def unpack_int(self): return self._get(">l", 4)
+        unpack_enum = unpack_int
+        def unpack_bool(self): return bool(self.unpack_int())
+        def unpack_uhyper(self): return self._get(">Q", 8)
+        def unpack_hyper(self): return self._get(">q", 8)
+        def unpack_float(self): return self._get(">f", 4)
+        def unpack_double(self): return self._get(">d", 8)
+
+        def unpack_fstring(self, n):
+            if n < 0:
+                raise ValueError("fstring size must be nonnegative")
+            i = self.__pos
+            j = i + n + pad(n)
+            if j > len(self.__buf):
+                raise EOFError
+            self.__pos = j
+            return self.__buf[i:i + n]
+
+        unpack_fopaque = unpack_fstring
+
+        def unpack_string(self):
+            return self.unpack_fstring(self.unpack_uint())
+
+        unpack_opaque = unpack_string
+        unpack_bytes = unpack_string
+
+        def unpack_list(self, unpack_item):
+            items = []
+            while True:
+                x = self.unpack_uint()
+                if x == 0:
+                    return items
+                if x != 1:
+                    raise ConversionError(f"0 or 1 expected, got {x!r}")
+                items.append(unpack_item())
+
+        def unpack_farray(self, n, unpack_item):
+            return [unpack_item() for _ in range(n)]
+
+        def unpack_array(self, unpack_item):
+            return self.unpack_farray(self.unpack_uint(), unpack_item)
+
+    xdr.Error, xdr.ConversionError, xdr.Packer, xdr.Unpacker = Error, ConversionError, Packer, Unpacker
+    sys.modules["xdrlib"] = xdr
 
 
 # --- SMB ---------------------------------------------------------------------
@@ -127,19 +279,26 @@ class WebDav:
             if probe.status_code == 401 and "digest" in probe.headers.get("WWW-Authenticate", "").lower():
                 self.session.auth = HTTPDigestAuth(user, password)
 
-    def url(self, rel):
+    def url(self, rel, form=None):
         parts = urllib.parse.urlsplit(self.base)
         # The folder as typed ("Vidéos") or already encoded ("Vid%C3%A9os"): encoded once.
         path = urllib.parse.unquote(parts.path).rstrip("/") + ("/" + rel if rel else "")
+        if form:
+            path = unicodedata.normalize(form, path)
         return urllib.parse.urlunsplit((parts.scheme, parts.netloc, urllib.parse.quote(path, safe="/()!$&'*+,;=:@~"), "", ""))
 
     def list(self, rel=""):
-        url = self.url(rel).rstrip("/") + "/"
-        r = self.session.request("PROPFIND", url, headers={"Depth": "1"}, timeout=20)
-        if r.status_code == 401:
-            raise Failure("compte refusé (401) : --webdav-user / --webdav-password")
-        if r.status_code != 207:
-            raise Failure(f"PROPFIND {url} : HTTP {r.status_code}")
+        codes = []
+        for form in (None, "NFD"):
+            url = self.url(rel, form).rstrip("/") + "/"
+            r = self.session.request("PROPFIND", url, headers={"Depth": "1"}, timeout=20)
+            if r.status_code == 207:
+                break
+            codes.append(f"{url} → HTTP {r.status_code}")
+        else:
+            if any("HTTP 401" in c for c in codes):
+                raise Failure("compte refusé (401) : --webdav-user / --webdav-password")
+            raise Failure("PROPFIND " + " ; ".join(dict.fromkeys(codes)))
         ns = {"d": "DAV:"}
         out = []
         for i, resp in enumerate(ET.fromstring(r.content).findall("d:response", ns)):
@@ -180,11 +339,12 @@ class Nfs:
     name = "NFS"
 
     def __init__(self, host, export, uid, gid):
+        install_xdrlib()
         try:
             import pyNfsClient as nfs
             from pyNfsClient.rpc import RPC
-        except ImportError:
-            raise Failure("module manquant : pip install pyNfsClient")
+        except ImportError as e:
+            raise Failure(f"module manquant ou incompatible ({e}) : pip install pyNfsClient")
         self.nfs = nfs
         _patch_pynfsclient(nfs, RPC)
         self.auth = {"flavor": 1, "machine_name": "nyxara-bench", "uid": uid, "gid": gid, "aux_gid": []}
@@ -369,26 +529,55 @@ def explore(protocols):
             print(f"  ✗ {e}")
             if isinstance(proto, WebDav):
                 nearest_parent(proto)
+            elif isinstance(proto, Smb):
+                nearest_smb(proto)
 
 
 def nearest_parent(dav):
-    """The first parent of a WebDAV URL that answers, with what it holds: where the folder really is."""
+    """Where the WebDAV server answers: each parent of the URL, then the usual roots, with their HTTP status."""
     parts = urllib.parse.urlsplit(dav.base)
     segments = [s for s in urllib.parse.unquote(parts.path).split("/") if s]
-    for depth in range(len(segments) - 1, -1, -1):
-        path = "/" + "/".join(segments[:depth])
-        parent = WebDav.__new__(WebDav)
-        parent.__dict__.update(dav.__dict__)
-        parent.base = urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, "", "")).rstrip("/")
+    paths = ["/" + "/".join(segments[:depth]) for depth in range(len(segments) - 1, -1, -1)]
+    paths += [p for p in ("/dav", "/webdav", "/remote.php/webdav", "/DATA", "/media") if p not in paths]
+    print("  Ce que répond le serveur :")
+    for path in paths:
+        url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, urllib.parse.quote(path.rstrip("/") + "/", safe="/"), "", ""))
         try:
-            entries = parent.list("")
+            r = dav.session.request("PROPFIND", url, headers={"Depth": "1"}, timeout=10)
+        except Exception as e:
+            print(f"    {path:24} ✗ {e}")
+            continue
+        print(f"    {path:24} HTTP {r.status_code}" + ("  ← liste ci-dessous" if r.status_code == 207 else ""))
+        if r.status_code == 207:
+            parent = WebDav.__new__(WebDav)
+            parent.__dict__.update(dav.__dict__)
+            parent.base = url.rstrip("/")
+            for name, is_dir, _ in parent.list("")[:25]:
+                print(f"      {'[dossier] ' if is_dir else ''}{name}")
+            return
+    try:
+        r = dav.session.get(urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/", "", "")), timeout=10)
+        print(f"  GET / : HTTP {r.status_code}, serveur « {r.headers.get('Server', '?')} »")
+    except Exception as e:
+        print(f"  GET / : ✗ {e}")
+
+
+def nearest_smb(smb):
+    """The deepest part of the SMB path that exists, and what it holds."""
+    base = smb.base
+    while base.count("\\") > 3:
+        base = base.rsplit("\\", 1)[0]
+        try:
+            entries = list(smb.smbclient.scandir(base))
         except Exception:
             continue
-        print(f"  Le dossier parent qui répond : {path}")
-        for name, is_dir, _ in entries[:25]:
-            print(f"    {'[dossier] ' if is_dir else ''}{name}")
+        print(f"  Existe : {base}")
+        for e in entries[:25]:
+            print(f"    {'[dossier] ' if e.is_dir() else ''}{e.name}")
         return
-    print("  Aucun dossier parent ne répond : vérifie l'adresse et le port.")
+    share = smb.base.split("\\")[3] if smb.base.count("\\") >= 3 else "?"
+    print(f"  Le partage « {share} » n'existe pas : --smb commence par le nom du partage SMB "
+          "(celui affiché en haut de l'onglet Dossiers de Nyxara), pas par le chemin Linux /media/….")
 
 
 def main():
