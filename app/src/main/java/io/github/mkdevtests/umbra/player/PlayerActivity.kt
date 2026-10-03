@@ -154,7 +154,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun start(item: PlayItem) {
-        item.file?.let { (application as NyxaraApp).streamServer.resetStats(it) }
+        (item.stream ?: item.file)?.let { (application as NyxaraApp).streamServer.resetStats(it) }
         player.play(toMpvPath(item.url), item.subtitles, item.start)
     }
 
@@ -169,8 +169,9 @@ class PlayerActivity : ComponentActivity() {
         if (figures.openMs == null) return // never played: nothing to measure
         measured = index
         val app = application as NyxaraApp
-        val stats = item.file?.let { app.streamServer.statsFor(it) }
-        val source = item.file?.let { app.nas?.sourceOf(it) }
+        val read = item.stream ?: item.file
+        val stats = read?.let { app.streamServer.statsFor(it) }
+        val source = read?.let { app.nas?.sourceOf(it) }
         app.measures.add(
             PlaybackMeasure(
                 at = System.currentTimeMillis(),
@@ -178,7 +179,7 @@ class PlayerActivity : ComponentActivity() {
                 source = source?.label ?: "Appareil",
                 protocol = source?.protocol?.label ?: "Fichier",
                 network = networkLabel(),
-                route = item.file?.let { app.nas?.hostOf(it) }?.let(::routeOf) ?: "Local",
+                route = read?.let { app.nas?.hostOf(it) }?.let(::routeOf) ?: "Local",
                 openMs = figures.openMs,
                 loadedMs = figures.loadedMs,
                 seeksMs = figures.seeksMs,

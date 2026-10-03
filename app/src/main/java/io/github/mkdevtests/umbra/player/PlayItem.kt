@@ -18,6 +18,8 @@ data class PlayItem(
     val start: Double = 0.0,
     /** What it is on Trakt; null when it isn't matched surely enough to be scrobbled. */
     val trakt: TraktTarget? = null,
+    /** The NAS file actually read when it isn't [file]: another version of the title, whose progress stays [file]'s. */
+    val stream: String? = null,
 )
 
 /** One audio or subtitle track of the playing file, as the side panel shows it. */

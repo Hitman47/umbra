@@ -33,6 +33,7 @@ import io.github.mkdevtests.umbra.ui.library.LibraryViewModel
 import io.github.mkdevtests.umbra.ui.library.MatchScreen
 import io.github.mkdevtests.umbra.ui.library.MovieDetailScreen
 import io.github.mkdevtests.umbra.ui.library.ShowDetailScreen
+import io.github.mkdevtests.umbra.ui.settings.FoldersScreen
 import io.github.mkdevtests.umbra.ui.settings.MeasuresScreen
 import io.github.mkdevtests.umbra.ui.settings.SettingsScreen
 import io.github.mkdevtests.umbra.ui.theme.NyxaraTheme
@@ -64,6 +65,7 @@ private sealed interface Detail {
     data class FixMatch(val key: String) : Detail
     data object Settings : Detail
     data object Measures : Detail
+    data class Folders(val sourceId: String) : Detail
 }
 
 /** NAS setup until a source works, then the library. */
@@ -149,14 +151,19 @@ private fun NyxaraRoot(
                     libraryViewModel.onSourcesChanged()
                     if (!browserViewModel.hasSource) editingSource = ""
                 },
-                onIncludeFolder = { source, folder ->
-                    browserViewModel.include(source, folder)
-                    libraryViewModel.onSourcesChanged()
-                },
+                onEditFolders = { stack.add(Detail.Folders(it.id)) },
                 onOpenStats = { stack.add(Detail.Measures) },
                 onBack = back,
             )
             Detail.Measures -> MeasuresScreen(app.measures, back)
+            is Detail.Folders -> sources.firstOrNull { it.id == detail.sourceId }?.let { source ->
+                FoldersScreen(
+                    source, browserViewModel,
+                    onExcluded = libraryViewModel::onFolderExcluded,
+                    onIncluded = libraryViewModel::onSourcesChanged,
+                    onBack = back,
+                )
+            } ?: back()
         }
     }
 }

@@ -63,7 +63,7 @@ fun SettingsScreen(
     onAddSource: () -> Unit,
     onEditSource: (NasSource) -> Unit,
     onRemoveSource: (NasSource) -> Unit,
-    onIncludeFolder: (NasSource, String) -> Unit,
+    onEditFolders: (NasSource) -> Unit,
     onOpenStats: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -123,10 +123,11 @@ fun SettingsScreen(
                         TextButton(onClick = { removing = source }) { Text("Retirer") }
                         TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
                     }
-                    source.excluded.forEach { folder ->
-                        Item("Exclu : ${folder.replace("\\", " › ")}", "Ni analysé, ni affiché, ni lisible.") {
-                            TextButton(onClick = { onIncludeFolder(source, folder) }) { Text("Rétablir") }
-                        }
+                    Item(
+                        "Dossiers suivis",
+                        if (source.excluded.isEmpty()) "Tous les dossiers" else "${source.excluded.size} dossier${if (source.excluded.size > 1) "s" else ""} exclu${if (source.excluded.size > 1) "s" else ""}",
+                    ) {
+                        TextButton(onClick = { onEditFolders(source) }) { Text("Choisir ›") }
                     }
                 }
                 Item("Ajouter un NAS", "Les vues Films et Séries regroupent toutes les sources.") {

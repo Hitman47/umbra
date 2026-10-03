@@ -26,7 +26,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.collectAsState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -62,6 +64,10 @@ import io.github.mkdevtests.umbra.library.Related
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Show
 import io.github.mkdevtests.umbra.library.Tmdb
+import io.github.mkdevtests.umbra.library.Version
+import io.github.mkdevtests.umbra.library.describeVersion
+import io.github.mkdevtests.umbra.library.versions
+import io.github.mkdevtests.umbra.library.versionsOf
 import io.github.mkdevtests.umbra.ui.theme.GlassButton
 import io.github.mkdevtests.umbra.ui.theme.GlassIconButton
 import io.github.mkdevtests.umbra.ui.theme.GlowButton
@@ -81,6 +87,8 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
     val context = LocalContext.current
     var extras by remember(movie.file) { mutableStateOf<Extras?>(null) }
     LaunchedEffect(movie.file) { extras = viewModel.extras(movie) }
+    val versions = remember(movie) { movie.versions }
+    var version by remember(movie) { mutableStateOf(viewModel.preferredVersion(movie.file, versions)) }
     val history by viewModel.history.collectAsState()
     val progress = history[movie.file]
     val hidden by viewModel.hidden.collectAsState()
@@ -99,12 +107,15 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         GlowButton(
                             "Reprendre · il reste ${formatRuntime((progress.remaining / 60).toInt().coerceAtLeast(1))}",
-                            onClick = { context.startActivity(viewModel.playIntent(movie)) },
+                            onClick = { context.startActivity(viewModel.playIntent(movie, version = version)) },
                         )
-                        GlassButton("Depuis le début", onClick = { context.startActivity(viewModel.playIntent(movie, fromStart = true)) })
+                        GlassButton("Depuis le début", onClick = { context.startActivity(viewModel.playIntent(movie, fromStart = true, version = version)) })
                     }
                 } else {
-                    GlowButton(if (progress?.watched == true) "Revoir" else "Lecture", onClick = { context.startActivity(viewModel.playIntent(movie)) })
+                    GlowButton(
+                        if (progress?.watched == true) "Revoir" else "Lecture",
+                        onClick = { context.startActivity(viewModel.playIntent(movie, version = version)) },
+                    )
                 }
                 HideButton(isHidden) { viewModel.setHidden(movie, !isHidden) }
             }
@@ -116,9 +127,17 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
                 if (extras == null) Credits("Réalisation", movie.directors, movie.cast)
             }
         }
+        if (versions.size > 1) {
+            item {
+                VersionList(versions, version, viewModel::sourceLabel) {
+                    version = it
+                    viewModel.chooseVersion(movie.file, it)
+                }
+            }
+        }
         extras?.let { item { ExtrasRows(it, links) } }
         item {
-            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) { FileInfo(movie.file, movie.fileSize) }
+            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) { FileInfo(version.file, version.size) }
         }
     }
 }
@@ -128,7 +147,14 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
     val context = LocalContext.current
     var extras by remember(show.key) { mutableStateOf<Extras?>(null) }
     LaunchedEffect(show.key) { extras = viewModel.extras(show) }
-    var selected by rememberSaveable(show.key) { mutableIntStateOf(show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1) }
+    // The season under way first, else the first regular one.
+    var selected by rememberSaveable(show.key) {
+        mutableIntStateOf(
+            nextUp(show, viewModel.history.value)?.episode?.season
+                ?: show.seasons.firstOrNull { it.number > 0 }?.number ?: show.seasons.firstOrNull()?.number ?: 1,
+        )
+    }
+    var picking by remember(show.key) { mutableStateOf<Episode?>(null) }
     val season = show.seasons.firstOrNull { it.number == selected }
     val history by viewModel.history.collectAsState()
     val hidden by viewModel.hidden.collectAsState()
@@ -179,9 +205,74 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
             }
         }
         items(season?.episodes.orEmpty(), key = { "${it.season}-${it.number}" }) { episode ->
-            EpisodeRow(episode, history[episode.file]) { context.startActivity(viewModel.playIntent(show, episode)) }
+            val versions = show.versionsOf(episode)
+            EpisodeRow(episode, history[episode.file], versions.size) {
+                // Several files of this episode: which one, first.
+                if (versions.size > 1) picking = episode else context.startActivity(viewModel.playIntent(show, episode))
+            }
         }
         extras?.let { item { Column(modifier = Modifier.padding(bottom = 32.dp)) { ExtrasRows(it, links) } } }
+    }
+
+    picking?.let { episode ->
+        val versions = show.versionsOf(episode)
+        AlertDialog(
+            onDismissRequest = { picking = null },
+            title = { Text("S%02dE%02d · quelle version ?".format(episode.season, episode.number)) },
+            text = {
+                VersionList(versions, viewModel.preferredVersion(episode.file, versions), viewModel::sourceLabel, padding = 0.dp) { chosen ->
+                    picking = null
+                    viewModel.chooseVersion(episode.file, chosen)
+                    context.startActivity(viewModel.playIntent(show, episode, version = chosen))
+                }
+            },
+            confirmButton = { TextButton(onClick = { picking = null }) { Text("Annuler") } },
+        )
+    }
+}
+
+/** The files of a title, with what their names say of them; the chosen one highlighted. */
+@Composable
+private fun VersionList(
+    versions: List<Version>,
+    selected: Version,
+    sourceLabel: (String) -> String?,
+    padding: androidx.compose.ui.unit.Dp = 24.dp,
+    onSelect: (Version) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = padding, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (padding > 0.dp) Text("Versions", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
+        versions.forEach { version ->
+            val info = describeVersion(version.file, version.size)
+            val chosen = version == selected
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (chosen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .clickable { onSelect(version) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                RadioButton(selected = chosen, onClick = null)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(info.quality, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        listOfNotNull(info.details, sourceLabel(version.file)).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        version.file.substringAfterLast('\\'),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -368,7 +459,7 @@ private fun TitleBlock(
 }
 
 @Composable
-private fun EpisodeRow(episode: Episode, progress: Progress?, onClick: () -> Unit) {
+private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -407,7 +498,7 @@ private fun EpisodeRow(episode: Episode, progress: Progress?, onClick: () -> Uni
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            val meta = listOfNotNull(formatRuntime(episode.runtime), episode.airDate?.let(::formatDate))
+            val meta = listOfNotNull(formatRuntime(episode.runtime), episode.airDate?.let(::formatDate), "$versions versions".takeIf { versions > 1 })
             if (meta.isNotEmpty()) {
                 Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

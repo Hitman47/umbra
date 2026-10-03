@@ -173,13 +173,24 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Leaves out the folder at [path]: no longer scanned, browsed nor played. Shows its parent. */
+    /** Leaves out the folder at [path]: no longer scanned, browsed nor played. Shows its parent when it was open. */
     fun exclude(path: String) {
         val source = nyxara.nas?.sourceOf(path) ?: return
-        val updated = source.copy(excluded = (source.excluded + path).distinct())
+        // Its excluded subfolders go: the folder covers them now.
+        val updated = source.copy(excluded = source.excluded.filterNot { it.startsWith("$path\\", ignoreCase = true) } + path)
         nyxara.saveSource(updated, NasClient.of(updated))
-        open(path.substringBeforeLast('\\'))
+        val shown = _state.value.path
+        if (shown == path || shown.startsWith("$path\\")) open(path.substringBeforeLast('\\')) else refresh()
     }
+
+    /** The folders below [path], excluded ones included: the "Dossiers suivis" tree. */
+    suspend fun folders(path: String): List<NasEntry> = withContext(Dispatchers.IO) {
+        runCatching { nyxara.nas?.list(path, withExcluded = true).orEmpty() }.getOrDefault(emptyList())
+            .filter { it.isDirectory }
+            .sortedWith { a, b -> naturalCompare(a.name, b.name) }
+    }
+
+    fun rootsOf(source: NasSource): List<String> = nyxara.nas?.rootsOf(source).orEmpty()
 
     /** Takes [folder] back into [source]. */
     fun include(source: NasSource, folder: String) {

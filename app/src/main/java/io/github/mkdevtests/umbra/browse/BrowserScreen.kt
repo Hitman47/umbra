@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.library.Episode
+import io.github.mkdevtests.umbra.nas.NasEntry
 import io.github.mkdevtests.umbra.library.Library
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Show
@@ -75,8 +76,30 @@ fun BrowserScreen(
     val context = LocalContext.current
     val index = remember(library) { PathIndex(library) }
     var excluding by remember { mutableStateOf<String?>(null) }
+    // The folder long-pressed: open it, or leave it out of the library.
+    var menu by remember { mutableStateOf<NasEntry?>(null) }
 
     BackHandler(enabled = state.path.isNotEmpty()) { viewModel.up() }
+
+    menu?.let { entry ->
+        // A share itself is followed or not from its source; only the folders inside one can be left out here.
+        val canExclude = '\\' in entry.path
+        AlertDialog(
+            onDismissRequest = { menu = null },
+            title = { Text(entry.name) },
+            text = {
+                Column {
+                    TextButton(onClick = { menu = null; viewModel.open(entry.path) }) { Text("Ouvrir le dossier") }
+                    if (canExclude) {
+                        TextButton(onClick = { menu = null; excluding = entry.path }) {
+                            Text("Exclure de la bibliothèque", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { menu = null }) { Text("Fermer") } },
+        )
+    }
 
     excluding?.let { path ->
         AlertDialog(
@@ -149,14 +172,18 @@ fun BrowserScreen(
                         }
                         val show = if (entry.isDirectory) index.showByFolder[entry.path] else null
                         val movie = if (entry.isDirectory) index.movieByFolder[entry.path] else index.movieByFile[entry.path]
+                        val longPress = { menu = entry }
                         when {
-                            show != null -> Tile(show.title, show.year?.toString(), onClick = { onOpenShow(show.key) }, onLongClick = open) {
+                            show != null -> Tile(show.title, show.year?.toString(), onClick = { onOpenShow(show.key) }, onLongClick = longPress) {
                                 Poster(show.poster, show.title, modifier = Modifier.fillMaxWidth())
+                            }
+                            movie != null && entry.isDirectory -> Tile(movie.title, movie.year?.toString(), onClick = { onOpenMovie(movie.file) }, onLongClick = longPress) {
+                                Poster(movie.poster, movie.title, modifier = Modifier.fillMaxWidth())
                             }
                             movie != null -> Tile(movie.title, movie.year?.toString(), onClick = { onOpenMovie(movie.file) }, onLongClick = open) {
                                 Poster(movie.poster, movie.title, modifier = Modifier.fillMaxWidth())
                             }
-                            entry.isDirectory -> Tile(entry.name, null, onClick = open) { GlyphCard { folder(it) } }
+                            entry.isDirectory -> Tile(entry.name, null, onClick = open, onLongClick = longPress) { GlyphCard { folder(it) } }
                             else -> {
                                 val episode = index.episodeByFile[entry.path]
                                 val code = episode?.let { "S%02dE%02d".format(it.season, it.number) }

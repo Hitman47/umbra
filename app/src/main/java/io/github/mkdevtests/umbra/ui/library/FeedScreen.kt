@@ -206,7 +206,13 @@ fun FeedScreen(
         if (resume.isNotEmpty()) {
             item {
                 Shelf("Lecture en cours") {
-                    items(resume, key = { it.file }) { ResumeCard(it, wide) { play(it) } }
+                    items(resume, key = { it.file }) { item ->
+                        ResumeCard(
+                            item, wide,
+                            onOpen = { item.movie?.let { onOpenMovie(it.file) } ?: onOpenShow(item.show!!.key) },
+                            onPlay = { play(item) },
+                        )
+                    }
                 }
             }
         }
@@ -332,10 +338,10 @@ private fun HeroPage(item: Featured, wide: Boolean) {
     }
 }
 
-/** A film or episode under way: its picture, how far it went, what's left. */
+/** A film or episode under way: its picture, how far it went, what's left. A touch opens its page, ▶ plays it. */
 @Composable
-private fun ResumeCard(item: Resume, wide: Boolean, onClick: () -> Unit) {
-    Column(modifier = Modifier.width(if (wide) 300.dp else 260.dp).clickable(onClick = onClick), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: () -> Unit) {
+    Column(modifier = Modifier.width(if (wide) 300.dp else 260.dp).clickable(onClick = onOpen), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -354,9 +360,14 @@ private fun ResumeCard(item: Resume, wide: Boolean, onClick: () -> Unit) {
             }
             Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.8f))))
             Box(
-                modifier = Modifier.align(Alignment.Center).size(46.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(Night.Glow)
+                    .clickable(onClick = onPlay),
                 contentAlignment = Alignment.Center,
-            ) { Icon(NyxaraIcons.Play, contentDescription = null, tint = Color.White) }
+            ) { Icon(NyxaraIcons.Play, contentDescription = "Reprendre", tint = Color.White) }
             Text(
                 item.movie?.title ?: item.show!!.title,
                 style = MaterialTheme.typography.titleSmall,

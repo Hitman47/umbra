@@ -32,17 +32,18 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
     /** [path] is in a folder the user left out. */
     fun isExcluded(path: String) = sourceOf(path)?.isExcluded(path) == true
 
-    fun list(path: String): List<NasEntry> {
+    /** The entries at [path]; excluded folders left out, unless [withExcluded] (to choose what to follow). */
+    fun list(path: String, withExcluded: Boolean = false): List<NasEntry> {
         if (path.isEmpty()) {
             return sources.flatMap(::rootsOf).sortedWith(::naturalCompare).map { NasEntry(it, it, isDirectory = true, size = 0) }
         }
         val root = path.substringBefore('\\')
         val (nas, share) = route(root)
-        if (nas.source.isExcluded(path)) return emptyList()
+        if (!withExcluded && nas.source.isExcluded(path)) return emptyList()
         val prefix = "$share\\"
         return nas.list(share + path.substring(root.length))
             .map { entry -> entry.copy(path = root + "\\" + entry.path.removePrefix(prefix)) }
-            .filterNot { nas.source.isExcluded(it.path) }
+            .filterNot { !withExcluded && nas.source.isExcluded(it.path) }
     }
 
     /** Opens [path] read-only; the caller closes the returned file. */

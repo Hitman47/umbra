@@ -332,7 +332,9 @@ class LibraryScanner(
     // --- Shows ---
 
     private suspend fun scanShows(episodes: List<EpisodeFile>, previous: List<Show>, counts: Map<String, Int>): List<Show> {
-        val knownShowOf = previous.flatMap { show -> (show.seasons.flatMap { it.episodes }.map { it.file } + show.duplicates).map { it to show } }.toMap()
+        val knownShowOf = previous.flatMap { show ->
+            (show.seasons.flatMap { it.episodes }.map { it.file } + show.duplicates.map(EpisodeCopy::pathOf)).map { it to show }
+        }.toMap()
         val knownEpisodes = previous.flatMap { show -> show.seasons.flatMap { it.episodes }.map { it.copy(showKey = show.key) } }.associateBy { it.file }
         val previousByKey = previous.associateBy { it.key }
 
@@ -390,7 +392,9 @@ class LibraryScanner(
             show.copy(
                 seasons = seasons.sortedBy { it.number },
                 folders = showFolders(all, counts),
-                duplicates = all.map { it.video.entry.path }.filterNot { it in shown },
+                // The other files of an episode, offered as versions on its page.
+                duplicates = files.filter { it.video.entry.path !in shown && it.episode != null }
+                    .map { EpisodeCopy(it.season, it.episode!!, it.video.entry.size, it.video.entry.path).encode() },
                 groups = all.map { it.group }.distinct().sorted(),
             )
         }
