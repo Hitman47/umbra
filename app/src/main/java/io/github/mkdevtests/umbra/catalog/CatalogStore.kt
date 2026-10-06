@@ -53,11 +53,6 @@ class CatalogStore(
     /** The last sync's data, to build the index again when the folders below change. */
     @Volatile private var data: CatalogData? = null
 
-    private val _apart = MutableStateFlow(readFolders(APART))
-
-    /** Folders (below the catalogue's root) shown as cards of their own, like the groups. */
-    val apart: StateFlow<List<String>> = _apart.asStateFlow()
-
     private val _ignored = MutableStateFlow(readFolders(IGNORED))
 
     /** Folders left out of Perso altogether. */
@@ -78,18 +73,14 @@ class CatalogStore(
 
     private fun use(data: CatalogData) {
         this.data = data
-        _index.value = CatalogIndex(data, _apart.value, _ignored.value)
+        _index.value = CatalogIndex(data, _ignored.value)
     }
 
     private fun readFolders(key: String) = prefs.getString(key, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
 
-    /** The folders apart and the folders left out (see [apart], [ignored]). */
-    fun setFolders(apart: List<String>, ignored: List<String>) {
-        prefs.edit {
-            putString(APART, apart.joinToString("\n"))
-            putString(IGNORED, ignored.joinToString("\n"))
-        }
-        _apart.value = apart
+    /** The folders left out (see [ignored]). */
+    fun setIgnored(ignored: List<String>) {
+        prefs.edit { putString(IGNORED, ignored.joinToString("\n")) }
         _ignored.value = ignored
         data?.let(::use)
     }
@@ -220,7 +211,6 @@ class CatalogStore(
         const val PASSWORD = "password"
         const val MODE = "mode"
         const val LAST = "last"
-        const val APART = "apart"
         const val IGNORED = "ignored"
     }
 }

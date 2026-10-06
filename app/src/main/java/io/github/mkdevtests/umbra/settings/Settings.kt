@@ -58,6 +58,10 @@ data class Settings(
     val cardScale: Float = 1f,
     /** The sound sent as it is (Dolby, DTS, Atmos) to a sound bar or an amplifier that takes it; else decoded. */
     val audioPassthrough: Boolean = true,
+    /** The whole interface's size; 0: automatic (smaller on a TV, whose screen is drawn as 960 × 540). */
+    val uiScale: Float = 0f,
+    /** On a TV: a thicker, brighter frame around what the remote is on. */
+    val strongFocus: Boolean = true,
 )
 
 
@@ -97,6 +101,8 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_HIDE_UNAVAILABLE, updated.hideUnavailable)
             putFloat(KEY_CARD_SCALE, updated.cardScale)
             putBoolean(KEY_PASSTHROUGH, updated.audioPassthrough)
+            putFloat(KEY_UI_SCALE, updated.uiScale)
+            putBoolean(KEY_STRONG_FOCUS, updated.strongFocus)
         }
     }
 
@@ -132,6 +138,8 @@ class SettingsStore(context: Context) {
             hideUnavailable = prefs.getBoolean(KEY_HIDE_UNAVAILABLE, defaults.hideUnavailable),
             cardScale = prefs.getFloat(KEY_CARD_SCALE, defaults.cardScale).coerceIn(0.8f, 1.3f),
             audioPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, defaults.audioPassthrough),
+            uiScale = prefs.getFloat(KEY_UI_SCALE, defaults.uiScale),
+            strongFocus = prefs.getBoolean(KEY_STRONG_FOCUS, defaults.strongFocus),
         )
     }
 
@@ -155,6 +163,8 @@ class SettingsStore(context: Context) {
         const val KEY_HIDE_UNAVAILABLE = "hide_unavailable"
         const val KEY_CARD_SCALE = "card_scale"
         const val KEY_PASSTHROUGH = "audio_passthrough"
+        const val KEY_UI_SCALE = "ui_scale"
+        const val KEY_STRONG_FOCUS = "strong_focus"
         const val NONE = "none"
     }
 }

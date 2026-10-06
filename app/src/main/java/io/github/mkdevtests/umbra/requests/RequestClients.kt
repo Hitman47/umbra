@@ -81,7 +81,7 @@ class RequestClients(http: OkHttpClient) {
     fun checkProwlarr(settings: RequestSettings) {
         val url = base(settings.prowlarrUrl).newBuilder().addPathSegments("api/v1/system/status").build()
         http.newCall(Request.Builder().url(url).get().header("X-Api-Key", settings.prowlarrKey).build()).execute().use { response ->
-            if (!response.isSuccessful) throw IOException(if (response.code == 401) "Clé API refusée" else "Erreur ${response.code}")
+            if (!response.isSuccessful) throw IOException((if (response.code == 401) "Clé API refusée" else "Erreur ${response.code}") + " par $url")
         }
     }
 

@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.theme
 
+import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.node.invalidateDraw
@@ -194,7 +195,8 @@ private data class FocusRingElement(val shape: androidx.compose.ui.graphics.Shap
 }
 
 private class FocusRingNode(shape: androidx.compose.ui.graphics.Shape) :
-    Modifier.Node(), androidx.compose.ui.focus.FocusEventModifierNode, androidx.compose.ui.node.DrawModifierNode {
+    Modifier.Node(), androidx.compose.ui.focus.FocusEventModifierNode, androidx.compose.ui.node.DrawModifierNode,
+    androidx.compose.ui.node.CompositionLocalConsumerModifierNode {
     var shape = shape
         set(value) {
             field = value
@@ -211,6 +213,16 @@ private class FocusRingNode(shape: androidx.compose.ui.graphics.Shape) :
     override fun androidx.compose.ui.graphics.drawscope.ContentDrawScope.draw() {
         drawContent()
         if (!focused) return
+        val outline = shape.createOutline(size, layoutDirection, this)
+        if (currentValueOf(LocalStrongFocus)) {
+            // A TV seen from the sofa: lit up, a violet halo outside, a white frame inside.
+            drawOutline(outline, Color.White.copy(alpha = 0.12f))
+            val halo = 6.dp.toPx()
+            drawOutline(outline, Night.Violet.copy(alpha = 0.55f), style = androidx.compose.ui.graphics.drawscope.Stroke(halo * 2))
+            val width = 3.5.dp.toPx()
+            inset(width / 2) { drawOutline(shape.createOutline(size, layoutDirection, this), Color.White, style = androidx.compose.ui.graphics.drawscope.Stroke(width)) }
+            return
+        }
         val width = 3.dp.toPx()
         // Inside the edge, as a border would be.
         inset(width / 2) {

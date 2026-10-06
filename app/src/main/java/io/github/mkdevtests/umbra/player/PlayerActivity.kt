@@ -77,6 +77,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -299,7 +300,7 @@ class PlayerActivity : ComponentActivity() {
             if (request.profile != null) {
                 val index = app.catalog.index.value
                 val keys = request.selection ?: index?.let { catalog ->
-                    val videos = if (request.profile.isEmpty()) catalog.ungrouped else catalog.videosOf(request.profile)
+                    val videos = catalog.videosFor(request.profile)
                     videos.mapNotNull(catalog::nasPath)
                 }.orEmpty()
                 if (keys.isEmpty()) preparing = "Aucune vidéo." else beginPerso(request, keys, complete = true)
@@ -822,8 +823,13 @@ private fun PlayerScreen(
     // Each key pressed: the controls' hiding starts again, they don't vanish under the remote.
     var touched by remember { mutableIntStateOf(0) }
     val pauseFocus = remember { FocusRequester() }
-    // Presses of an arrow held on the progress bar, since it went down.
+    // Presses of an arrow held, since it went down: on the progress bar, and with the controls hidden.
     val held = remember { intArrayOf(0) }
+    val heldHidden = remember { intArrayOf(0) }
+    // With a remote, as Infuse: the progress bar has the focus; ◀ ▶ move a mark, OK goes there.
+    val barFocus = remember { FocusRequester() }
+    var scrub by remember { mutableStateOf<Double?>(null) }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var panelOpen by remember { mutableStateOf(false) }
     var queueOpen by remember { mutableStateOf(false) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -924,9 +930,9 @@ private fun PlayerScreen(
     LaunchedEffect(controlsVisible, panelOpen, queueOpen) { if (!controlsVisible && !panelOpen && !queueOpen) runCatching { keys.requestFocus() } }
     LaunchedEffect(controlsVisible) {
         if (controlsVisible && keyMode) {
-            // Once the controls are on screen: the first press then lands on Pause, not anywhere.
+            // Once the controls are on screen: the remote starts on the progress bar, as in Infuse.
             delay(80)
-            runCatching { pauseFocus.requestFocus() }
+            runCatching { barFocus.requestFocus() }
         }
     }
     Box(
@@ -935,6 +941,12 @@ private fun PlayerScreen(
             .background(Color.Black)
             .focusRequester(keys)
             .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp && (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)) {
+                    // An arrow held with the controls hidden: one jump to where it got, on release.
+                    heldHidden[0] = 0
+                    if (!controlsVisible) swipeTarget?.let { target -> player.seekTo(target); swipeTarget = null }
+                    return@onPreviewKeyEvent false
+                }
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 keyMode = true
                 touched++
@@ -944,8 +956,19 @@ private fun PlayerScreen(
                     Key.MediaPause -> { if (!player.paused.value) player.togglePause(); true }
                     Key.MediaFastForward -> { jump(REMOTE_LONG_JUMP); true }
                     Key.MediaRewind -> { jump(-REMOTE_LONG_JUMP); true }
-                    Key.DirectionLeft -> if (!controlsVisible && !panelOpen && !queueOpen) { jump(-SHORT_JUMP); true } else false
-                    Key.DirectionRight -> if (!controlsVisible && !panelOpen && !queueOpen) { jump(SHORT_JUMP); true } else false
+                    Key.DirectionLeft, Key.DirectionRight -> if (!controlsVisible && !panelOpen && !queueOpen) {
+                        val direction = if (event.key == Key.DirectionLeft) -1 else 1
+                        val repeat = heldHidden[0]++
+                        if (repeat == 0) {
+                            // A press: 10 s at once.
+                            jump(direction * SHORT_JUMP)
+                        } else if (repeat % 2 == 0) {
+                            // Held: a mark runs ahead, faster and faster; the video jumps there on release.
+                            val end = player.duration.value.takeIf { it > 0 } ?: Double.MAX_VALUE
+                            swipeTarget = ((swipeTarget ?: positionState.value) + direction * scrubStep(repeat)).coerceIn(0.0, end)
+                        }
+                        true
+                    } else false
                     Key.DirectionCenter, Key.Enter -> if (!controlsVisible && !panelOpen && !queueOpen) { player.togglePause(); controlsVisible = true; true } else false
                     Key.DirectionUp, Key.DirectionDown, Key.Menu -> if (!controlsVisible && !panelOpen && !queueOpen) { controlsVisible = true; true } else false
                     else -> false
@@ -1128,21 +1151,45 @@ private fun PlayerScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(horizontal = 12.dp)
-                                // With the remote: ±10 s a press, further when held, mpv asked
-                                // once in a while rather than at each tiny step of the slider.
+                                // With the remote, as Infuse: ◀ ▶ move a mark (further when held), OK plays from
+                                // there, Back forgets it; ▲ ▼ leave the bar, it never holds the remote.
+                                .focusRequester(barFocus)
+                                .onFocusChanged { if (!it.isFocused && scrub != null) { scrub = null; dragPosition = null } }
                                 .onPreviewKeyEvent { event ->
-                                    val direction = when (event.key) {
-                                        Key.DirectionLeft -> -1
-                                        Key.DirectionRight -> 1
-                                        else -> return@onPreviewKeyEvent false
+                                    val down = event.type == KeyEventType.KeyDown
+                                    when (event.key) {
+                                        Key.DirectionLeft, Key.DirectionRight -> {
+                                            if (down) {
+                                                val direction = if (event.key == Key.DirectionLeft) -1 else 1
+                                                val repeat = held[0]++
+                                                if (repeat == 0 || repeat % 2 == 0) {
+                                                    val target = ((scrub ?: positionState.value) + direction * (if (repeat == 0) SHORT_JUMP.toDouble() else scrubStep(repeat)))
+                                                        .coerceIn(0.0, duration.coerceAtLeast(0.0))
+                                                    scrub = target
+                                                    dragPosition = target.toFloat()
+                                                }
+                                            } else {
+                                                held[0] = 0
+                                            }
+                                            true
+                                        }
+                                        Key.DirectionCenter, Key.Enter -> {
+                                            if (down) {
+                                                val target = scrub
+                                                if (target != null) player.seekTo(target) else player.togglePause()
+                                                scrub = null
+                                                dragPosition = null
+                                            }
+                                            true
+                                        }
+                                        Key.Back -> if (scrub != null) {
+                                            if (down) { scrub = null; dragPosition = null }
+                                            true
+                                        } else false
+                                        Key.DirectionUp -> { if (down) focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Up); true }
+                                        Key.DirectionDown -> { if (down) focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down); true }
+                                        else -> false
                                     }
-                                    if (event.type == KeyEventType.KeyDown) {
-                                        val repeat = held[0]++
-                                        if (repeat % 3 == 0) jump(direction * if (repeat > 15) 60 else if (repeat > 3) 30 else SHORT_JUMP)
-                                    } else {
-                                        held[0] = 0
-                                    }
-                                    true
                                 }
                                 .focusRing(RoundedCornerShape(50)),
                         )
@@ -1307,6 +1354,13 @@ private fun Pill(text: String, active: Boolean, modifier: Modifier = Modifier, o
     ) {
         Text(text, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
     }
+}
+
+/** How far a held arrow moves the mark at each repeat: seconds, then half-minutes, then minutes. */
+private fun scrubStep(repeat: Int): Double = when {
+    repeat < 10 -> 10.0
+    repeat < 30 -> 30.0
+    else -> 60.0
 }
 
 /** Side panel: audio and subtitle tracks, their delays, subtitles found online. */

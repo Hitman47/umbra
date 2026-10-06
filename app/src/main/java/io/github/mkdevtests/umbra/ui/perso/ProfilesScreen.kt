@@ -2,7 +2,6 @@ package io.github.mkdevtests.umbra.ui.perso
 
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import io.github.mkdevtests.umbra.nas.within
-import io.github.mkdevtests.umbra.perso.videosUnder
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -81,9 +80,6 @@ import java.util.Locale
 /** The id of the "Groupes" card: the videos of no profile. */
 private const val GROUPS = ""
 
-/** Before a folder apart (Réglages › Perso): the id of its card. */
-private const val APART = "apart:"
-
 private enum class ProfileSort(val label: String) { Name("Nom"), Count("Vidéos"), Size("Taille") }
 
 /** The external catalogue's profiles, from the copy on the device; a profile opens its page. */
@@ -153,10 +149,10 @@ private fun ProfileGrid(app: NyxaraApp, catalog: CatalogIndex, onOpen: (String) 
         val gridState = rememberLazyGridState()
         val scope = rememberCoroutineScope()
         val unfiltered = query.isBlank() && category == null && !followed
-        val groups = catalog.ungrouped.isNotEmpty() && unfiltered
-        // The folders apart: cards of their own after the groups, before the profiles.
-        val apart = if (unfiltered) catalog.apart else emptyList()
-        val before = (if (groups) 1 else 0) + apart.size
+        // The videos of no profile: a card per folder, then the loose ones, before the profiles.
+        val folders = if (unfiltered) catalog.folders else emptyList()
+        val groups = catalog.loose.isNotEmpty() && unfiltered
+        val before = (if (groups) 1 else 0) + folders.size
         val letters = remember(shown, sort) { if (sort == ProfileSort.Name && shown.size >= INDEX_BAR_MIN_ITEMS) letterPositions(shown.map { it.name }) else null }
         Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
@@ -167,17 +163,13 @@ private fun ProfileGrid(app: NyxaraApp, catalog: CatalogIndex, onOpen: (String) 
             verticalArrangement = Arrangement.spacedBy(18.dp * scale),
             modifier = Modifier.fillMaxSize(),
         ) {
+            items(folders, key = { CatalogIndex.FOLDER + it.path }) { folder ->
+                ProfileCard(null, folder.name, null, "${folder.videos.size} vidéos · ${size(folder.videos.sumOf { it.size })}", false) { onOpen(CatalogIndex.FOLDER + folder.path) }
+            }
             if (groups) {
                 item(key = "groups") {
-                    ProfileCard(null, "Groupes", null, "${catalog.ungrouped.size} vidéos · ${size(catalog.ungrouped.sumOf { it.size })}", false) { onOpen(GROUPS) }
+                    ProfileCard(null, "Groupes", null, "${catalog.loose.size} vidéos · ${size(catalog.loose.sumOf { it.size })}", false) { onOpen(GROUPS) }
                 }
-            }
-            items(apart, key = { APART + it }) { folder ->
-                val videos = catalog.apartVideos(folder)
-                ProfileCard(
-                    null, folder.substringAfterLast('/').substringAfterLast('\\'), null,
-                    if (videos.isEmpty()) "Dossier" else "${videos.size} vidéos · ${size(videos.sumOf { it.size })}", false,
-                ) { onOpen(APART + folder) }
             }
             items(shown, key = { it.id }) { person ->
                 ProfileCard(
@@ -225,28 +217,11 @@ private fun ProfileCard(picture: String?, name: String, category: String?, detai
 private fun ProfilePage(app: NyxaraApp, catalog: CatalogIndex, id: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val person: CatalogPerson? = catalog.byId[id]
-    val apartFolder = id.takeIf { it.startsWith(APART) }?.removePrefix(APART)
-    val known: List<CatalogVideo> = remember(catalog, id) {
-        when {
-            apartFolder != null -> catalog.apartVideos(apartFolder)
-            id == GROUPS -> catalog.ungrouped
-            else -> catalog.videosOf(id)
-        }
-    }
-    // A folder apart the catalogue doesn't list: its videos, read from the NAS.
-    var walked by remember(id) { mutableStateOf<List<CatalogVideo>?>(null) }
-    LaunchedEffect(id) {
-        val folder = apartFolder?.takeIf { known.isEmpty() }?.let(catalog::nasPath) ?: return@LaunchedEffect
-        val nas = app.nas ?: return@LaunchedEffect
-        val ignored = catalog.ignoredNasPaths
-        val root = catalog.data.root.orEmpty()
-        walked = runCatching { videosUnder(nas, folder, skip = { path -> ignored.any { path.within(it) } }) }.getOrDefault(emptyList())
-            .map { CatalogVideo(it.path.removePrefix("$root\\").replace('\\', '/')) }
-    }
-    val videos: List<CatalogVideo> = remember(known, walked) { (walked?.takeIf { known.isEmpty() } ?: known).sortedBy { it.path.lowercase() } }
+    val folder = catalog.folders.firstOrNull { CatalogIndex.FOLDER + it.path == id }
+    val videos: List<CatalogVideo> = remember(catalog, id) { catalog.videosFor(id).sortedBy { it.path.lowercase() } }
     val paths = remember(videos) { videos.mapNotNull(catalog::nasPath) }
     var profile by remember(id) { mutableStateOf<CatalogProfile?>(null) }
-    LaunchedEffect(id) { if (id != GROUPS && apartFolder == null) profile = app.catalog.profile(id) }
+    LaunchedEffect(id) { if (person != null) profile = app.catalog.profile(id) }
     val progress by app.perso.progress.collectAsState()
     val infos by app.persoMedia.infos.collectAsState()
     var selected by remember(id) { mutableStateOf(emptySet<String>()) }
@@ -255,18 +230,14 @@ private fun ProfilePage(app: NyxaraApp, catalog: CatalogIndex, id: String, onBac
     LaunchedEffect(paths) { app.persoMedia.request(videos.mapNotNull { video -> catalog.nasPath(video)?.let { it to video.size } }.take(200)) }
 
     fun play(shuffle: Boolean, start: String? = null, selection: List<String>? = null) {
-        // A folder apart plays as a Perso folder (walked, its order); a selection, as chosen.
-        val folder = apartFolder?.let(catalog::nasPath)
-        val request = if (folder != null && selection == null) PersoRequest(folder, shuffle, start)
-        else PersoRequest("profile:$id", shuffle, start, profile = id, selection = selection)
-        context.startActivity(PlayerActivity.persoIntent(context, request))
+        context.startActivity(PlayerActivity.persoIntent(context, PersoRequest("profile:$id", shuffle, start, profile = id, selection = selection)))
     }
 
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(NyxaraIcons.Back, contentDescription = "Retour") }
-                Text(person?.name ?: apartFolder?.substringAfterLast('/') ?: "Groupes", style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(person?.name ?: folder?.name ?: "Groupes", style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         if (person != null) {

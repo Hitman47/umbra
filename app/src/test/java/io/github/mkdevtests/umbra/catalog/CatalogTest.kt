@@ -31,19 +31,21 @@ class CatalogTest {
     }
 
     @Test
-    fun foldersApartAndLeftOutStayOutOfTheProfiles() {
-        val people = listOf(CatalogPerson("a", "Anna", folders = listOf("Cat/Anna")))
+    fun videosOfNoProfileGetACardPerFolder() {
+        val people = listOf(CatalogPerson("a", "Anna", folders = listOf("Misc/Cat/Anna")))
         val videos = listOf(
-            CatalogVideo("Cat/Anna/1.mp4"),
+            CatalogVideo("Misc/Cat/Anna/1.mp4"),
             CatalogVideo("Misc/Mix/2.mp4"),
             CatalogVideo("Misc/Mix/Sub/3.mp4"),
-            CatalogVideo("Misc/Skip/4.mp4"),
-            CatalogVideo("Misc/5.mp4"),
+            CatalogVideo("Misc/Live/4.mp4"),
+            CatalogVideo("Misc/Skip/5.mp4"),
+            CatalogVideo("Misc/6.mp4"),
         )
-        val index = CatalogIndex(CatalogData(people, videos, root = "Media\\Divers"), apart = listOf("Misc/Mix"), ignored = listOf("misc/skip/"))
-        assertEquals(listOf("Cat/Anna/1.mp4"), index.videosOf("a").map { it.path })
-        assertEquals(listOf("Misc/Mix/2.mp4", "Misc/Mix/Sub/3.mp4"), index.apartVideos("Misc/Mix").map { it.path })
-        assertEquals(listOf("Misc/5.mp4"), index.ungrouped.map { it.path })
+        val index = CatalogIndex(CatalogData(people, videos, root = "Media\\Divers"), ignored = listOf("misc/skip/"))
+        assertEquals(listOf("Misc/Cat/Anna/1.mp4"), index.videosOf("a").map { it.path })
+        assertEquals(listOf("Live", "Mix"), index.folders.map { it.name })
+        assertEquals(listOf("Misc/Mix/2.mp4", "Misc/Mix/Sub/3.mp4"), index.videosFor(CatalogIndex.FOLDER + "Misc/Mix").map { it.path })
+        assertEquals(listOf("Misc/6.mp4"), index.videosFor("").map { it.path })
         assertEquals(listOf("Media\\Divers\\misc\\skip"), index.ignoredNasPaths)
     }
 

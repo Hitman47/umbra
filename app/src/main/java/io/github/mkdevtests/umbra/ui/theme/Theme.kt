@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.theme
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -79,5 +80,26 @@ private val NyxaraShapes = Shapes(
 /** Dark-only theme: Nyxara is a video app, a light theme would fight the content. */
 @Composable
 fun NyxaraTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = NyxaraColors, typography = NyxaraType, shapes = NyxaraShapes, content = content)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as? io.github.mkdevtests.umbra.NyxaraApp
+    val settings = app?.settings?.settings?.collectAsState()?.value
+    val tv = isTv()
+    // A TV draws its screen as 960 × 540 whatever the panel: everything looks huge. Smaller there by default.
+    val scale = settings?.uiScale?.takeIf { it > 0f } ?: if (tv) TV_UI_SCALE else 1f
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density * scale, density.fontScale),
+        LocalStrongFocus provides (tv && settings?.strongFocus != false),
+    ) {
+        MaterialTheme(colorScheme = NyxaraColors, typography = NyxaraType, shapes = NyxaraShapes, content = content)
+    }
 }
+
+/** The interface's size on a TV when not chosen (Réglages › Appli › Apparence). */
+const val TV_UI_SCALE = 0.75f
+
+/** The sizes offered for the whole interface. */
+val UI_SCALES = listOf(0.65f to "65 %", 0.75f to "75 %", 0.85f to "85 %", 1f to "100 %", 1.15f to "115 %")
+
+/** A thicker, brighter frame around what the remote is on (a TV). */
+val LocalStrongFocus = androidx.compose.runtime.staticCompositionLocalOf { false }

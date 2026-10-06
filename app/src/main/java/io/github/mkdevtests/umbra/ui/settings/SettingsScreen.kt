@@ -335,6 +335,15 @@ fun SettingsScreen(
                                         }
                                     }
                                     CardPreview(settings.cardScale)
+                                    ChipsItem("Taille de l'interface", "Tout l'écran : textes, boutons, cartes. Automatique : 75 % sur une TV (qui dessine son écran en 960 × 540), 100 % ailleurs.") {
+                                        FilterChip(selected = settings.uiScale == 0f, onClick = { store.update { it.copy(uiScale = 0f) } }, label = { Text("Automatique") })
+                                        io.github.mkdevtests.umbra.ui.theme.UI_SCALES.forEach { (value, label) ->
+                                            FilterChip(selected = settings.uiScale == value, onClick = { store.update { it.copy(uiScale = value) } }, label = { Text(label) })
+                                        }
+                                    }
+                                    Item("Sélection très visible (TV)", "Cadre blanc épais et halo autour de ce que la télécommande sélectionne.") {
+                                        Switch(checked = settings.strongFocus, onCheckedChange = { on -> store.update { it.copy(strongFocus = on) } })
+                                    }
                                 }
                                 Section("Sauvegarde") {
                                     Item(
@@ -424,35 +433,23 @@ private fun CardPreview(scale: Float) {
     }
 }
 
-/**
- * Folders below the catalogue's root: apart (cards of their own in Profils, like
- * the groups, out of the profiles) or left out of Perso altogether.
- */
+/** Folders below the catalogue's root left out of Perso altogether (the others: a card per folder in Profils). */
 @Composable
 private fun ColumnScope.CatalogFolders(catalog: io.github.mkdevtests.umbra.catalog.CatalogStore, root: String) {
-    val apart by catalog.apart.collectAsState()
     val ignored by catalog.ignored.collectAsState()
-    var picking by remember { mutableStateOf<Boolean?>(null) } // true: apart, false: left out
-    Item("Dossiers à part", if (apart.isEmpty()) "Aucun. Chacun devient une carte en haut de Profils, comme Groupes, hors des profils." else "Une carte chacun en haut de Profils, hors des profils.") {
-        TextButton(onClick = { picking = true }) { Text("Ajouter ›") }
-    }
-    apart.forEach { folder ->
-        Item(folder.substringAfterLast('/'), folder.replace("/", " › ")) {
-            TextButton(onClick = { catalog.setFolders(apart - folder, ignored) }) { Text("Retirer") }
-        }
-    }
+    var picking by remember { mutableStateOf(false) }
     Item("Dossiers ignorés", if (ignored.isEmpty()) "Aucun. Ni affichés, ni lus, ni dans Profils." else "Ni affichés, ni lus, ni dans Profils.") {
-        TextButton(onClick = { picking = false }) { Text("Ajouter ›") }
+        TextButton(onClick = { picking = true }) { Text("Ajouter ›") }
     }
     ignored.forEach { folder ->
         Item(folder.substringAfterLast('/'), folder.replace("/", " › ")) {
-            TextButton(onClick = { catalog.setFolders(apart, ignored - folder) }) { Text("Retirer") }
+            TextButton(onClick = { catalog.setIgnored(ignored - folder) }) { Text("Retirer") }
         }
     }
-    picking?.let { forApart ->
+    if (picking) {
         val app = LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
         CatalogFolderPicker(
-            title = if (forApart) "Dossier à part" else "Dossier ignoré",
+            title = "Dossier ignoré",
             list = { relative ->
                 val nas = app.nas ?: return@CatalogFolderPicker emptyList()
                 val path = if (relative.isEmpty()) root else "$root\\" + relative.replace('/', '\\')
@@ -460,11 +457,10 @@ private fun ColumnScope.CatalogFolders(catalog: io.github.mkdevtests.umbra.catal
                     .filter { it.isDirectory }.map { it.name }.sortedWith { a, b -> naturalCompare(a, b) }
             },
             onPick = { folder ->
-                picking = null
-                if (forApart) catalog.setFolders((apart + folder).distinct(), ignored - folder)
-                else catalog.setFolders(apart - folder, (ignored + folder).distinct())
+                picking = false
+                catalog.setIgnored((ignored + folder).distinct())
             },
-            onDismiss = { picking = null },
+            onDismiss = { picking = false },
         )
     }
 }

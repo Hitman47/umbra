@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.settings.Address
 import io.github.mkdevtests.umbra.settings.parseAddress
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 /**
  * A text field a remote can leave: ▲ ▼ go to the field above or below (a
@@ -49,12 +51,30 @@ fun Modifier.remoteFriendly(): Modifier = composed {
     val focus = LocalFocusManager.current
     val bring = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val tv = isTv()
+    var typing by remember { mutableStateOf(false) }
     this
         .bringIntoViewRequester(bring)
-        .onFocusEvent { if (it.isFocused) scope.launch { bring.bringIntoView() } }
+        .onFocusEvent { state ->
+            if (state.isFocused) {
+                scope.launch { bring.bringIntoView() }
+                // On a TV, going over a field doesn't open the keyboard: OK does.
+                if (tv && !typing) scope.launch { repeat(4) { keyboard?.hide(); delay(60) } }
+            } else {
+                typing = false
+            }
+        }
         .onPreviewKeyEvent { event ->
             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
             when (event.key) {
+                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> if (tv && !typing) {
+                    typing = true
+                    keyboard?.show()
+                    true
+                } else {
+                    false
+                }
                 Key.DirectionDown -> focus.moveFocus(FocusDirection.Down)
                 Key.DirectionUp -> focus.moveFocus(FocusDirection.Up)
                 else -> false
@@ -62,7 +82,7 @@ fun Modifier.remoteFriendly(): Modifier = composed {
         }
 }
 
-/** A one-line field of a form: the keyboard's ↵ goes to the next one ([last]: closes it), the remote can leave it. */
+/** A one-line field of a form: the keyboard's ↵ goes to the next one ([last]: closes it), the remote can leave it. A secret one can be shown, to check it. */
 @Composable
 fun FormField(
     value: String,
@@ -76,6 +96,7 @@ fun FormField(
     last: Boolean = false,
 ) {
     val focus = LocalFocusManager.current
+    var shown by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -83,7 +104,8 @@ fun FormField(
         placeholder = placeholder?.let { { Text(it) } },
         supportingText = supporting?.let { { Text(it) } },
         singleLine = true,
-        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+        trailingIcon = if (secret) ({ androidx.compose.material3.TextButton(onClick = { shown = !shown }) { Text(if (shown) "Masquer" else "Afficher") } }) else null,
+        visualTransformation = if (secret && !shown) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(
             keyboardType = if (secret) KeyboardType.Password else keyboardType,
             imeAction = if (last) ImeAction.Done else ImeAction.Next,
@@ -107,7 +129,7 @@ fun AddressField(
     suggestions: List<Pair<String, String>> = emptyList(),
     last: Boolean = false,
 ) {
-    var address by remember { mutableStateOf(parseAddress(value).let { if (it.port == defaultPort?.toString()) it.copy(port = "") else it }) }
+    var address by remember { mutableStateOf(parseAddress(value)) }
     fun update(changed: Address) {
         address = changed
         onValueChange(changed.url(defaultPort))
@@ -120,7 +142,11 @@ fun AddressField(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FormField(
-                address.host, { update(address.copy(host = it.substringAfter("://").trim())) }, "Adresse IP ou nom",
+                address.host, { typed ->
+                    // "192.168.1.10:9696" or "http://…" typed whole: taken apart.
+                    val parsed = parseAddress(if ("://" in typed) typed else "http://$typed")
+                    update(address.copy(host = parsed.host, port = parsed.port.ifEmpty { address.port }, secure = if ("://" in typed) parsed.secure else address.secure))
+                }, "Adresse IP ou nom",
                 Modifier.weight(1f), placeholder = "192.168.1.10", keyboardType = KeyboardType.Uri,
             )
             FormField(

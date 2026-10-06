@@ -42,20 +42,17 @@ data class CatalogData(
     val root: String? = null,
 )
 
+/** Videos of no profile in one folder: a card of its own in Profils ([path] below the catalogue's root). */
+data class CatalogFolder(val name: String, val path: String, val videos: List<CatalogVideo>)
+
 /**
  * The catalogue as the screens use it: each profile's videos (a video
  * belongs to the profile owning the nearest of its parent folders), and the
- * rest, apart. Built once per sync. The user's [apart] folders (paths below
- * the catalogue's root) are cards of their own, out of the profiles; the
- * [ignored] ones are left out everywhere.
+ * rest, by folder ([folders], [loose]). Built once per sync. The [ignored]
+ * folders (paths below the catalogue's root) are left out everywhere.
  */
-class CatalogIndex(val data: CatalogData, val apart: List<String> = emptyList(), val ignored: List<String> = emptyList()) {
-    private val apartKeys = apart.map(::folderKey)
+class CatalogIndex(val data: CatalogData, val ignored: List<String> = emptyList()) {
     private val ignoredKeys = ignored.map(::folderKey)
-    private val byApart = HashMap<String, MutableList<CatalogVideo>>()
-
-    /** The catalogue's videos in [folder], one of [apart]. */
-    fun apartVideos(folder: String): List<CatalogVideo> = byApart[folderKey(folder)].orEmpty()
 
     /** The NAS paths of the [ignored] folders, for Perso's folders too. */
     val ignoredNasPaths: List<String> get() = ignored.mapNotNull(::nasPath)
@@ -64,8 +61,14 @@ class CatalogIndex(val data: CatalogData, val apart: List<String> = emptyList(),
     val byId: Map<String, CatalogPerson> = people.associateBy { it.id }
     private val byPerson: Map<String, List<CatalogVideo>>
 
-    /** Videos of no profile ("Groupes"). */
+    /** Videos of no profile. */
     val ungrouped: List<CatalogVideo>
+
+    /** The videos of no profile, by folder: one card each, at the top of Profils. */
+    val folders: List<CatalogFolder>
+
+    /** Those of no profile and no folder of their own ("Groupes"). */
+    val loose: List<CatalogVideo>
 
     /** Every category, by name. */
     val categories: List<String> = people.flatMap { it.categories }.distinct().sorted()
@@ -78,15 +81,35 @@ class CatalogIndex(val data: CatalogData, val apart: List<String> = emptyList(),
         data.videos.forEach { video ->
             val key = folderKey(video.path)
             if (ignoredKeys.any { key.isIn(it) }) return@forEach
-            apartKeys.firstOrNull { key.isIn(it) }?.let { folder ->
-                byApart.getOrPut(folder) { ArrayList() } += video
-                return@forEach
-            }
             val id = ownerOf(video.path, owner)
             if (id == null) rest += video else grouped.getOrPut(id) { ArrayList() } += video
         }
         byPerson = grouped
         ungrouped = rest
+        // The folders below what they all share: "Misc/Mix/…", "Misc/Live/…" → Mix, Live.
+        val parents = rest.map { it.path.replace('\\', '/').trim('/').split('/').dropLast(1) }
+        val common = parents.reduceOrNull { a, b -> a.zip(b).takeWhile { (x, y) -> x.equals(y, ignoreCase = true) }.map { it.first } }.orEmpty()
+        val byFolder = LinkedHashMap<String, MutableList<CatalogVideo>>()
+        val alone = ArrayList<CatalogVideo>()
+        rest.zip(parents).forEach { (video, parent) ->
+            if (parent.size <= common.size) alone += video
+            else byFolder.getOrPut((common + parent[common.size]).joinToString("/")) { ArrayList() } += video
+        }
+        folders = byFolder.map { (path, videos) -> CatalogFolder(path.substringAfterLast('/'), path, videos) }
+            .sortedBy { it.name.lowercase() }
+        loose = alone
+    }
+
+    /** The videos of a card of Profils: a profile's id, [FOLDER] + a folder's path, or "" for the loose ones. */
+    fun videosFor(id: String): List<CatalogVideo> = when {
+        id.isEmpty() -> loose
+        id.startsWith(FOLDER) -> folders.firstOrNull { it.path == id.removePrefix(FOLDER) }?.videos.orEmpty()
+        else -> videosOf(id)
+    }
+
+    companion object {
+        /** Before a folder's path: the id of its card. */
+        const val FOLDER = "folder:"
     }
 
     fun videosOf(id: String): List<CatalogVideo> = byPerson[id].orEmpty()
