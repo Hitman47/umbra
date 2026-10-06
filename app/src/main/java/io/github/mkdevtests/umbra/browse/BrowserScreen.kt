@@ -1,5 +1,15 @@
 package io.github.mkdevtests.umbra.browse
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import io.github.mkdevtests.umbra.library.letterPositions
+import io.github.mkdevtests.umbra.library.LETTERS
+import io.github.mkdevtests.umbra.ui.theme.INDEX_BAR_MIN_ITEMS
+import io.github.mkdevtests.umbra.ui.theme.indexBarWidth
+import io.github.mkdevtests.umbra.ui.theme.IndexBar
+import io.github.mkdevtests.umbra.ui.theme.scaled
+import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -169,11 +179,16 @@ fun BrowserScreen(
                     modifier = Modifier.align(Alignment.Center),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 140.dp),
-                    contentPadding = PaddingValues(20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                else -> Box(modifier = Modifier.fillMaxSize()) {
+                val scale = LocalCardScale.current
+                val gridState = remember(state.path) { LazyGridState() }
+                val letters = remember(state.entries) { state.entries.takeIf { it.size >= INDEX_BAR_MIN_ITEMS }?.let { letterPositions(it.map { entry -> entry.name }) } }
+                LazyVerticalGrid(
+                    state = gridState,
+                    columns = GridCells.Adaptive(minSize = 140.dp * scale),
+                    contentPadding = PaddingValues(start = 20.dp, top = 20.dp, bottom = 20.dp, end = 20.dp + if (letters != null) indexBarWidth() else 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp * scale),
+                    verticalArrangement = Arrangement.spacedBy(20.dp * scale),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(state.entries, key = { it.path }) { entry ->
@@ -209,6 +224,15 @@ fun BrowserScreen(
                         }
                     }
                 }
+                letters?.let { positions ->
+                    val scope = rememberCoroutineScope()
+                    IndexBar(
+                        LETTERS, positions,
+                        onJump = { position -> scope.launch { gridState.scrollToItem(position) } },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, bottom = 16.dp, end = 4.dp),
+                    )
+                }
+                }
             }
         }
     }
@@ -218,15 +242,16 @@ fun BrowserScreen(
 private fun Tile(title: String, caption: String?, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, artwork: @Composable () -> Unit) {
     Column(modifier = Modifier.focusRing().combinedClickable(onLongClick = onLongClick, onClick = onClick)) {
         artwork()
+        val scale = LocalCardScale.current
         Text(
             title,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyMedium.scaled(scale),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
         caption?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(it, style = MaterialTheme.typography.bodySmall.scaled(scale), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
     }
 }

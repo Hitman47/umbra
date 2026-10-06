@@ -1,5 +1,15 @@
 package io.github.mkdevtests.umbra.ui.perso
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.LazyListState
+import io.github.mkdevtests.umbra.library.letterPositions
+import io.github.mkdevtests.umbra.library.LETTERS
+import io.github.mkdevtests.umbra.ui.theme.INDEX_BAR_MIN_ITEMS
+import io.github.mkdevtests.umbra.ui.theme.indexBarWidth
+import io.github.mkdevtests.umbra.ui.theme.IndexBar
+import io.github.mkdevtests.umbra.ui.theme.scaled
+import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -214,8 +224,12 @@ private fun PersoFolders(viewModel: PersoViewModel) {
                     Button(onClick = viewModel::refresh) { Text("Réessayer") }
                 }
                 state.entries.isEmpty() -> Text("Aucune vidéo dans ce dossier.", modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                else -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp), modifier = Modifier.fillMaxSize()) {
-                    items(sortedFor(state.entries, sort), key = { it.path }) { entry ->
+                else -> Box(modifier = Modifier.fillMaxSize()) {
+                val entries = remember(state.entries, sort) { sortedFor(state.entries, sort) }
+                val listState = remember(state.path) { LazyListState() }
+                val letters = remember(entries, sort) { if (sort == PersoSort.Name && entries.size >= INDEX_BAR_MIN_ITEMS) letterPositions(entries.map { it.name }) else null }
+                LazyColumn(state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp, end = if (letters != null) indexBarWidth() else 0.dp), modifier = Modifier.fillMaxSize()) {
+                    items(entries, key = { it.path }) { entry ->
                         if (entry.isDirectory) {
                             FolderRow(entry.name, null, onClick = { viewModel.open(entry.path) }, onLongClick = { folderMenu = entry.path })
                         } else {
@@ -232,6 +246,15 @@ private fun PersoFolders(viewModel: PersoViewModel) {
                         }
                     }
                 }
+                letters?.let { positions ->
+                    val scope = rememberCoroutineScope()
+                    IndexBar(
+                        LETTERS, positions,
+                        onJump = { position -> scope.launch { listState.scrollToItem(position) } },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, bottom = 16.dp, end = 4.dp),
+                    )
+                }
+                }
             }
         }
     }
@@ -246,8 +269,8 @@ private fun FolderRow(name: String, detail: String?, onClick: () -> Unit, onLong
     ) {
         Icon(NyxaraIcons.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         Column(modifier = Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Text(name, style = MaterialTheme.typography.bodyLarge.scaled(LocalCardScale.current), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall.scaled(LocalCardScale.current), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
         Icon(NyxaraIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -273,10 +296,10 @@ private fun VideoRow(
             tint = if (progress?.watched == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(name, style = MaterialTheme.typography.bodyLarge.scaled(LocalCardScale.current), maxLines = 2, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (downloaded) Icon(NyxaraIcons.Download, contentDescription = "Sur l'appareil", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                Text(detail, style = MaterialTheme.typography.bodySmall.scaled(LocalCardScale.current), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
             if (progress?.inProgress == true) {
                 LinearProgressIndicator(

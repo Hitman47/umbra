@@ -1,6 +1,6 @@
 name: Build
 
-# Every push: the unit tests and a debug APK, so a broken build shows here
+# Every push: the unit tests, a debug APK and the shrunk release build, so a broken build shows here
 # before anyone installs it.
 on:
   push:
@@ -26,8 +26,8 @@ jobs:
           sed -i 's/ -Djavax.net.ssl.trustStoreType=Windows-ROOT//' gradle.properties
           chmod +x gradlew
 
-      - name: Unit tests and debug APK
-        run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
+      - name: Unit tests, debug APK, and the release build (R8) unsigned
+        run: ./gradlew testDebugUnitTest assembleDebug assembleRelease --stacktrace
 
       - name: Test reports
         if: failure()

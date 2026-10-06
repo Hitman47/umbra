@@ -1,6 +1,7 @@
 package io.github.mkdevtests.umbra.player
 
 import android.content.Context
+import kotlin.math.abs
 import android.os.SystemClock
 import android.util.Log
 import android.view.SurfaceHolder
@@ -112,6 +113,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     private val _ended = MutableStateFlow(false)
     val ended: StateFlow<Boolean> = _ended.asStateFlow()
 
+    /** A TV's GPU is weaker than a tablet's: mpv's lighter renderer there. */
+    private val vo = if (context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)) TV_VO else VO
+
     init {
         val cacheDir = context.cacheDir.absolutePath
         mpv.setOptionString("config", "no")
@@ -122,7 +126,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         // tone mapping and ASS subtitles. "mediacodec" hands decoded frames to
         // the GPU without a copy (AImageReader); "mediacodec-copy" is the
         // fallback. At 4K the copy alone made playback stutter.
-        mpv.setOptionString("vo", VO)
+        mpv.setOptionString("vo", vo)
         mpv.setOptionString("gpu-context", "android")
         mpv.setOptionString("opengl-es", "yes")
         mpv.setOptionString("hwdec", "mediacodec,mediacodec-copy")
@@ -375,7 +379,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
             mpv.command(arrayOf("loadfile", file))
             pendingFile = null
         } else {
-            mpv.setPropertyString("vo", VO)
+            mpv.setPropertyString("vo", vo)
         }
     }
 
@@ -403,7 +407,8 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
     override fun eventProperty(property: String, value: Double) {
         when (property) {
-            "time-pos" -> _position.value = value
+            // Every frame otherwise (24 to 60 a second): the screens showing it would redraw as often.
+            "time-pos" -> if (abs(value - _position.value) >= POSITION_STEP) _position.value = value
             "duration" -> _duration.value = value
             "sub-delay" -> _subtitleDelay.value = value
             "audio-delay" -> _audioDelay.value = value
@@ -565,6 +570,10 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     private companion object {
         const val TAG = "MpvPlayer"
         const val VO = "gpu-next"
+        const val TV_VO = "gpu"
+
+        /** The playback position is published to the screens when it moved this much (seconds). */
+        const val POSITION_STEP = 0.25
 
         /** No picture after this long: the file is reported as not playing. */
         const val FAILURE_AFTER_MS = 25_000L

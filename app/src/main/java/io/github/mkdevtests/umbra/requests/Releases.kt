@@ -76,8 +76,13 @@ enum class ReleaseSort(val label: String) { Best("Pertinence"), Seeders("Sources
 /**
  * [releases] ordered: by default the preferred quality, then the preferred
  * languages (MULTI, VFF…), then the most seeded; the others follow, never hidden.
+ * [reversed]: the other way round (the smallest first…).
  */
-fun ranked(releases: List<Release>, sort: ReleaseSort = ReleaseSort.Best, quality: String = "1080p"): List<Release> = when (sort) {
+fun ranked(releases: List<Release>, sort: ReleaseSort = ReleaseSort.Best, quality: String = "1080p", reversed: Boolean = false): List<Release> =
+    rankedFirstBest(releases, sort, quality).let { if (reversed) it.asReversed() else it }
+
+/** [ranked]'s usual direction: the best, most seeded, biggest, newest first. */
+private fun rankedFirstBest(releases: List<Release>, sort: ReleaseSort, quality: String): List<Release> = when (sort) {
     ReleaseSort.Best -> releases.sortedWith(
         compareByDescending<Release> { it.quality == quality }
             .thenBy { release -> release.language?.let { PREFERRED_LANGUAGES.indexOf(it.uppercase()).takeIf { i -> i >= 0 } } ?: PREFERRED_LANGUAGES.size }

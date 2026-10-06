@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.scaled
+import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -457,15 +459,15 @@ private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks, 
                 ?: item.tmdbId?.let { id -> { links.onOpenRemote(id, item.isShow) } }
             Column(
                 modifier = Modifier
-                    .width(110.dp)
+                    .width(110.dp * LocalCardScale.current)
                     .alpha(if (item.owned) 1f else 0.45f)
                     .then(if (open != null) Modifier.clickable(onClick = open) else Modifier),
             ) {
                 Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth(), size = "w185")
-                Text(item.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                Text(item.title, style = MaterialTheme.typography.bodySmall.scaled(LocalCardScale.current), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                 Text(
                     listOfNotNull(item.year?.toString(), "absent".takeIf { !item.owned }).joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.scaled(LocalCardScale.current),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

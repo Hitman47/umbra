@@ -79,6 +79,7 @@ fun ReleaseSearch(app: NyxaraApp, title: RemoteTitle, onClose: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var sort by remember { mutableStateOf(ReleaseSort.Best) }
+    var reversed by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(ReleaseFilter()) }
     var chosen by remember { mutableStateOf<Pair<Release, List<Release>>?>(null) }
     fun search() {
@@ -94,7 +95,7 @@ fun ReleaseSearch(app: NyxaraApp, title: RemoteTitle, onClose: () -> Unit) {
     LaunchedEffect(Unit) { search() }
 
     val all = results.orEmpty()
-    val lines = remember(all, sort, filter) { grouped(ranked(filter.apply(all), sort)) }
+    val lines = remember(all, sort, reversed, filter) { grouped(ranked(filter.apply(all), sort, reversed = reversed)) }
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
@@ -118,7 +119,14 @@ fun ReleaseSearch(app: NyxaraApp, title: RemoteTitle, onClose: () -> Unit) {
             }
             if (all.isNotEmpty()) {
                 Chips {
-                    ReleaseSort.entries.forEach { s -> FilterChip(selected = sort == s, onClick = { sort = s }, label = { Text(s.label) }) }
+                    // The chosen sort touched again: the other way round.
+                    ReleaseSort.entries.forEach { s ->
+                        FilterChip(
+                            selected = sort == s,
+                            onClick = { if (sort == s) reversed = !reversed else { sort = s; reversed = false } },
+                            label = { Text(s.label + if (sort == s) (if (reversed) " ↑" else " ↓") else "") },
+                        )
+                    }
                 }
                 Chips {
                     FilterChip(selected = filter.withSeeders, onClick = { filter = filter.copy(withSeeders = !filter.withSeeders) }, label = { Text("Avec sources") })

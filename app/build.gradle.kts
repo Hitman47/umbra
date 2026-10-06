@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val nyxaraVersion = "1.2.4"
+val nyxaraVersion = "1.2.5"
 
 base {
     // APK names: nyxara-debug.apk, nyxara-release-unsigned.apk
@@ -58,7 +58,8 @@ android {
         }
         release {
             // Signed by scripts/build-nyxara-release.sh (zipalign + apksigner).
-            isMinifyEnabled = false
+            // Shrunk and optimized: Compose runs much faster so (a TV's chip above all).
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             resValue("string", "app_name", "Nyxara")
             buildConfigField("boolean", "UPDATES", "true")
@@ -101,6 +102,8 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // Installs the libraries' startup profiles (Compose…) on a sideloaded APK too.
+    implementation(libs.androidx.profileinstaller)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

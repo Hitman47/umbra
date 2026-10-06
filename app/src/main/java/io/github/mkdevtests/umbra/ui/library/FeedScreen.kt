@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -232,7 +233,7 @@ fun FeedScreen(
             }
         }
         if (fresh.isNotEmpty()) {
-            item { Shelf("Ajouts récents", onMore = { onOpenShelf("fresh") }) { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } } }
+            item { Shelf("Ajouts récents", onMore = { onOpenShelf("fresh") }) { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } } }
         }
         if (movies.isNotEmpty()) {
             item {
@@ -242,7 +243,7 @@ fun FeedScreen(
                     mode = movieMode,
                     onMode = { movieMode = it; movieSeed = Random.nextLong() },
                     onRefresh = { movieSeed = Random.nextLong() },
-                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
+                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } }
             }
         }
         if (shows.isNotEmpty()) {
@@ -253,7 +254,7 @@ fun FeedScreen(
                     mode = showMode,
                     onMode = { showMode = it; showSeed = Random.nextLong() },
                     onRefresh = { showSeed = Random.nextLong() },
-                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
+                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } }
             }
         }
         if (sagas.isNotEmpty()) {
@@ -261,7 +262,7 @@ fun FeedScreen(
                 Shelf("Sagas", onMore = { onOpenShelf("sagas") }) {
                     items(sagas, key = { it.id }) { saga ->
                         PosterCard(
-                            sagaItem(saga, history), { links.onOpenSaga(saga.id) }, Modifier.width(POSTER),
+                            sagaItem(saga, history), { links.onOpenSaga(saga.id) }, Modifier.width(POSTER * LocalCardScale.current),
                             onLongClick = { onLongPress(TitleTarget("saga:${saga.id}")) },
                         )
                     }
@@ -270,7 +271,7 @@ fun FeedScreen(
         }
         genres.forEach { (genre, picks) ->
             item(key = "genre:$genre") {
-                Shelf(genre, onMore = { onOpenShelf("genre:$genre") }) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
+                Shelf(genre, onMore = { onOpenShelf("genre:$genre") }) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } }
             }
         }
     }
@@ -371,7 +372,7 @@ private fun HeroPage(item: Featured, wide: Boolean) {
 @Composable
 private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: () -> Unit, onLongPress: () -> Unit) {
     Column(
-        modifier = Modifier.width(if (wide) 300.dp else 260.dp).focusRing(RoundedCornerShape(16.dp)).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
+        modifier = Modifier.width((if (wide) 300.dp else 260.dp) * LocalCardScale.current).focusRing(RoundedCornerShape(16.dp)).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(

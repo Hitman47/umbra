@@ -27,6 +27,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,6 +51,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,6 +61,18 @@ import io.github.mkdevtests.umbra.browse.BrowserViewModel
 import io.github.mkdevtests.umbra.history.Progress
 import io.github.mkdevtests.umbra.history.seenOf
 import io.github.mkdevtests.umbra.library.Library
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import io.github.mkdevtests.umbra.library.byTitle
+import io.github.mkdevtests.umbra.library.decadePositions
+import io.github.mkdevtests.umbra.library.letterPositions
+import io.github.mkdevtests.umbra.library.LETTERS
+import io.github.mkdevtests.umbra.ui.theme.INDEX_BAR_MIN_ITEMS
+import io.github.mkdevtests.umbra.ui.theme.indexBarWidth
+import io.github.mkdevtests.umbra.ui.theme.IndexBar
+import io.github.mkdevtests.umbra.ui.theme.scaled
+import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import io.github.mkdevtests.umbra.library.available
 import io.github.mkdevtests.umbra.library.unavailableKeys
 import io.github.mkdevtests.umbra.library.Movie
@@ -450,7 +466,7 @@ internal fun PosterGrid(
                 (decade == null || item.year?.let { it / 10 * 10 } == decade)
         }.let { kept ->
             when (sort) {
-                GridSort.Title -> kept
+                GridSort.Title -> byTitle(kept) { it.title }
                 GridSort.Added -> kept.sortedByDescending { it.added }
                 GridSort.Year -> kept.sortedByDescending { it.year ?: 0 }
                 GridSort.Rating -> kept.sortedByDescending { it.rating ?: 0.0 }
@@ -458,11 +474,25 @@ internal fun PosterGrid(
         }
     }
     val filtered = seen != null || genre != null || decade != null
+    val scale = LocalCardScale.current
+    val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    // In title order: the letters; in year order: the decades; else none.
+    val index = remember(shown, sort) {
+        when {
+            shown.size < INDEX_BAR_MIN_ITEMS -> null
+            sort == GridSort.Title -> LETTERS to letterPositions(shown.map { it.title })
+            sort == GridSort.Year -> decadePositions(shown.map { it.year }).let { decades -> decades.keys.map { it.takeLast(2) } to decades.mapKeys { it.key.takeLast(2) } }
+            else -> null
+        }
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 128.dp),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        state = gridState,
+        columns = GridCells.Adaptive(minSize = 128.dp * scale),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp + if (index != null) indexBarWidth() else 0.dp, top = 8.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp * scale),
+        verticalArrangement = Arrangement.spacedBy(20.dp * scale),
         modifier = Modifier.fillMaxSize(),
     ) {
         if (noun != null) {
@@ -482,10 +512,20 @@ internal fun PosterGrid(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        chips()
-                        listOf(true to "Vus", false to "Non vus").forEach { (value, label) ->
-                            FilterChip(selected = seen == value, onClick = { seen = value.takeIf { it != seen } }, label = { Text(label) })
+                        // All, not watched, watched: one row of three, the choice always visible.
+                        val unwatched = items.count { !it.watched }
+                        SingleChoiceSegmentedButtonRow {
+                            listOf(null to "Tout", false to "Non vus · $unwatched", true to "Vus · ${items.size - unwatched}").forEachIndexed { index, (value, label) ->
+                                SegmentedButton(
+                                    selected = seen == value,
+                                    onClick = { seen = value },
+                                    shape = SegmentedButtonDefaults.itemShape(index, 3),
+                                    icon = {},
+                                    modifier = Modifier.focusRing(RoundedCornerShape(50)),
+                                ) { Text(label, maxLines = 1) }
+                            }
                         }
+                        chips()
                         if (genres.size > 1) {
                             Dropdown(
                                 text = genre ?: "Genre",
@@ -515,6 +555,17 @@ internal fun PosterGrid(
         items(shown, key = { it.key }) { item ->
             PosterCard(item, onClick = { onClick(item.key) }, onLongClick = onLongClick?.let { { it(item) } })
         }
+    }
+    index?.let { (labels, positions) ->
+        val header = if (noun != null) 1 else 0
+        IndexBar(
+            labels, positions,
+            onJump = { position -> scope.launch { gridState.scrollToItem(position + header) } },
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, bottom = 16.dp, end = 4.dp),
+            // "90" in the bar, "1990" in the bubble.
+            bubble = { label -> if (sort == GridSort.Year) positions[label]?.let { shown[it].year?.let { year -> (year / 10 * 10).toString() } } ?: label else label },
+        )
+    }
     }
 }
 
@@ -546,16 +597,17 @@ internal fun PosterCard(item: PosterItem, onClick: () -> Unit, modifier: Modifie
             item.badge?.let { CornerBadge(it, Modifier.align(Alignment.TopEnd)) }
             if (unavailable) UnavailableMark(Modifier.align(Alignment.TopStart))
         }
+        val scale = LocalCardScale.current
         Text(
             item.title,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyMedium.scaled(scale),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(top = 8.dp * scale),
         )
         val caption = listOfNotNull(item.year?.toString(), item.subtitle).joinToString(" · ")
         if (caption.isNotEmpty()) {
-            Text(caption, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(caption, style = MaterialTheme.typography.bodySmall.scaled(scale), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
     }
 }

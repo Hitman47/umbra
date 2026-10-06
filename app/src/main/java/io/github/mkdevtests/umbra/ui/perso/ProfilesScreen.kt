@@ -1,5 +1,16 @@
 package io.github.mkdevtests.umbra.ui.perso
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import io.github.mkdevtests.umbra.library.byTitle
+import io.github.mkdevtests.umbra.library.letterPositions
+import io.github.mkdevtests.umbra.library.LETTERS
+import io.github.mkdevtests.umbra.ui.theme.INDEX_BAR_MIN_ITEMS
+import io.github.mkdevtests.umbra.ui.theme.indexBarWidth
+import io.github.mkdevtests.umbra.ui.theme.IndexBar
+import io.github.mkdevtests.umbra.ui.theme.scaled
+import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -104,7 +115,7 @@ private fun ProfileGrid(app: NyxaraApp, catalog: CatalogIndex, onOpen: (String) 
             .filter { (needle.isEmpty() || needle in it.name.lowercase()) && (category == null || category in it.categories) && (!followed || it.followed) }
             .let { list ->
                 when (sort) {
-                    ProfileSort.Name -> list.sortedBy { it.name.lowercase() }
+                    ProfileSort.Name -> byTitle(list) { it.name }
                     ProfileSort.Count -> list.sortedByDescending { it.count }
                     ProfileSort.Size -> list.sortedByDescending { it.size }
                 }
@@ -132,14 +143,21 @@ private fun ProfileGrid(app: NyxaraApp, catalog: CatalogIndex, onOpen: (String) 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
+        val scale = LocalCardScale.current
+        val gridState = rememberLazyGridState()
+        val scope = rememberCoroutineScope()
+        val groups = catalog.ungrouped.isNotEmpty() && query.isBlank() && category == null && !followed
+        val letters = remember(shown, sort) { if (sort == ProfileSort.Name && shown.size >= INDEX_BAR_MIN_ITEMS) letterPositions(shown.map { it.name }) else null }
+        Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 150.dp),
-            contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            state = gridState,
+            columns = GridCells.Adaptive(minSize = 150.dp * scale),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 16.dp + if (letters != null) indexBarWidth() else 0.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp * scale),
+            verticalArrangement = Arrangement.spacedBy(18.dp * scale),
             modifier = Modifier.fillMaxSize(),
         ) {
-            if (catalog.ungrouped.isNotEmpty() && query.isBlank() && category == null && !followed) {
+            if (groups) {
                 item(key = "groups") {
                     ProfileCard(null, "Groupes", null, "${catalog.ungrouped.size} vidéos · ${size(catalog.ungrouped.sumOf { it.size })}", false) { onOpen(GROUPS) }
                 }
@@ -150,6 +168,14 @@ private fun ProfileGrid(app: NyxaraApp, catalog: CatalogIndex, onOpen: (String) 
                     "${person.count} vidéos · ${size(person.size)}", person.followed,
                 ) { onOpen(person.id) }
             }
+        }
+        letters?.let { positions ->
+            IndexBar(
+                LETTERS, positions,
+                onJump = { position -> scope.launch { gridState.scrollToItem(position + if (groups) 1 else 0) } },
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, bottom = 16.dp, end = 4.dp),
+            )
+        }
         }
     }
 }
@@ -170,9 +196,10 @@ private fun ProfileCard(picture: String?, name: String, category: String?, detai
                 )
             }
         }
-        Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
-        category?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) }
-        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        val scale = LocalCardScale.current
+        Text(name, style = MaterialTheme.typography.titleSmall.scaled(scale), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        category?.let { Text(it, style = MaterialTheme.typography.bodySmall.scaled(scale), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) }
+        Text(detail, style = MaterialTheme.typography.bodySmall.scaled(scale), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }
 

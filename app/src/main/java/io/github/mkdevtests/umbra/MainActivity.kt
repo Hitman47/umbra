@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,8 +56,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             NyxaraTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    NyxaraRoot()
+                val settings by (application as NyxaraApp).settings.settings.collectAsState()
+                CompositionLocalProvider(io.github.mkdevtests.umbra.ui.theme.LocalCardScale provides settings.cardScale) {
+                    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        NyxaraRoot()
+                    }
                 }
             }
         }

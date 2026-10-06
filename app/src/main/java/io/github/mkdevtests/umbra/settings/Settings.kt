@@ -54,6 +54,8 @@ data class Settings(
     val documentaryFolders: List<String> = emptyList(),
     /** The titles of a NAS that doesn't answer leave the lists (downloaded ones stay). */
     val hideUnavailable: Boolean = false,
+    /** Every card's size against the usual one (0.8 to 1.3). */
+    val cardScale: Float = 1f,
 )
 
 
@@ -91,6 +93,7 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_SCAN_AWAY, updated.scanAway)
             putString(KEY_DOCUMENTARIES, updated.documentaryFolders.joinToString("\n"))
             putBoolean(KEY_HIDE_UNAVAILABLE, updated.hideUnavailable)
+            putFloat(KEY_CARD_SCALE, updated.cardScale)
         }
     }
 
@@ -124,6 +127,7 @@ class SettingsStore(context: Context) {
             scanAway = prefs.getBoolean(KEY_SCAN_AWAY, defaults.scanAway),
             documentaryFolders = prefs.getString(KEY_DOCUMENTARIES, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
             hideUnavailable = prefs.getBoolean(KEY_HIDE_UNAVAILABLE, defaults.hideUnavailable),
+            cardScale = prefs.getFloat(KEY_CARD_SCALE, defaults.cardScale).coerceIn(0.8f, 1.3f),
         )
     }
 
@@ -145,6 +149,7 @@ class SettingsStore(context: Context) {
         const val KEY_SCAN_AWAY = "scan_away"
         const val KEY_DOCUMENTARIES = "documentary_folders"
         const val KEY_HIDE_UNAVAILABLE = "hide_unavailable"
+        const val KEY_CARD_SCALE = "card_scale"
         const val NONE = "none"
     }
 }

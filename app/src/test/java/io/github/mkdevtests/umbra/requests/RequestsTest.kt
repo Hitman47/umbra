@@ -37,6 +37,7 @@ class RequestsTest {
             Release("Film.2021.720p.MULTI.WEB", 1, 900, "A", magnet = "m4"),
         )
         assertEquals(listOf("m3", "m2", "m1", "m4"), ranked(releases).map { it.link })
+        assertEquals(listOf("m3", "m2", "m1", "m4"), ranked(releases, ReleaseSort.Seeders, reversed = true).map { it.link })
         assertEquals(listOf("MULTI", "VFF", "VOSTFR"), languagesOf(releases))
         assertEquals(listOf("1080p", "720p"), qualitiesOf(releases))
         assertEquals(listOf("m3", "m4"), ReleaseFilter(language = "MULTI").apply(releases).map { it.link })

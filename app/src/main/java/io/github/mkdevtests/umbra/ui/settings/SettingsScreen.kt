@@ -1,5 +1,13 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import androidx.compose.foundation.layout.Box
+
+import androidx.compose.foundation.background
+
+import androidx.compose.foundation.layout.aspectRatio
+
+import io.github.mkdevtests.umbra.ui.theme.scaled
+
 import io.github.mkdevtests.umbra.nas.within
 
 import androidx.compose.ui.graphics.Color
@@ -300,6 +308,18 @@ fun SettingsScreen(
                                 RequestsSection(requests)
                             }
                             SettingsTab.App -> {
+                                Section("Apparence") {
+                                    ChipsItem("Taille des cartes", "Affiches, dossiers, profils, vidéos Perso : toutes d'un coup ; le texte suit.") {
+                                        io.github.mkdevtests.umbra.ui.theme.CARD_SCALES.forEach { (value, label) ->
+                                            FilterChip(
+                                                selected = settings.cardScale == value,
+                                                onClick = { store.update { it.copy(cardScale = value) } },
+                                                label = { Text(label) },
+                                            )
+                                        }
+                                    }
+                                    CardPreview(settings.cardScale)
+                                }
                                 Section("Sauvegarde") {
                                     Item(
                                         "Historique, corrections, réglages",
@@ -364,6 +384,25 @@ fun SettingsScreen(
                     }
                     page(Modifier.fillMaxWidth())
                 }
+            }
+        }
+    }
+}
+
+/** Four cards at [scale], to see the size before leaving Réglages. */
+@Composable
+private fun CardPreview(scale: Float) {
+    Row(modifier = Modifier.padding(start = 4.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp * scale)) {
+        listOf("Dune" to "2021", "Heat" to "1995", "Akira" to "1988", "Amélie" to "2001").forEach { (title, year) ->
+            Column(modifier = Modifier.width(128.dp * scale)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(2f / 3f)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)),
+                )
+                Text(title, style = MaterialTheme.typography.bodyMedium.scaled(scale), modifier = Modifier.padding(top = 8.dp * scale))
+                Text(year, style = MaterialTheme.typography.bodySmall.scaled(scale), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

@@ -80,6 +80,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -104,6 +105,7 @@ import io.github.mkdevtests.umbra.subtitles.subtitleLanguageName
 import io.github.mkdevtests.umbra.subtitles.SubtitleQuery
 import io.github.mkdevtests.umbra.subtitles.movieHash
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.settings.Settings
 import io.github.mkdevtests.umbra.trakt.TraktEndpoint
 import io.github.mkdevtests.umbra.ui.theme.NyxaraTheme
@@ -812,6 +814,13 @@ private fun PlayerScreen(
     val subtitleTracks by player.subtitleTracks.collectAsState()
 
     var controlsVisible by remember { mutableStateOf(true) }
+    // Driven by a remote (or a keyboard): the controls stay longer, and Pause takes the focus when they show.
+    var keyMode by remember { mutableStateOf(false) }
+    // Each key pressed: the controls' hiding starts again, they don't vanish under the remote.
+    var touched by remember { mutableIntStateOf(0) }
+    val pauseFocus = remember { FocusRequester() }
+    // Presses of an arrow held on the progress bar, since it went down.
+    val held = remember { intArrayOf(0) }
     var panelOpen by remember { mutableStateOf(false) }
     var queueOpen by remember { mutableStateOf(false) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -876,9 +885,9 @@ private fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(controlsVisible, paused, panelOpen, queueOpen, speedMenu, swipeTarget) {
+    LaunchedEffect(controlsVisible, paused, panelOpen, queueOpen, speedMenu, swipeTarget, touched) {
         if (controlsVisible && !paused && !panelOpen && !queueOpen && !speedMenu && swipeTarget == null) {
-            delay(4_000)
+            delay(if (keyMode) 6_000 else 4_000)
             controlsVisible = false
         }
     }
@@ -910,6 +919,13 @@ private fun PlayerScreen(
     // The remote (Android TV) or a keyboard: ⏪ ⏩ and pause without the controls, the controls on any other key.
     val keys = remember { FocusRequester() }
     LaunchedEffect(controlsVisible, panelOpen, queueOpen) { if (!controlsVisible && !panelOpen && !queueOpen) runCatching { keys.requestFocus() } }
+    LaunchedEffect(controlsVisible) {
+        if (controlsVisible && keyMode) {
+            // Once the controls are on screen: the first press then lands on Pause, not anywhere.
+            delay(80)
+            runCatching { pauseFocus.requestFocus() }
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -917,6 +933,8 @@ private fun PlayerScreen(
             .focusRequester(keys)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                keyMode = true
+                touched++
                 when (event.key) {
                     Key.MediaPlayPause, Key.Spacebar -> { player.togglePause(); true }
                     Key.MediaPlay -> { if (player.paused.value) player.togglePause(); true }
@@ -934,6 +952,7 @@ private fun PlayerScreen(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {
+                        keyMode = false
                         when {
                             panelOpen -> panelOpen = false
                             queueOpen -> queueOpen = false
@@ -1034,13 +1053,13 @@ private fun PlayerScreen(
                     modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().safeDrawingPadding().padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = onBack) { Text("←", color = Color.White, fontSize = 24.sp) }
+                    TextButton(onClick = onBack, modifier = Modifier.focusRing(RoundedCornerShape(50))) { Text("←", color = Color.White, fontSize = 24.sp) }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(item.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         item.subtitle?.let { Text(it, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, maxLines = 1) }
                     }
-                    IconButton(onClick = onPip) { Icon(NyxaraIcons.Pip, contentDescription = "Image dans l'image", tint = Color.White) }
-                    TextButton(onClick = { showInfo = !showInfo }) { Text("Infos", color = Color.White) }
+                    IconButton(onClick = onPip, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Pip, contentDescription = "Image dans l'image", tint = Color.White) }
+                    TextButton(onClick = { showInfo = !showInfo }, modifier = Modifier.focusRing(RoundedCornerShape(50))) { Text("Infos", color = Color.White) }
                 }
 
                 Row(
@@ -1054,7 +1073,7 @@ private fun PlayerScreen(
                         onClick = { player.togglePause() },
                         shape = CircleShape,
                         color = Color.White.copy(alpha = 0.18f),
-                        modifier = Modifier.size(88.dp),
+                        modifier = Modifier.focusRequester(pauseFocus).focusRing(CircleShape).size(88.dp),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(if (paused) "▶" else "❚❚", color = Color.White, fontSize = 34.sp)
@@ -1082,7 +1101,26 @@ private fun PlayerScreen(
                                 dragPosition = null
                             },
                             valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 12.dp)
+                                // With the remote: ±10 s a press, further when held, mpv asked
+                                // once in a while rather than at each tiny step of the slider.
+                                .onPreviewKeyEvent { event ->
+                                    val direction = when (event.key) {
+                                        Key.DirectionLeft -> -1
+                                        Key.DirectionRight -> 1
+                                        else -> return@onPreviewKeyEvent false
+                                    }
+                                    if (event.type == KeyEventType.KeyDown) {
+                                        val repeat = held[0]++
+                                        if (repeat % 3 == 0) jump(direction * if (repeat > 15) 60 else if (repeat > 3) 30 else SHORT_JUMP)
+                                    } else {
+                                        held[0] = 0
+                                    }
+                                    true
+                                }
+                                .focusRing(RoundedCornerShape(50)),
                         )
                         Text("−" + formatTime(duration - shown), color = Color.White, fontSize = 13.sp)
                     }
@@ -1196,7 +1234,15 @@ private fun PlayerScreen(
 private fun SeekButton(direction: Int, onJump: (Int) -> Unit, onHold: (Int) -> Job) {
     Box(
         modifier = Modifier
+            .focusRing(RoundedCornerShape(50))
             .clip(RoundedCornerShape(50))
+            // The remote's OK: one jump (the finger's press is below).
+            .onKeyEvent { event ->
+                val ok = event.key == Key.DirectionCenter || event.key == Key.Enter
+                if (ok && event.type == KeyEventType.KeyDown) onJump(direction * SHORT_JUMP)
+                ok
+            }
+            .focusable()
             .pointerInput(direction) {
                 detectTapGestures(
                     onPress = {
@@ -1228,7 +1274,7 @@ private const val HOLD_TICK_MS = 350L
 private fun Pill(text: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.focusRing(RoundedCornerShape(50)),
         shape = RoundedCornerShape(50),
         color = if (active) Color.White else Color.White.copy(alpha = 0.14f),
         contentColor = if (active) Color.Black else Color.White,
@@ -1384,7 +1430,7 @@ private fun FailurePanel(report: String, onClose: () -> Unit) {
 /** ⏮ / ⏭ on each side of the jumps. */
 @Composable
 private fun SkipButton(forward: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(56.dp)) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.focusRing(CircleShape).size(56.dp)) {
         Icon(
             if (forward) NyxaraIcons.SkipNext else NyxaraIcons.SkipPrevious,
             contentDescription = if (forward) "Vidéo suivante" else "Vidéo précédente",
