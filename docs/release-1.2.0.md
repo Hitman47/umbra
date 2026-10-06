@@ -1,0 +1,9 @@
+- Lecture : diagnostic quand une vidéo ne démarre pas (« Lecture impossible », à copier)
+- Analyse des gros partages plus robuste : reprise après interruption, dossiers sans réponse gardés tels quels
+- Fiche série : résumé, date et note de chaque saison
+- Accueil : chaque rangée s'ouvre en grille complète
+- Séries : filtres Séries / Animation / Animés
+- Documentaires : dossiers dédiés et onglet Docs
+- Titres similaires absents : leur page, et recherche externe
+- Intégrations tierces améliorées
+- Affichage sur téléphone corrigé
