@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import io.github.mkdevtests.umbra.nas.NasCheck
 import io.github.mkdevtests.umbra.nas.NasState
 import io.github.mkdevtests.umbra.ui.theme.focusRing
 import java.text.DateFormat
@@ -57,6 +58,7 @@ fun NasStatusChip(
     wide: Boolean,
     hide: Boolean,
     titles: Map<String, Int>,
+    history: List<NasCheck>,
     onHide: (Boolean) -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -132,8 +134,26 @@ fun NasStatusChip(
                     }
                     Switch(checked = hide, onCheckedChange = onHide)
                 }
+                var showHistory by remember { mutableStateOf(false) }
+                TextButton(onClick = { showHistory = !showHistory }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                    Text(if (showHistory) "Masquer l'historique" else "Dernières vérifications ›")
+                }
+                if (showHistory) {
+                    val time = java.text.SimpleDateFormat("HH:mm:ss", Locale.FRANCE)
+                    Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (history.isEmpty()) Text("Aucune pour l'instant.", style = MaterialTheme.typography.bodySmall)
+                        history.forEach { check ->
+                            Text(
+                                "${time.format(Date(check.at))} · ${check.reason.label}\n" + check.results.joinToString("\n"),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 Text(
-                    "Vérifié toutes les minutes tant que l'appli est ouverte, et à chaque changement de réseau.",
+                    "Vérifié toutes les minutes tant que l'appli est ouverte, et après chaque changement de réseau. Hors ligne seulement après deux échecs de suite.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),

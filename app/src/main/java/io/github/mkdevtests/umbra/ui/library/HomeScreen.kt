@@ -187,6 +187,7 @@ private fun HomeContent(
     val hidden by libraryViewModel.hidden.collectAsState()
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
     val nasStates by app.nasMonitor.states.collectAsState()
+    val nasHistory by app.nasMonitor.history.collectAsState()
     val downloads by app.downloads.list.collectAsState()
     val appSettings by app.settings.settings.collectAsState()
     val hide = appSettings.hideUnavailable
@@ -227,7 +228,7 @@ private fun HomeContent(
             NyxaraLogo()
             Box(modifier = Modifier.weight(1f))
             NasStatusChip(
-                nasStates, wide, hide, titlesPerNas,
+                nasStates, wide, hide, titlesPerNas, nasHistory,
                 onHide = { value -> app.settings.update { it.copy(hideUnavailable = value) } },
                 onRetry = app.nasMonitor::checkNow,
             )

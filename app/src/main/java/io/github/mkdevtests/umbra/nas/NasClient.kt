@@ -47,11 +47,17 @@ interface NasClient : Closeable {
     }
 
     /**
-     * The NAS answers now, at its home address or its fallback: for the
-     * state shown at the top of the screen. Blocking (a few seconds at most).
+     * Null when the NAS answers now, at its home address or its fallback;
+     * else why not, per address: for the state shown at the top of the
+     * screen. Blocking (a few seconds at most).
      */
-    fun answers(): Boolean = listOf(source.host, source.fallbackHost).map { it.trim() }.filter { it.isNotEmpty() }.any { host ->
-        reachable(host.substringBefore(':'), host.substringAfter(':', "").toIntOrNull() ?: probePort)
+    fun probe(): String? {
+        val errors = mutableListOf<String>()
+        for (host in source.hosts()) {
+            val port = host.substringAfter(':', "").toIntOrNull() ?: probePort
+            errors += connectError(host.substringBefore(':'), port) ?: return null
+        }
+        return errors.joinToString(" ; ").ifEmpty { "aucune adresse" }
     }
 
     companion object {
@@ -98,10 +104,25 @@ fun firstReachable(hosts: List<String>, port: Int, timeoutMs: Int = 1_500): Stri
 
 private const val HOME_PROBE_MS = 600
 
-/** Something listens at [host]:[port]. */
-fun reachable(host: String, port: Int, timeoutMs: Int = 1_500): Boolean = runCatching {
-    java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), timeoutMs) }
-}.isSuccess
+/** Null when something listens at [host]:[port]; else "192.168.1.10:445 : délai dépassé (3000 ms)". */
+fun connectError(host: String, port: Int, timeoutMs: Int = PROBE_TIMEOUT_MS): String? {
+    val started = System.currentTimeMillis()
+    return try {
+        java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), timeoutMs) }
+        null
+    } catch (e: Exception) {
+        val reason = when (e) {
+            is java.net.SocketTimeoutException -> "délai dépassé"
+            is java.net.UnknownHostException -> "nom inconnu"
+            is java.net.ConnectException -> "refusé"
+            is java.net.NoRouteToHostException -> "pas de route"
+            else -> e.javaClass.simpleName
+        }
+        "$host:$port : $reason (${System.currentTimeMillis() - started} ms)"
+    }
+}
+
+private const val PROBE_TIMEOUT_MS = 3_000
 
 /** How long the home address may answer after the Tailscale one and still be chosen. */
 private const val PREFER_HOME_MS = 150L

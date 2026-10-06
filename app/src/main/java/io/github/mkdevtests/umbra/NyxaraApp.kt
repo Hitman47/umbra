@@ -185,12 +185,12 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
             override fun onAvailable(network: android.net.Network) {
                 if (last != null && last != network) nas?.onNetworkChanged()
                 last = network
-                nasMonitor.checkNow()
+                nasMonitor.checkNow(io.github.mkdevtests.umbra.nas.CheckReason.Network)
             }
 
             override fun onLost(network: android.net.Network) {
                 nas?.onNetworkChanged()
-                nasMonitor.checkNow()
+                nasMonitor.checkNow(io.github.mkdevtests.umbra.nas.CheckReason.Network)
             }
         })
     }

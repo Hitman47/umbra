@@ -20,6 +20,14 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
     private val byRoot: Map<String, Pair<NasClient, String>> =
         connections.flatMap { nas -> nas.source.shares.map { share -> nas.source.rootOf(share).lowercase() to (nas to share) } }.toMap()
 
+    /** Source id → when its NAS last answered a listing or an opening: proof enough that it is there. */
+    private val answered = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** When the NAS of [sourceId] last answered (0: not since the app started). */
+    fun answeredAt(sourceId: String): Long = answered[sourceId] ?: 0
+
+    private fun <T> NasClient.noted(call: () -> T): T = call().also { answered[source.id] = System.currentTimeMillis() }
+
     /** The roots of [source], in name order. */
     fun rootsOf(source: NasSource): List<String> = source.shares.map(source::rootOf).sortedWith(::naturalCompare)
 
@@ -53,7 +61,7 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
         if (!withExcluded && nas.source.isExcluded(path)) return emptyList()
         if (!withPersonal && nas.source.isPersonal(path)) return emptyList()
         val prefix = "$share\\"
-        return nas.list(share + path.substring(root.length))
+        return nas.noted { nas.list(share + path.substring(root.length)) }
             .map { entry -> entry.copy(path = root + "\\" + entry.path.removePrefix(prefix)) }
             .filterNot { (!withExcluded && nas.source.isExcluded(it.path)) || (!withPersonal && nas.source.isPersonal(it.path)) }
     }
@@ -63,7 +71,7 @@ class NasRouter(val connections: List<NasClient>) : Closeable {
         val root = path.substringBefore('\\')
         val (nas, share) = route(root)
         if (nas.source.isExcluded(path)) throw IOException("Dossier exclu de la bibliothèque")
-        return nas.open(share + path.substring(root.length))
+        return nas.noted { nas.open(share + path.substring(root.length)) }
     }
 
     /** A URL the player reads [path] at by itself (WebDAV), or null: through the local server. */

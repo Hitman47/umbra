@@ -314,7 +314,7 @@ class LibraryRepository(private val app: NyxaraApp) {
                         "${(tvdb?.requests?.get() ?: 0) - tvdbRequests} TheTVDB requests",
                 )
                 // A NAS that didn't answer: said at the top of the screen, by its state.
-                if (scanner.offline.isNotEmpty()) app.nasMonitor.checkNow()
+                if (scanner.offline.isNotEmpty()) app.nasMonitor.checkNow(io.github.mkdevtests.umbra.nas.CheckReason.Scan)
                 _scan.value = ScanState(
                     error = scanner.failed.size.takeIf { it > 0 }?.let { "$it dossier${if (it > 1) "s" else ""} sans réponse : leurs titres sont gardés tels quels." },
                 )
