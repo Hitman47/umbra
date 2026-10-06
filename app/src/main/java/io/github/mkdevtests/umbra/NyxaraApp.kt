@@ -111,17 +111,22 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** Durations of the Perso videos, kept apart from the library's media infos and out of the backups. */
     val persoMedia by lazy { MediaInfoStore(noBackupFilesDir.resolve("perso-media.json"), { nas }, scope) }
 
+    /** Whether each NAS answers, for the state at the top of the screen. */
+    val nasMonitor by lazy { io.github.mkdevtests.umbra.nas.NasMonitor(scope) { nas } }
+
     /** Activities on screen: none left, the Perso tab locks again. */
     private var started = 0
 
     private fun watchForeground() = registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
         override fun onActivityStarted(activity: android.app.Activity) {
             started++
+            nasMonitor.foreground = true
         }
 
         override fun onActivityStopped(activity: android.app.Activity) {
             started--
             if (started <= 0 && !activity.isChangingConfigurations) perso.relock()
+            if (started <= 0) nasMonitor.foreground = false
         }
 
         override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) = Unit
@@ -180,10 +185,12 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
             override fun onAvailable(network: android.net.Network) {
                 if (last != null && last != network) nas?.onNetworkChanged()
                 last = network
+                nasMonitor.checkNow()
             }
 
             override fun onLost(network: android.net.Network) {
                 nas?.onNetworkChanged()
+                nasMonitor.checkNow()
             }
         })
     }
@@ -260,6 +267,25 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         if (!exclude) library.onSourcesChanged()
     }
 
+    /**
+     * [sub] of [share] on the NAS of [sourceId] takes [role] (Réglages ›
+     * Dossiers suivis): the NAS and the documentary folders change, then the
+     * library follows.
+     */
+    @Synchronized
+    fun setRole(sourceId: String, share: String, sub: String, role: io.github.mkdevtests.umbra.nas.FolderRole, siblings: List<String>) {
+        val source = nas?.sources?.firstOrNull { it.id == sourceId } ?: return
+        val others = nas?.sources.orEmpty().filter { it.id != sourceId }
+        val change = io.github.mkdevtests.umbra.nas.withRole(source, others, share, sub, role, settings.settings.value.documentaryFolders, siblings) ?: return
+        if (change.documentaries != settings.settings.value.documentaryFolders) settings.update { it.copy(documentaryFolders = change.documentaries) }
+        if (change.source == source) return
+        saveSource(change.source, NasClient.of(change.source))
+        when (role) {
+            io.github.mkdevtests.umbra.nas.FolderRole.Off, io.github.mkdevtests.umbra.nas.FolderRole.Personal -> library.onFolderExcluded()
+            else -> library.onSourcesChanged()
+        }
+    }
+
     val backups by lazy { io.github.mkdevtests.umbra.history.BackupManager(this) }
 
     @Synchronized
@@ -270,6 +296,7 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         val dropped = nas?.connections.orEmpty().filter { it !in connections }
         nas = connections.takeIf { it.isNotEmpty() }?.let(::NasRouter)
         _sourceList.value = nas?.sources.orEmpty()
+        nasMonitor.checkNow()
         // Closing logs off the NAS: network I/O, not allowed on the main thread.
         if (dropped.isNotEmpty()) thread { dropped.forEach { it.close() } }
     }

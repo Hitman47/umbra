@@ -45,6 +45,8 @@ class WebDavNas(override val source: NasSource, private val http: OkHttpClient =
         if (source.username.isNotBlank()) username(source.username).password(source.password)
     }.build().toString()
 
+    override fun answers(): Boolean = reachable(base.host, base.port)
+
     /** The folders at the server's URL. */
     override fun availableShares(): List<String> = propfind(base).filter { it.isDirectory }.map { it.name }.sorted()
 

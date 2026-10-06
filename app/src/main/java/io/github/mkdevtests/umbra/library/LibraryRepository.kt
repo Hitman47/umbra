@@ -313,9 +313,10 @@ class LibraryRepository(private val app: NyxaraApp) {
                     "scan done in ${(System.currentTimeMillis() - started) / 1000} s, ${tmdb.requests.get() - requests} TMDB requests, " +
                         "${(tvdb?.requests?.get() ?: 0) - tvdbRequests} TheTVDB requests",
                 )
+                // A NAS that didn't answer: said at the top of the screen, by its state.
+                if (scanner.offline.isNotEmpty()) app.nasMonitor.checkNow()
                 _scan.value = ScanState(
-                    error = offlineMessage(nas, scanner.offline)
-                        ?: scanner.failed.size.takeIf { it > 0 }?.let { "$it dossier${if (it > 1) "s" else ""} sans réponse : leurs titres sont gardés tels quels." },
+                    error = scanner.failed.size.takeIf { it > 0 }?.let { "$it dossier${if (it > 1) "s" else ""} sans réponse : leurs titres sont gardés tels quels." },
                 )
             } catch (e: CancellationException) {
                 _scan.value = ScanState()
@@ -328,16 +329,6 @@ class LibraryRepository(private val app: NyxaraApp) {
     }
 
     private suspend fun save(library: Library) = dao.replace(library)
-
-    /** "Zima 2 injoignable : ses titres sont gardés tels quels.", or null when every NAS answered. */
-    private fun offlineMessage(nas: NasRouter, offline: Set<String>): String? {
-        val names = offline.mapNotNull { nas.sourceOf(it)?.label }.distinct().sorted().ifEmpty { return null }
-        return if (names.size == 1) {
-            "${names.single()} injoignable : ses titres sont gardés tels quels."
-        } else {
-            "${names.joinToString(", ")} injoignables : leurs titres sont gardés tels quels."
-        }
-    }
 
     /** Only the titles stored on the shares of [nas], out of the excluded and Perso folders. */
     private fun Library.within(nas: NasRouter?): Library {

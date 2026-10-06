@@ -46,6 +46,14 @@ interface NasClient : Closeable {
         }.isSuccess
     }
 
+    /**
+     * The NAS answers now, at its home address or its fallback: for the
+     * state shown at the top of the screen. Blocking (a few seconds at most).
+     */
+    fun answers(): Boolean = listOf(source.host, source.fallbackHost).map { it.trim() }.filter { it.isNotEmpty() }.any { host ->
+        reachable(host.substringBefore(':'), host.substringAfter(':', "").toIntOrNull() ?: probePort)
+    }
+
     companion object {
         fun of(source: NasSource): NasClient = when (source.protocol) {
             Protocol.Smb -> SmbNas(source)
@@ -89,6 +97,11 @@ fun firstReachable(hosts: List<String>, port: Int, timeoutMs: Int = 1_500): Stri
 }
 
 private const val HOME_PROBE_MS = 600
+
+/** Something listens at [host]:[port]. */
+fun reachable(host: String, port: Int, timeoutMs: Int = 1_500): Boolean = runCatching {
+    java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), timeoutMs) }
+}.isSuccess
 
 /** How long the home address may answer after the Tailscale one and still be chosen. */
 private const val PREFER_HOME_MS = 150L

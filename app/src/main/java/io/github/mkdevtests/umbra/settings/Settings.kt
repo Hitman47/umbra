@@ -52,6 +52,8 @@ data class Settings(
     val onlineSubtitleLanguages: List<String> = listOf("fr", "en"),
     /** Folders of documentaries (app paths): their titles leave Films and Séries for Documentaires. */
     val documentaryFolders: List<String> = emptyList(),
+    /** The titles of a NAS that doesn't answer leave the lists (downloaded ones stay). */
+    val hideUnavailable: Boolean = false,
 )
 
 
@@ -88,6 +90,7 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_ANIME_UPSCALE, updated.animeUpscale)
             putBoolean(KEY_SCAN_AWAY, updated.scanAway)
             putString(KEY_DOCUMENTARIES, updated.documentaryFolders.joinToString("\n"))
+            putBoolean(KEY_HIDE_UNAVAILABLE, updated.hideUnavailable)
         }
     }
 
@@ -120,6 +123,7 @@ class SettingsStore(context: Context) {
             animeUpscale = prefs.getBoolean(KEY_ANIME_UPSCALE, defaults.animeUpscale),
             scanAway = prefs.getBoolean(KEY_SCAN_AWAY, defaults.scanAway),
             documentaryFolders = prefs.getString(KEY_DOCUMENTARIES, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
+            hideUnavailable = prefs.getBoolean(KEY_HIDE_UNAVAILABLE, defaults.hideUnavailable),
         )
     }
 
@@ -140,6 +144,7 @@ class SettingsStore(context: Context) {
         const val KEY_ANIME_UPSCALE = "anime_upscale"
         const val KEY_SCAN_AWAY = "scan_away"
         const val KEY_DOCUMENTARIES = "documentary_folders"
+        const val KEY_HIDE_UNAVAILABLE = "hide_unavailable"
         const val NONE = "none"
     }
 }

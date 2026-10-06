@@ -48,6 +48,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,8 @@ import io.github.mkdevtests.umbra.browse.BrowserViewModel
 import io.github.mkdevtests.umbra.history.Progress
 import io.github.mkdevtests.umbra.history.seenOf
 import io.github.mkdevtests.umbra.library.Library
+import io.github.mkdevtests.umbra.library.available
+import io.github.mkdevtests.umbra.library.unavailableKeys
 import io.github.mkdevtests.umbra.library.Movie
 import io.github.mkdevtests.umbra.library.Saga
 import io.github.mkdevtests.umbra.library.Show
@@ -182,13 +185,39 @@ private fun HomeContent(
     val shortcuts by libraryViewModel.shortcuts.collectAsState()
     val fullLibrary by libraryViewModel.library.collectAsState()
     val hidden by libraryViewModel.hidden.collectAsState()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
+    val nasStates by app.nasMonitor.states.collectAsState()
+    val downloads by app.downloads.list.collectAsState()
+    val appSettings by app.settings.settings.collectAsState()
+    val hide = appSettings.hideUnavailable
+    val offlineIds = remember(nasStates) { nasStates.filter { !it.online }.mapTo(HashSet()) { it.id } }
+    // A file of a NAS that doesn't answer, not downloaded: can't be read now.
+    val unavailable: (String) -> Boolean = remember(offlineIds, downloads) {
+        val router = app.nas
+        val local = downloads.filter { it.state == io.github.mkdevtests.umbra.download.DownloadState.Done }.mapTo(HashSet()) { it.key }
+        val test: (String) -> Boolean = { file -> file !in local && router?.sourceOf(file)?.id in offlineIds }
+        test
+    }
+    // Hidden when asked: out of every list, the search's included; else dimmed.
+    val reachable = remember(fullLibrary, offlineIds, hide, unavailable) {
+        if (hide && offlineIds.isNotEmpty()) fullLibrary.available(unavailable) else fullLibrary
+    }
+    val dimmed = remember(fullLibrary, offlineIds, hide, unavailable) {
+        if (!hide && offlineIds.isNotEmpty()) fullLibrary.unavailableKeys(unavailable) else emptySet()
+    }
+    val titlesPerNas = remember(fullLibrary, nasStates) {
+        val router = app.nas
+        (fullLibrary.movies.map { it.file } + fullLibrary.shows.mapNotNull { show -> show.seasons.firstOrNull()?.episodes?.firstOrNull()?.file })
+            .mapNotNull { router?.sourceOf(it)?.id }.groupingBy { it }.eachCount()
+    }
     // Hidden titles stay out of every list; the search finds them with its "Masqués" filter.
-    val library = remember(fullLibrary, hidden) { fullLibrary.without(hidden) }
+    val library = remember(reachable, hidden) { reachable.without(hidden) }
     // Documentaries leave Films and Séries for their own tab.
     val (documentaries, titles) = remember(library, documentaryFolders) { library.splitDocumentaries(documentaryFolders) }
     val scan by libraryViewModel.scan.collectAsState()
     val history by libraryViewModel.history.collectAsState()
     val scanning = if (scan.running) "Analyse de la bibliothèque…" else null
+    val tabStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
 
     Column(modifier = modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
         Row(
@@ -197,12 +226,17 @@ private fun HomeContent(
         ) {
             NyxaraLogo()
             Box(modifier = Modifier.weight(1f))
+            NasStatusChip(
+                nasStates, wide, hide, titlesPerNas,
+                onHide = { value -> app.settings.update { it.copy(hideUnavailable = value) } },
+                onRetry = app.nasMonitor::checkNow,
+            )
             if (scan.running) {
                 Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                 }
             } else {
-                IconButton(onClick = libraryViewModel::rescan) { Icon(NyxaraIcons.Refresh, contentDescription = "Actualiser la bibliothèque") }
+                IconButton(onClick = { app.nasMonitor.checkNow(); libraryViewModel.rescan() }) { Icon(NyxaraIcons.Refresh, contentDescription = "Actualiser la bibliothèque") }
             }
             if (wide) {
                 IconButton(onClick = onPickLocalFile) { Icon(NyxaraIcons.Upload, contentDescription = "Lire un fichier de l'appareil") }
@@ -222,6 +256,9 @@ private fun HomeContent(
         }
         scan.error?.let { StatusText(it, isError = true) }
 
+        // Each tab keeps its filters and scroll while another tab or a page is shown.
+        tabStates.SaveableStateProvider(tab.name) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalUnavailable provides dimmed) {
         when (tab) {
             HomeTab.Home -> FeedScreen(
                 library = library,
@@ -249,8 +286,10 @@ private fun HomeContent(
                     onPersonal = { (context.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).addPersonal(it); browserViewModel.refresh() },
                 )
             }
-            HomeTab.Search -> SearchScreen(fullLibrary, libraryViewModel, onOpenMovie, onOpenShow, onLongPress = menu)
+            HomeTab.Search -> SearchScreen(reachable, libraryViewModel, onOpenMovie, onOpenShow, onLongPress = menu)
             HomeTab.Perso -> io.github.mkdevtests.umbra.ui.perso.PersoScreen(androidx.lifecycle.viewmodel.compose.viewModel())
+        }
+        }
         }
     }
 }
@@ -500,9 +539,11 @@ private fun SortMenu(sort: GridSort, onSort: (GridSort) -> Unit) {
 @Composable
 internal fun PosterCard(item: PosterItem, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
     Column(modifier = modifier.focusRing().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
-        Box {
+        val unavailable = item.key in LocalUnavailable.current
+        Box(modifier = if (unavailable) Modifier.alpha(0.4f) else Modifier) {
             Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth())
             item.badge?.let { CornerBadge(it, Modifier.align(Alignment.TopEnd)) }
+            if (unavailable) UnavailableMark(Modifier.align(Alignment.TopStart))
         }
         Text(
             item.title,

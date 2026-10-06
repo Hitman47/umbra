@@ -1,5 +1,23 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import io.github.mkdevtests.umbra.nas.within
+
+import androidx.compose.ui.graphics.Color
+
+import androidx.compose.runtime.saveable.rememberSaveable
+
+import androidx.compose.runtime.key
+
+import androidx.compose.material3.Tab
+
+import androidx.compose.material3.ScrollableTabRow
+
+import androidx.compose.material3.NavigationDrawerItem
+
+import androidx.compose.foundation.layout.width
+
+import androidx.compose.foundation.layout.BoxWithConstraints
+
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
@@ -90,8 +108,6 @@ fun SettingsScreen(
     onImport: suspend (Uri) -> String,
     perso: PersoStore,
     catalog: io.github.mkdevtests.umbra.catalog.CatalogStore,
-    /** The folders below a NAS path ("" for the shares), to choose the documentaries. */
-    listFolders: suspend (String) -> List<String>,
     requests: io.github.mkdevtests.umbra.requests.RequestStore,
     onBack: () -> Unit,
 ) {
@@ -114,196 +130,252 @@ fun SettingsScreen(
         cacheSize = withContext(Dispatchers.IO) { imageCache.walk().filter { it.isFile }.sumOf { it.length() } }
     }
 
+    var tab by rememberSaveable { mutableStateOf(SettingsTab.Library) }
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
         ScreenTitle("Réglages", onBack)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 12.dp)
-                .widthIn(max = 900.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-        ) {
-            Section("Profil de lecture") {
-                Item("Audio préféré", "Touchez une langue pour la monter d'un rang.") {
-                    settings.audioOrder.forEachIndexed { index, language ->
-                        FilterChip(
-                            selected = index == 0,
-                            onClick = { store.update { it.copy(audioOrder = it.audioOrder.movedUp(language)) } },
-                            label = { Text("${index + 1} · ${language.label}") },
-                        )
-                    }
-                }
-                Item("Sous-titres", "Complets, pas seulement les passages forcés. Si l'audio est déjà dans cette langue : seulement les passages étrangers.") {
-                    (Language.entries + null).forEach { language ->
-                        FilterChip(
-                            selected = settings.subtitles == language,
-                            onClick = { store.update { it.copy(subtitles = language) } },
-                            label = { Text(language?.label ?: "Aucun") },
-                        )
-                    }
-                }
-                Item("Taille des sous-titres") {
-                    SubtitleSize.entries.forEach { size ->
-                        FilterChip(
-                            selected = settings.subtitleSize == size,
-                            onClick = { store.update { it.copy(subtitleSize = size) } },
-                            label = { Text(size.label) },
-                        )
-                    }
-                }
-                Item("Si une langue manque", "La piste la plus proche est choisie : la lecture n'est jamais bloquée. Les choix s'appliquent à la prochaine vidéo ouverte.")
-            }
-
-            Section("Sources") {
-                var removing by remember { mutableStateOf<NasSource?>(null) }
-                sources.forEach { source ->
-                    val addresses = source.hosts().joinToString(" ou ")
-                    Item(source.label, "${source.protocol.label} · $addresses · ${source.shares.size} dossier${if (source.shares.size > 1) "s" else ""}") {
-                        TextButton(onClick = { removing = source }) { Text("Retirer") }
-                        TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
-                    }
-                    Item(
-                        "Dossiers suivis",
-                        if (source.excluded.isEmpty()) "Tous les dossiers" else "${source.excluded.size} dossier${if (source.excluded.size > 1) "s" else ""} exclu${if (source.excluded.size > 1) "s" else ""}",
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val wide = maxWidth >= 600.dp
+            val page: @Composable (Modifier) -> Unit = { modifier ->
+                // Each tab starts at its top.
+                key(tab) {
+                    Column(
+                        modifier = modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 24.dp, vertical = 12.dp)
+                            .widthIn(max = 900.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp),
                     ) {
-                        TextButton(onClick = { onEditFolders(source) }) { Text("Choisir ›") }
-                    }
-                }
-                Item("Ajouter un NAS", "Les vues Films et Séries regroupent toutes les sources.") {
-                    TextButton(onClick = onAddSource) { Text("Ajouter ›") }
-                }
-                removing?.let { source ->
-                    AlertDialog(
-                        onDismissRequest = { removing = null },
-                        title = { Text("Retirer ${source.label} ?") },
-                        text = { Text("Ses titres quittent la bibliothèque. L'historique de lecture est gardé : il revient si le NAS est ajouté à nouveau.") },
-                        confirmButton = { TextButton(onClick = { removing = null; onRemoveSource(source) }) { Text("Retirer") } },
-                        dismissButton = { TextButton(onClick = { removing = null }) { Text("Annuler") } },
-                    )
-                }
-            }
+                        when (tab) {
+                            SettingsTab.Library -> {
+                                Section("Sources") {
+                                    var removing by remember { mutableStateOf<NasSource?>(null) }
+                                    sources.forEach { source ->
+                                        val addresses = source.hosts().joinToString(" ou ")
+                                        Item(source.label, "${source.protocol.label} · $addresses · ${source.shares.size} dossier${if (source.shares.size > 1) "s" else ""}") {
+                                            TextButton(onClick = { removing = source }) { Text("Retirer") }
+                                            TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
+                                        }
+                                        val documentaries = settings.documentaryFolders.count { folder -> source.shares.any { folder.within(source.rootOf(it)) } }
+                                        Item(
+                                            "Dossiers suivis",
+                                            listOfNotNull(
+                                                "${source.shares.size} partage${if (source.shares.size > 1) "s" else ""}",
+                                                source.excluded.size.takeIf { it > 0 }?.let { "$it exclu${if (it > 1) "s" else ""}" },
+                                                documentaries.takeIf { it > 0 }?.let { "$it de documentaires" },
+                                                source.personal.size.takeIf { it > 0 }?.let { "$it Perso" },
+                                            ).joinToString(" · ") + ". Bibliothèque, Documentaires, Perso ou non suivi, dossier par dossier.",
+                                        ) {
+                                            TextButton(onClick = { onEditFolders(source) }) { Text("Choisir ›") }
+                                        }
+                                    }
+                                    Item("Masquer ce qui est indisponible", "Les titres d'un NAS hors ligne quittent les listes, sauf ceux téléchargés. Aussi en haut de l'accueil, en touchant l'état des NAS.") {
+                                        Switch(checked = settings.hideUnavailable, onCheckedChange = { on -> store.update { it.copy(hideUnavailable = on) } })
+                                    }
+                                    Item("Ajouter un NAS", "Les vues Films et Séries regroupent toutes les sources.") {
+                                        TextButton(onClick = onAddSource) { Text("Ajouter ›") }
+                                    }
+                                    removing?.let { source ->
+                                        AlertDialog(
+                                            onDismissRequest = { removing = null },
+                                            title = { Text("Retirer ${source.label} ?") },
+                                            text = { Text("Ses titres quittent la bibliothèque. L'historique de lecture est gardé : il revient si le NAS est ajouté à nouveau.") },
+                                            confirmButton = { TextButton(onClick = { removing = null; onRemoveSource(source) }) { Text("Retirer") } },
+                                            dismissButton = { TextButton(onClick = { removing = null }) { Text("Annuler") } },
+                                        )
+                                    }
+                                }
 
-            Section("Accueil") {
-                val roots = remember(sources) { sources.flatMap { source -> source.shares.map(source::rootOf) }.sortedWith(::naturalCompare) }
-                val chosen = shortcutRoots(settings.homeShortcuts, roots)
-                ChipsItem("Raccourcis", "Dossiers proposés en haut de l'accueil, chacun avec ses films et séries.") {
-                    roots.forEach { root ->
-                        val on = chosen.any { it.equals(root, ignoreCase = true) }
-                        FilterChip(
-                            selected = on,
-                            onClick = { store.update { it.copy(homeShortcuts = roots.filter { r -> if (r == root) !on else chosen.any { c -> c.equals(r, ignoreCase = true) } }) } },
-                            label = { Text(root) },
+                                Section("Accueil") {
+                                    val roots = remember(sources) { sources.flatMap { source -> source.shares.map(source::rootOf) }.sortedWith(::naturalCompare) }
+                                    val chosen = shortcutRoots(settings.homeShortcuts, roots)
+                                    ChipsItem("Raccourcis", "Dossiers proposés en haut de l'accueil, chacun avec ses films et séries.") {
+                                        roots.forEach { root ->
+                                            val on = chosen.any { it.equals(root, ignoreCase = true) }
+                                            FilterChip(
+                                                selected = on,
+                                                onClick = { store.update { it.copy(homeShortcuts = roots.filter { r -> if (r == root) !on else chosen.any { c -> c.equals(r, ignoreCase = true) } }) } },
+                                                label = { Text(root) },
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Section("Bibliothèque") {
+                                    Item("Actualiser au lancement", "Seuls les fichiers nouveaux ou modifiés sont analysés.") {
+                                        Switch(checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
+                                    }
+                                    Item(
+                                        "Bibliothèque enregistrée",
+                                        listOfNotNull(
+                                            savedAt?.let { "Analyse du ${DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME)}" } ?: "Pas encore",
+                                            "point de départ du prochain lancement",
+                                            scan.error,
+                                        ).joinToString(" · "),
+                                    )
+                                    Item("Actualiser hors de chez moi", "Au lancement, même à travers Tailscale (plus lent). Sinon seulement à la maison.") {
+                                        Switch(checked = settings.scanAway, onCheckedChange = { on -> store.update { it.copy(scanAway = on) } })
+                                    }
+                                    Item("Téléchargements", "Films et épisodes copiés sur la tablette, pour les regarder sans le NAS.") {
+                                        TextButton(onClick = onOpenDownloads) { Text("Voir ›") }
+                                    }
+                                    Item("Corrections de matching", if (fixes.isEmpty()) "Aucune" else "${fixes.size} dossier${if (fixes.size > 1) "s" else ""} corrigé${if (fixes.size > 1) "s" else ""}") {
+                                        TextButton(onClick = onOpenCorrections) { Text("Voir ›") }
+                                    }
+                                    Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
+                                }
+                            }
+                            SettingsTab.Playback -> {
+                                Section("Profil de lecture") {
+                                    Item("Audio préféré", "Touchez une langue pour la monter d'un rang.") {
+                                        settings.audioOrder.forEachIndexed { index, language ->
+                                            FilterChip(
+                                                selected = index == 0,
+                                                onClick = { store.update { it.copy(audioOrder = it.audioOrder.movedUp(language)) } },
+                                                label = { Text("${index + 1} · ${language.label}") },
+                                            )
+                                        }
+                                    }
+                                    Item("Sous-titres", "Complets, pas seulement les passages forcés. Si l'audio est déjà dans cette langue : seulement les passages étrangers.") {
+                                        (Language.entries + null).forEach { language ->
+                                            FilterChip(
+                                                selected = settings.subtitles == language,
+                                                onClick = { store.update { it.copy(subtitles = language) } },
+                                                label = { Text(language?.label ?: "Aucun") },
+                                            )
+                                        }
+                                    }
+                                    Item("Taille des sous-titres") {
+                                        SubtitleSize.entries.forEach { size ->
+                                            FilterChip(
+                                                selected = settings.subtitleSize == size,
+                                                onClick = { store.update { it.copy(subtitleSize = size) } },
+                                                label = { Text(size.label) },
+                                            )
+                                        }
+                                    }
+                                    Item("Si une langue manque", "La piste la plus proche est choisie : la lecture n'est jamais bloquée. Les choix s'appliquent à la prochaine vidéo ouverte.")
+                                }
+
+                                Section("Lecture") {
+                                    Item("Avancer, reculer", "Double appui sur un bord : 10 s. Maintenir ⏪ ou ⏩ : de plus en plus loin. Glisser sur l'image : des secondes aux minutes selon la longueur du geste.")
+                                    Item("Passer les génériques tout seul", "Sinon, un bouton « Passer » apparaît pendant le générique (fichiers avec chapitres).") {
+                                        Switch(checked = settings.autoSkip, onCheckedChange = { on -> store.update { it.copy(autoSkip = on) } })
+                                    }
+                                    Item("Épisode suivant au générique", "Compte à rebours de 10 s dès le générique de fin, annulable.") {
+                                        Switch(checked = settings.nextEpisodeCountdown, onCheckedChange = { on -> store.update { it.copy(nextEpisodeCountdown = on) } })
+                                    }
+                                    Item("Image dans l'image", "Quitter le lecteur (bouton Accueil) garde la vidéo dans une petite fenêtre.") {
+                                        Switch(checked = settings.pictureInPicture, onCheckedChange = { on -> store.update { it.copy(pictureInPicture = on) } })
+                                    }
+                                    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+                                    Item("Son en arrière-plan", "Écran éteint ou autre appli : le son continue, avec une notification pour mettre en pause.") {
+                                        Switch(checked = settings.backgroundAudio, onCheckedChange = { on ->
+                                            store.update { it.copy(backgroundAudio = on) }
+                                            // The notification's pause button needs Android's permission.
+                                            if (on && android.os.Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                        })
+                                    }
+                                    Item("Version plus légère hors de chez moi", "Par Tailscale ou en données mobiles : la version jusqu'au 1080p plutôt que la 4K. Toujours modifiable sur la fiche.") {
+                                        Switch(checked = settings.lighterAway, onCheckedChange = { on -> store.update { it.copy(lighterAway = on) } })
+                                    }
+                                    Item("Mode nuit", "Dialogues plus forts, explosions plus douces, à chaque lecture. Aussi dans le lecteur : Audio et sous-titres.") {
+                                        Switch(checked = settings.nightAudio, onCheckedChange = { on -> store.update { it.copy(nightAudio = on) } })
+                                    }
+                                    Item("Amélioration anime (Anime4K)", "Traits plus nets sur les dessins animés, à chaque lecture. Demande plus à la tablette.") {
+                                        Switch(checked = settings.animeUpscale, onCheckedChange = { on -> store.update { it.copy(animeUpscale = on) } })
+                                    }
+                                }
+
+                                OpenSubtitlesSection(
+                                    openSubtitles, settings.onlineSubtitleLanguages, settings.autoOnlineSubtitles,
+                                    onAuto = { on -> store.update { it.copy(autoOnlineSubtitles = on) } },
+                                ) { languages -> store.update { it.copy(onlineSubtitleLanguages = languages) } }
+                            }
+                            SettingsTab.Perso -> {
+                                PersoSection(perso)
+                                CatalogSection(catalog)
+                            }
+                            SettingsTab.Services -> {
+                                TraktSection(trakt)
+                                RequestsSection(requests)
+                            }
+                            SettingsTab.App -> {
+                                Section("Sauvegarde") {
+                                    Item(
+                                        "Historique, corrections, réglages",
+                                        backupResult ?: "Dans un fichier que tu gardes où tu veux (jamais sur le NAS) ; à importer sur une autre tablette ou après une réinstallation. Les mots de passe des NAS n'y sont pas.",
+                                    ) {
+                                        TextButton(onClick = { exportTo.launch("nyxara-sauvegarde.json") }) { Text("Exporter") }
+                                        TextButton(onClick = { importFrom.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }) { Text("Importer") }
+                                    }
+                                }
+
+                                Section("Réseau") {
+                                    Item("Tester le débit", networkResult ?: "Lit un gros film comme la lecture le ferait : aller-retour, débit, et ce qu'ils permettent. À faire chez soi puis dehors.") {
+                                        TextButton(onClick = {
+                                            networkResult = "Test en cours…"
+                                            scope.launch { networkResult = onTestNetwork() }
+                                        }) { Text("Tester") }
+                                    }
+                                    Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
+                                        TextButton(onClick = onOpenStats) { Text("Voir ›") }
+                                    }
+                                }
+
+                                Section("Mises à jour") {
+                                    if (BuildConfig.UPDATES) {
+                                        Item("Version installée", "${BuildConfig.VERSION_NAME} · GitHub ${Updater.REPOSITORY}${lastCheck?.let { " · $it" } ?: ""}") {
+                                            TextButton(onClick = updater::check) { Text("Rechercher") }
+                                        }
+                                    } else {
+                                        Item("Version installée", "${BuildConfig.VERSION_NAME} · version de test, mise à jour par le PC")
+                                    }
+                                }
+                                UpdateBanner(updater)
+                            }
+                        }
+                        Text(
+                            "Lecture seule : Nyxara ne modifie ni ne supprime jamais de fichiers sur le NAS.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
-
-            Section("Bibliothèque") {
-                Item("Actualiser au lancement", "Seuls les fichiers nouveaux ou modifiés sont analysés.") {
-                    Switch(checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
-                }
-                Item(
-                    "Bibliothèque enregistrée",
-                    listOfNotNull(
-                        savedAt?.let { "Analyse du ${DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME)}" } ?: "Pas encore",
-                        "point de départ du prochain lancement",
-                        scan.error,
-                    ).joinToString(" · "),
-                )
-                Item("Actualiser hors de chez moi", "Au lancement, même à travers Tailscale (plus lent). Sinon seulement à la maison.") {
-                    Switch(checked = settings.scanAway, onCheckedChange = { on -> store.update { it.copy(scanAway = on) } })
-                }
-                Item("Téléchargements", "Films et épisodes copiés sur la tablette, pour les regarder sans le NAS.") {
-                    TextButton(onClick = onOpenDownloads) { Text("Voir ›") }
-                }
-                Item("Corrections de matching", if (fixes.isEmpty()) "Aucune" else "${fixes.size} dossier${if (fixes.size > 1) "s" else ""} corrigé${if (fixes.size > 1) "s" else ""}") {
-                    TextButton(onClick = onOpenCorrections) { Text("Voir ›") }
-                }
-                Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
-            }
-
-            DocumentarySection(settings.documentaryFolders, listFolders) { folders -> store.update { it.copy(documentaryFolders = folders) } }
-
-            Section("Lecture") {
-                Item("Avancer, reculer", "Double appui sur un bord : 10 s. Maintenir ⏪ ou ⏩ : de plus en plus loin. Glisser sur l'image : des secondes aux minutes selon la longueur du geste.")
-                Item("Passer les génériques tout seul", "Sinon, un bouton « Passer » apparaît pendant le générique (fichiers avec chapitres).") {
-                    Switch(checked = settings.autoSkip, onCheckedChange = { on -> store.update { it.copy(autoSkip = on) } })
-                }
-                Item("Épisode suivant au générique", "Compte à rebours de 10 s dès le générique de fin, annulable.") {
-                    Switch(checked = settings.nextEpisodeCountdown, onCheckedChange = { on -> store.update { it.copy(nextEpisodeCountdown = on) } })
-                }
-                Item("Image dans l'image", "Quitter le lecteur (bouton Accueil) garde la vidéo dans une petite fenêtre.") {
-                    Switch(checked = settings.pictureInPicture, onCheckedChange = { on -> store.update { it.copy(pictureInPicture = on) } })
-                }
-                val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-                Item("Son en arrière-plan", "Écran éteint ou autre appli : le son continue, avec une notification pour mettre en pause.") {
-                    Switch(checked = settings.backgroundAudio, onCheckedChange = { on ->
-                        store.update { it.copy(backgroundAudio = on) }
-                        // The notification's pause button needs Android's permission.
-                        if (on && android.os.Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                    })
-                }
-                Item("Version plus légère hors de chez moi", "Par Tailscale ou en données mobiles : la version jusqu'au 1080p plutôt que la 4K. Toujours modifiable sur la fiche.") {
-                    Switch(checked = settings.lighterAway, onCheckedChange = { on -> store.update { it.copy(lighterAway = on) } })
-                }
-                Item("Mode nuit", "Dialogues plus forts, explosions plus douces, à chaque lecture. Aussi dans le lecteur : Audio et sous-titres.") {
-                    Switch(checked = settings.nightAudio, onCheckedChange = { on -> store.update { it.copy(nightAudio = on) } })
-                }
-                Item("Amélioration anime (Anime4K)", "Traits plus nets sur les dessins animés, à chaque lecture. Demande plus à la tablette.") {
-                    Switch(checked = settings.animeUpscale, onCheckedChange = { on -> store.update { it.copy(animeUpscale = on) } })
-                }
-                Item("Tester le débit", networkResult ?: "Lit un gros film comme la lecture le ferait : aller-retour, débit, et ce qu'ils permettent. À faire chez soi puis dehors.") {
-                    TextButton(onClick = {
-                        networkResult = "Test en cours…"
-                        scope.launch { networkResult = onTestNetwork() }
-                    }) { Text("Tester") }
-                }
-                Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
-                    TextButton(onClick = onOpenStats) { Text("Voir ›") }
-                }
-            }
-
-            RequestsSection(requests)
-
-            PersoSection(perso)
-            CatalogSection(catalog)
-
-            TraktSection(trakt)
-
-            Section("Sauvegarde") {
-                Item(
-                    "Historique, corrections, réglages",
-                    backupResult ?: "Dans un fichier que tu gardes où tu veux (jamais sur le NAS) ; à importer sur une autre tablette ou après une réinstallation. Les mots de passe des NAS n'y sont pas.",
-                ) {
-                    TextButton(onClick = { exportTo.launch("nyxara-sauvegarde.json") }) { Text("Exporter") }
-                    TextButton(onClick = { importFrom.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }) { Text("Importer") }
-                }
-            }
-
-            OpenSubtitlesSection(
-                openSubtitles, settings.onlineSubtitleLanguages, settings.autoOnlineSubtitles,
-                onAuto = { on -> store.update { it.copy(autoOnlineSubtitles = on) } },
-            ) { languages -> store.update { it.copy(onlineSubtitleLanguages = languages) } }
-
-            Section("Mises à jour") {
-                if (BuildConfig.UPDATES) {
-                    Item("Version installée", "${BuildConfig.VERSION_NAME} · GitHub ${Updater.REPOSITORY}${lastCheck?.let { " · $it" } ?: ""}") {
-                        TextButton(onClick = updater::check) { Text("Rechercher") }
+            if (wide) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Column(modifier = Modifier.width(220.dp).padding(start = 12.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SettingsTab.entries.forEach { entry ->
+                            NavigationDrawerItem(
+                                label = { Text(entry.label) },
+                                selected = tab == entry,
+                                onClick = { tab = entry },
+                            )
+                        }
                     }
-                } else {
-                    Item("Version installée", "${BuildConfig.VERSION_NAME} · version de test, mise à jour par le PC")
+                    page(Modifier.weight(1f))
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    ScrollableTabRow(selectedTabIndex = tab.ordinal, edgePadding = 16.dp, containerColor = Color.Transparent) {
+                        SettingsTab.entries.forEach { entry ->
+                            Tab(selected = tab == entry, onClick = { tab = entry }, text = { Text(entry.label) })
+                        }
+                    }
+                    page(Modifier.fillMaxWidth())
                 }
             }
-            UpdateBanner(updater)
-
-            Text(
-                "Lecture seule : Nyxara ne modifie ni ne supprime jamais de fichiers sur le NAS.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
+}
+
+/** The pages of Réglages. */
+private enum class SettingsTab(val label: String) {
+    Library("Bibliothèque"),
+    Playback("Lecture"),
+    Perso("Perso"),
+    Services("Services"),
+    App("Appli"),
 }
 
 /** The Perso tab's lock: a PIN, the fingerprint as a shortcut. */
@@ -401,35 +473,6 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
                 }) { Text("Enregistrer") }
             },
             dismissButton = { TextButton(onClick = { editing = false }) { Text("Annuler") } },
-        )
-    }
-}
-
-/** The documentary folders: their titles go to the Docs tab, out of Films and Séries. */
-@Composable
-private fun DocumentarySection(folders: List<String>, listFolders: suspend (String) -> List<String>, onChange: (List<String>) -> Unit) {
-    var picking by remember { mutableStateOf(false) }
-    Section("Documentaires") {
-        Item(
-            "Dossiers de documentaires",
-            if (folders.isEmpty()) "Aucun : un onglet Docs apparaît dès qu'un dossier est choisi. Ses titres quittent Films et Séries." else "Leurs films et séries sont dans l'onglet Docs, plus dans Films ni Séries.",
-        ) { TextButton(onClick = { picking = true }) { Text("Ajouter ›") } }
-        folders.forEach { folder ->
-            Item(folder.substringAfterLast('\\'), folder.replace("\\", " › ")) {
-                TextButton(onClick = { onChange(folders - folder) }) { Text("Retirer") }
-            }
-        }
-    }
-    if (picking) {
-        FolderPickerDialog(
-            "Dossier de documentaires",
-            listFolders,
-            onPick = { path ->
-                picking = false
-                // A folder inside one already chosen adds nothing; one around others replaces them.
-                if (folders.none { path.equals(it, true) || path.startsWith("$it\\", true) }) onChange(folders.filterNot { it.startsWith("$path\\", true) } + path)
-            },
-            onDismiss = { picking = false },
         )
     }
 }

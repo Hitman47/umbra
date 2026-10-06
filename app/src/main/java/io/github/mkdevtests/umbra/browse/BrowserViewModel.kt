@@ -192,6 +192,27 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rootsOf(source: NasSource): List<String> = nyxara.nas?.libraryRootsOf(source).orEmpty()
 
+    /** Every share [source] offers, read or not; those it reads when it won't say (or doesn't answer). */
+    suspend fun sharesOf(source: NasSource): List<String> = withContext(Dispatchers.IO) {
+        val client = nyxara.nas?.connections?.firstOrNull { it.source.id == source.id }
+        val offered = runCatching { client?.availableShares() }.getOrNull().orEmpty()
+        (offered + source.shares).distinctBy { it.lowercase() }.sortedWith { a, b -> naturalCompare(a, b) }
+    }
+
+    /** The folders in [sub] ("" for the top) of [share] on [source], whether the library reads them or not. */
+    suspend fun subfoldersOf(source: NasSource, share: String, sub: String): List<String> = withContext(Dispatchers.IO) {
+        val client = nyxara.nas?.connections?.firstOrNull { it.source.id == source.id } ?: return@withContext emptyList()
+        runCatching { sortForDisplay(client.list(if (sub.isEmpty()) share else "$share\\$sub")) }.getOrDefault(emptyList())
+            .filter { it.isDirectory && !it.name.startsWith('@') && !it.name.startsWith('#') }
+            .map { it.name }
+    }
+
+    /** [sub] of [share] takes [role] (see [NyxaraApp.setRole]). */
+    suspend fun setRole(source: NasSource, share: String, sub: String, role: io.github.mkdevtests.umbra.nas.FolderRole, siblings: List<String>) {
+        withContext(Dispatchers.IO) { nyxara.setRole(source.id, share, sub, role, siblings) }
+        refresh()
+    }
+
     /** Takes [folder] back into [source]. */
     fun include(source: NasSource, folder: String) {
         val updated = source.copy(excluded = source.excluded - folder)

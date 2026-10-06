@@ -137,10 +137,12 @@ private fun NyxaraRoot(
             stack.clear()
         },
     )
+    // The home screen's filters and scroll, kept while a page is open over it.
+    val homeState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     // A page opened from another of the same kind starts at its top.
     key(stack.size) {
         when (val detail = stack.lastOrNull()) {
-            null -> HomeScreen(
+            null -> homeState.SaveableStateProvider("home") { HomeScreen(
                 libraryViewModel = libraryViewModel,
                 browserViewModel = browserViewModel,
                 updater = app.updater,
@@ -154,7 +156,7 @@ private fun NyxaraRoot(
                 onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
                 onOpenSettings = { stack.add(Detail.Settings) },
                 onOpenShelf = { stack.add(Detail.Shelf(it)) },
-            )
+            ) }
             is Detail.MovieDetail -> library.movies.firstOrNull { it.file == detail.file }?.let { MovieDetailScreen(it, libraryViewModel, links, back) } ?: back()
             is Detail.ShowDetail -> showOf(detail.key)?.let { show ->
                 ShowDetailScreen(show, libraryViewModel, links, back, onFixMatch = { stack.add(Detail.FixMatch(show.key)) })
@@ -189,7 +191,6 @@ private fun NyxaraRoot(
                 onImport = app.backups::import,
                 perso = app.perso,
                 catalog = app.catalog,
-                listFolders = { path -> browserViewModel.folders(path).map { it.path } },
                 requests = app.requests,
                 onBack = back,
             )
@@ -197,12 +198,7 @@ private fun NyxaraRoot(
             Detail.Downloads -> DownloadsScreen(libraryViewModel, back)
             Detail.Corrections -> CorrectionsScreen(libraryViewModel, onOpenShow = { stack.add(Detail.ShowDetail(it)) }, onBack = back)
             is Detail.Folders -> sources.firstOrNull { it.id == detail.sourceId }?.let { source ->
-                FoldersScreen(
-                    source, browserViewModel,
-                    onExcluded = libraryViewModel::onFolderExcluded,
-                    onIncluded = libraryViewModel::onSourcesChanged,
-                    onBack = back,
-                )
+                FoldersScreen(source, browserViewModel, onBack = back)
             } ?: back()
         }
     }
