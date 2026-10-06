@@ -171,9 +171,17 @@ class LocalStreamServer(
         val opening = System.nanoTime()
         val (file, opened) = try {
             target.pool.acquire()
-        } catch (e: Exception) {
-            Log.w(TAG, "open ${target.key} failed", e)
-            return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
+        } catch (first: Exception) {
+            // Handles kept from before (connection lost meanwhile): once more, from scratch.
+            Log.w(TAG, "open ${target.key} failed, retrying", first)
+            target.pool.closeAll()
+            try {
+                target.pool.acquire()
+            } catch (e: Exception) {
+                Log.w(TAG, "open ${target.key} failed", e)
+                lastOpenError = OpenError(target.key, describe(e))
+                return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
+            }
         }
         if (opened) stat.opened(System.nanoTime() - opening) else stat.reused()
         val size = try {
@@ -231,6 +239,15 @@ class LocalStreamServer(
         /** Port tried first, so that image URLs (and their cache) stay the same from one launch to the next. */
         private const val PREFERRED_PORT = 47913
 
+        /** The last file the NAS refused to open, and why: for the player's "Lecture impossible". */
+        @Volatile
+        var lastOpenError: OpenError? = null
+
+        /** "Le partage … : STATUS_… (SMBApiException)", causes included. */
+        private fun describe(e: Throwable): String = generateSequence(e) { it.cause }.take(3)
+            .joinToString(" ← ") { "${it.message ?: "?"} (${it.javaClass.simpleName})" }
+            .let { e.toUserMessage() + "\n" + it }
+
         /** A server on [PREFERRED_PORT], or any free port when it is taken. */
         fun bound(nas: () -> NasRouter?, imageSecret: String): LocalStreamServer {
             val preferred = LocalStreamServer(imageSecret, PREFERRED_PORT, nas)
@@ -277,6 +294,9 @@ class LocalStreamServer(
 }
 
 /** Requests made for one file, time spent opening it on the NAS and reading from it. */
+/** [key] could not be opened on the NAS: [message]. */
+data class OpenError(val key: String, val message: String, val at: Long = System.currentTimeMillis())
+
 class StreamStats {
     @Volatile var size = 0L
     private val requestCount = AtomicLong()

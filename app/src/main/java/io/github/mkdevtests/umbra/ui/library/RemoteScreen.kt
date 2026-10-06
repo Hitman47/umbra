@@ -1,6 +1,5 @@
 package io.github.mkdevtests.umbra.ui.library
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,42 +7,31 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.library.RemoteTitle
-import io.github.mkdevtests.umbra.nas.toUserMessage
-import io.github.mkdevtests.umbra.requests.Release
-import io.github.mkdevtests.umbra.requests.searchQuery
 import io.github.mkdevtests.umbra.ui.theme.GlassIconButton
 import io.github.mkdevtests.umbra.ui.theme.GlowButton
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.ui.theme.Tag
-import io.github.mkdevtests.umbra.ui.theme.focusRing
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -129,86 +117,5 @@ fun RemoteScreen(tmdbId: Int, isShow: Boolean, viewModel: LibraryViewModel, link
             }
         }
     }
-    title?.takeIf { searching }?.let { shown -> SearchDialog(app, shown, onClose = { searching = false }) }
-}
-
-/** Prowlarr's releases for a title, the preferred quality first; one chosen goes to qBittorrent after a confirmation. */
-@Composable
-private fun SearchDialog(app: NyxaraApp, title: RemoteTitle, onClose: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf(searchQuery(title.title, title.year, title.isShow)) }
-    var results by remember { mutableStateOf<List<Release>?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var chosen by remember { mutableStateOf<Release?>(null) }
-    fun search() {
-        busy = true
-        message = null
-        scope.launch {
-            runCatching { app.requests.search(query, title.isShow) }
-                .onSuccess { results = it; if (it.isEmpty()) message = "Aucun résultat." }
-                .onFailure { message = "Recherche impossible : ${it.toUserMessage()}" }
-            busy = false
-        }
-    }
-    LaunchedEffect(Unit) { search() }
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Rechercher « ${title.title} »", maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(query, { query = it }, singleLine = true, modifier = Modifier.weight(1f))
-                    TextButton(onClick = ::search, enabled = !busy && query.isNotBlank()) { Text("Chercher") }
-                }
-                message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp)) {
-                    if (busy) {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                    } else {
-                        LazyColumn {
-                            items(results.orEmpty(), key = { it.link }) { release ->
-                                Column(modifier = Modifier.fillMaxWidth().focusRing().clickable { chosen = release }.padding(vertical = 8.dp)) {
-                                    Text(release.title, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                    Text(
-                                        listOfNotNull(release.quality, sizeLabel(release.size), release.seeders?.let { "$it sources" }, release.indexer, release.published)
-                                            .joinToString("  ·  "),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                HorizontalDivider()
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onClose) { Text("Fermer") } },
-    )
-    chosen?.let { release ->
-        AlertDialog(
-            onDismissRequest = { chosen = null },
-            title = { Text("Envoyer à qBittorrent ?") },
-            text = { Text(release.title) },
-            confirmButton = {
-                TextButton(onClick = {
-                    chosen = null
-                    busy = true
-                    scope.launch {
-                        message = runCatching { app.requests.send(release, title.tmdbId, title.isShow, title.title) }
-                            .fold({ "Envoyé à qBittorrent." }, { "Envoi impossible : ${it.toUserMessage()}" })
-                        busy = false
-                    }
-                }, enabled = app.requests.settings.value.canSend) { Text("Envoyer") }
-            },
-            dismissButton = { TextButton(onClick = { chosen = null }) { Text("Annuler") } },
-        )
-    }
-}
-
-private fun sizeLabel(bytes: Long): String? = when {
-    bytes <= 0 -> null
-    bytes >= 1L shl 30 -> String.format(Locale.FRANCE, "%.1f Go", bytes / (1L shl 30).toDouble())
-    else -> String.format(Locale.FRANCE, "%d Mo", bytes / (1L shl 20))
+    title?.takeIf { searching }?.let { shown -> ReleaseSearch(app, shown, onClose = { searching = false }) }
 }

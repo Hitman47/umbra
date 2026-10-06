@@ -351,8 +351,8 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
             "Prowlarr et qBittorrent",
             result ?: listOf(
                 if (settings.canSearch) "Prowlarr : ${settings.prowlarrUrl}" else "Prowlarr : non réglé",
-                if (settings.canSend) "qBittorrent : ${settings.qbitUrl}" else "qBittorrent : non réglé",
-            ).joinToString(" · ") + ". Depuis la page d'un titre absent (titres similaires) : rechercher, choisir, envoyer.",
+                if (settings.canSend) "qBittorrent : ${settings.qbitUrl}" else "qBittorrent : non réglé (envoi par Prowlarr)",
+            ).joinToString(" · ") + ". Depuis la page d'un titre absent (titres similaires) : rechercher, choisir, envoyer. Catégories « Films Nyxara » et « Séries Nyxara ».",
         ) {
             TextButton(onClick = { editing = true }) { Text("Régler") }
             if (settings.canSearch || settings.canSend) {
@@ -369,6 +369,7 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
         var qbitUrl by remember { mutableStateOf(settings.qbitUrl) }
         var qbitUser by remember { mutableStateOf(settings.qbitUser) }
         var qbitPassword by remember { mutableStateOf(settings.qbitPassword) }
+        var qbitKey by remember { mutableStateOf(settings.qbitKey) }
         AlertDialog(
             onDismissRequest = { editing = false },
             title = { Text("Recherche externe") },
@@ -380,6 +381,11 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     )
                     OutlinedTextField(qbitUrl, { qbitUrl = it }, label = { Text("Adresse de qBittorrent") }, placeholder = { Text("http://192.168.1.10:8080") }, singleLine = true)
+                    OutlinedTextField(
+                        qbitKey, { qbitKey = it }, label = { Text("Clé API WebUI de qBittorrent") }, singleLine = true,
+                        supportingText = { Text("qBittorrent 5.2 ou plus récent. Sinon, identifiant et mot de passe ci-dessous.") },
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    )
                     OutlinedTextField(qbitUser, { qbitUser = it }, label = { Text("Identifiant qBittorrent") }, singleLine = true)
                     OutlinedTextField(
                         qbitPassword, { qbitPassword = it }, label = { Text("Mot de passe qBittorrent") }, singleLine = true,
@@ -389,7 +395,7 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
             },
             confirmButton = {
                 TextButton(onClick = {
-                    requests.save(io.github.mkdevtests.umbra.requests.RequestSettings(prowlarrUrl, prowlarrKey, qbitUrl, qbitUser, qbitPassword))
+                    requests.save(io.github.mkdevtests.umbra.requests.RequestSettings(prowlarrUrl, prowlarrKey, qbitUrl, qbitUser, qbitPassword, qbitKey))
                     result = null
                     editing = false
                 }) { Text("Enregistrer") }

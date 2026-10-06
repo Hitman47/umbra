@@ -31,6 +31,7 @@ class RequestStore(context: Context, http: OkHttpClient) {
         prefs.getString(QBIT_URL, "").orEmpty(),
         prefs.getString(QBIT_USER, "").orEmpty(),
         prefs.getString(QBIT_PASSWORD, null)?.let(Secrets::decrypt).orEmpty(),
+        prefs.getString(QBIT_KEY, null)?.let(Secrets::decrypt).orEmpty(),
     )
 
     fun save(settings: RequestSettings) {
@@ -40,22 +41,23 @@ class RequestStore(context: Context, http: OkHttpClient) {
             putString(QBIT_URL, settings.qbitUrl.trim())
             putString(QBIT_USER, settings.qbitUser.trim())
             putString(QBIT_PASSWORD, Secrets.encrypt(settings.qbitPassword))
+            putString(QBIT_KEY, Secrets.encrypt(settings.qbitKey.trim()))
         }
         _settings.value = read()
     }
 
     suspend fun search(query: String, isShow: Boolean): List<Release> = withContext(Dispatchers.IO) { clients.search(settings.value, query, isShow) }
 
-    /** Sends [release] to qBittorrent and notes the title as asked for. */
+    /** Sends [release] (qBittorrent, else Prowlarr's client) and notes the title as asked for. */
     suspend fun send(release: Release, tmdbId: Int, isShow: Boolean, title: String) {
-        withContext(Dispatchers.IO) { clients.send(settings.value, release) }
+        withContext(Dispatchers.IO) { clients.send(settings.value, release, categoryFor(isShow)) }
         update { list -> list.filterNot { it.tmdbId == tmdbId && it.isShow == isShow } + Requested(tmdbId, isShow, title, release.title, System.currentTimeMillis()) }
     }
 
     /** A test of both: null when they answer, else what is wrong. */
     suspend fun check(settings: RequestSettings): String = withContext(Dispatchers.IO) {
         val prowlarr = if (!settings.canSearch) "Prowlarr : non réglé" else runCatching { clients.checkProwlarr(settings); "Prowlarr : OK" }.getOrElse { "Prowlarr : ${it.message}" }
-        val qbit = if (!settings.canSend) "qBittorrent : non réglé" else runCatching { clients.login(settings); "qBittorrent : OK" }.getOrElse { "qBittorrent : ${it.message}" }
+        val qbit = if (!settings.canSend) "qBittorrent : non réglé" else runCatching { "qBittorrent ${clients.checkQbit(settings)} : OK" }.getOrElse { "qBittorrent : ${it.message}" }
         "$prowlarr · $qbit"
     }
 
@@ -77,6 +79,7 @@ class RequestStore(context: Context, http: OkHttpClient) {
         private const val QBIT_URL = "qbit_url"
         private const val QBIT_USER = "qbit_user"
         private const val QBIT_PASSWORD = "qbit_password"
+        private const val QBIT_KEY = "qbit_key"
         private const val REQUESTED = "requested"
     }
 }

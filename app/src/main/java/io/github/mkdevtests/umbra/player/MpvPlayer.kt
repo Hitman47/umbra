@@ -153,6 +153,8 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.setOptionString("demuxer-max-back-bytes", "32MiB")
         mpv.setOptionString("keep-open", "yes")
         mpv.setOptionString("input-default-bindings", "no")
+        // No youtube-dl on Android: its hook only adds a misleading error.
+        mpv.setOptionString("ytdl", "no")
 
         // While a file opens, mpv's messages go to a file: they tell why a picture never comes.
         mpv.setOptionString("log-file", logFile.absolutePath)
@@ -348,7 +350,12 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         val messages = runCatching { logFile.readLines() }.getOrDefault(emptyList())
             .filter { LOG_PROBLEM.containsMatchIn(it) }
             .takeLast(30)
-        _failure.value = (listOf(reason) + file + listOf("") + messages.ifEmpty { listOf("(aucun message d'erreur du lecteur)") }).joinToString("\n")
+        // The local server's answer "HTTP 500" says nothing: the NAS's own refusal, if it happened for this file.
+        val nas = io.github.mkdevtests.umbra.nas.LocalStreamServer.lastOpenError
+            ?.takeIf { it.at >= System.currentTimeMillis() - (SystemClock.elapsedRealtime() - loadAt) - 1000 }
+            ?.let { listOf("Ouverture sur le NAS : ${it.key}", it.message) }
+            .orEmpty()
+        _failure.value = (listOf(reason) + nas + file + listOf("") + messages.ifEmpty { listOf("(aucun message d'erreur du lecteur)") }).joinToString("\n")
     }
 
     fun release() {

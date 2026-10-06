@@ -20,12 +20,55 @@ class RequestsTest {
               {"title":"Sans lien","size":1}
             ]""",
         ).jsonArray
-        val releases = parseReleases(json)
+        val releases = ranked(parseReleases(json))
         assertEquals(listOf("Film.2021.1080p.BluRay", "Film.2021.1080p.WEB", "Film.2021.2160p.UHD"), releases.map { it.title })
         assertEquals("magnet:?c", releases.first().link)
         assertEquals("2160p", releases.last().quality)
         assertEquals("Dune 2021", searchQuery("Dune", 2021, isShow = false))
         assertEquals("Cosmos", searchQuery("Cosmos", 2014, isShow = true))
+    }
+
+    @Test
+    fun preferredLanguagesComeFirstButTheOthersStay() {
+        val releases = listOf(
+            Release("Film.2021.1080p.VOSTFR.WEB", 1, 500, "A", magnet = "m1"),
+            Release("Film.2021.1080p.VFF.WEB", 1, 10, "A", magnet = "m2"),
+            Release("Film.2021.1080p.MULTI.WEB", 1, 5, "A", magnet = "m3"),
+            Release("Film.2021.720p.MULTI.WEB", 1, 900, "A", magnet = "m4"),
+        )
+        assertEquals(listOf("m3", "m2", "m1", "m4"), ranked(releases).map { it.link })
+        assertEquals(listOf("MULTI", "VFF", "VOSTFR"), languagesOf(releases))
+        assertEquals(listOf("1080p", "720p"), qualitiesOf(releases))
+        assertEquals(listOf("m3", "m4"), ReleaseFilter(language = "MULTI").apply(releases).map { it.link })
+    }
+
+    @Test
+    fun theSameTorrentOnSeveralIndexersIsOneLine() {
+        val releases = listOf(
+            Release("Film 2021 1080p", 100, 10, "A", magnet = "m1", infoHash = "ABC"),
+            Release("Film.2021.1080p", 100, 8, "B", magnet = "m2", infoHash = "abc"),
+            Release("Autre", 5, 1, "B", magnet = "m3"),
+        )
+        val lines = grouped(releases)
+        assertEquals(2, lines.size)
+        assertEquals(listOf("B"), lines.first().second.map { it.indexer })
+    }
+
+    @Test
+    fun releaseNamesAreTakenApart() {
+        val film = ReleaseTitle.parse("Ghost.in.the.Shell.1995.MULTI.1080p.BluRay.x265-GROUP")
+        assertEquals("Ghost in the Shell", film.title)
+        assertEquals(1995, film.year)
+        assertEquals("1080p", film.tag(TagKind.Resolution))
+        assertEquals("MULTI", film.tag(TagKind.Language))
+        assertEquals("x265", film.tag(TagKind.Codec))
+        val episode = ReleaseTitle.parse("Cosmos S01E03 VFF 720p WEB-DL H.264")
+        assertEquals("Cosmos", episode.title)
+        assertEquals(1, episode.season)
+        assertEquals(3, episode.episode)
+        assertEquals("WEB-DL", episode.tag(TagKind.Source))
+        assertEquals("Cosmos · S01E03", episode.heading)
+        assertEquals("5 j", ageLabel(120.0))
     }
 
     @Test
