@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val nyxaraVersion = "1.2.3"
+val nyxaraVersion = "1.2.4"
 
 base {
     // APK names: nyxara-debug.apk, nyxara-release-unsigned.apk
@@ -42,8 +42,9 @@ android {
         buildConfigField("String", "TRAKT_CLIENT_SECRET", localProperty("trakt.clientSecret"))
         buildConfigField("String", "OPENSUBTITLES_KEY", localProperty("opensubtitles.key"))
 
-        // libmpv ships 4 ABIs (~100 MB); the target tablet is arm64.
-        ndk { abiFilters += "arm64-v8a" }
+        // libmpv ships 4 ABIs (~100 MB): arm64 for the tablet, and 32-bit ARM for the
+        // Android TVs, which mostly run a 32-bit system even on a 64-bit chip.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     buildTypes {
