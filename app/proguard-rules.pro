@@ -25,6 +25,7 @@
 # Optional dependencies of those libraries, absent on Android.
 -dontwarn javax.**
 -dontwarn java.beans.**
+-dontwarn java.rmi.**
 -dontwarn java.lang.management.**
 -dontwarn org.slf4j.**
 -dontwarn org.ietf.jgss.**
