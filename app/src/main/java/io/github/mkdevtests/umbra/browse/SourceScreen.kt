@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.browse
 
+import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -153,7 +154,7 @@ fun SourceScreen(
                     placeholder = { Text(host.ifBlank { "Zima salon" }) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    modifier = width,
+                    modifier = width.remoteFriendly(),
                 )
                 OutlinedTextField(
                     value = host,
@@ -162,7 +163,7 @@ fun SourceScreen(
                     placeholder = { Text(if (protocol == Protocol.WebDav) "http://192.168.1.20:5005/" else "192.168.1.20 ou nom Tailscale") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
-                    modifier = width,
+                    modifier = width.remoteFriendly(),
                 )
                 if (protocol != Protocol.WebDav) {
                     OutlinedTextField(
@@ -173,7 +174,7 @@ fun SourceScreen(
                         supportingText = { Text("Utilisée quand l'adresse locale ne répond pas : une seule source chez toi et ailleurs.") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
-                        modifier = width,
+                        modifier = width.remoteFriendly(),
                     )
                 }
                 if (protocol != Protocol.Nfs) {
@@ -183,7 +184,7 @@ fun SourceScreen(
                         label = { Text("Utilisateur (vide = invité)") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                        modifier = width,
+                        modifier = width.remoteFriendly(),
                     )
                     OutlinedTextField(
                         value = password,
@@ -193,7 +194,7 @@ fun SourceScreen(
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = { if (!busy && host.isNotBlank()) discover() }),
-                        modifier = width,
+                        modifier = width.remoteFriendly(),
                     )
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -260,7 +261,7 @@ fun SourceScreen(
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { add() }),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).remoteFriendly(),
                         )
                         OutlinedButton(onClick = ::add, enabled = name.isNotBlank()) { Text("Ajouter") }
                     }

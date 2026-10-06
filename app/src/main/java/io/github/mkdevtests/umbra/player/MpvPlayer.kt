@@ -131,6 +131,11 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     /** The picture goes straight to the screen: the subtitles' text is shown by the app ([subtitleText]). */
     val direct: StateFlow<Boolean> = _direct.asStateFlow()
 
+    private val _passthrough = MutableStateFlow(settings.audioPassthrough)
+
+    /** Dolby / DTS sent as they are to an amplifier that takes them (Réglages, or the player's panel). */
+    val passthrough: StateFlow<Boolean> = _passthrough.asStateFlow()
+
     private val _subtitleText = MutableStateFlow("")
     val subtitleText: StateFlow<String> = _subtitleText.asStateFlow()
 
@@ -467,7 +472,12 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     /** The codecs the HDMI output takes as they are, for mpv's "audio-spdif" ("" : all decoded). */
     private fun passthroughCodecs(): String {
         // The night mode works on the decoded sound.
-        if (!settings.audioPassthrough || _nightAudio.value) return ""
+        if (!_passthrough.value || _nightAudio.value) return ""
+        return outputCodecs()
+    }
+
+    /** What the HDMI output takes as it is ("" : none, the sound is decoded). */
+    fun outputCodecs(): String {
         val audio = appContext.getSystemService(android.media.AudioManager::class.java) ?: return ""
         val hdmi = setOf(android.media.AudioDeviceInfo.TYPE_HDMI, android.media.AudioDeviceInfo.TYPE_HDMI_ARC, android.media.AudioDeviceInfo.TYPE_HDMI_EARC)
         val encodings = audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
@@ -475,6 +485,11 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
             .flatMap { it.encodings.toList() }
             .toSet()
         return passthroughFor(encodings)
+    }
+
+    fun setPassthrough(on: Boolean) {
+        _passthrough.value = on
+        mpv.setPropertyString("audio-spdif", passthroughCodecs())
     }
 
     /** The picture is HDR or Dolby Vision (known once decoded). */

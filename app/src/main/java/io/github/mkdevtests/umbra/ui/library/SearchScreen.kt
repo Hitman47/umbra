@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.speech.RecognizerIntent
@@ -108,7 +109,7 @@ fun SearchScreen(
                 }
             },
             shape = RoundedCornerShape(50),
-            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp).remoteFriendly(),
         )
         ChipRow {
             items(SearchKind.entries) { kind ->

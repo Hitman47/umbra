@@ -1349,6 +1349,22 @@ private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubt
         val night by player.nightAudio.collectAsState()
         val anime by player.animeUpscale.collectAsState()
         TrackRow("Mode nuit", "Dialogues plus forts, explosions plus douces", night) { player.setNightAudio(!night) }
+        val direct by player.passthrough.collectAsState()
+        val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
+        val output = remember { player.outputCodecs() }
+        TrackRow(
+            "Son direct (ampli, barre de son)",
+            when {
+                output.isEmpty() -> "Cette sortie ne prend que du son décodé"
+                night -> "Pas pendant le mode nuit"
+                else -> "Envoyé tel quel : " + output.uppercase().replace(",", ", ")
+            },
+            direct,
+        ) {
+            player.setPassthrough(!direct)
+            // Kept for the next videos too, as in Réglages › Lecture.
+            app.settings.update { it.copy(audioPassthrough = !direct) }
+        }
         TrackRow("Amélioration anime (Anime4K)", "Traits plus nets sur les dessins animés ; plus de travail pour la tablette", anime) { player.setAnimeUpscale(!anime) }
 
         PanelTitle("Décalage sous-titres")

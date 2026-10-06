@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 fun localProperty(key: String) = "\"${localProperties.getProperty(key, "")}\""
 
 // Bump for each GitHub release: the in-app updater compares it to the latest tag (v0.2.0).
-val nyxaraVersion = "1.2.6"
+val nyxaraVersion = "1.2.7"
 
 base {
     // APK names: nyxara-debug.apk, nyxara-release-unsigned.apk
@@ -125,6 +125,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // QR codes: Trakt's sign-in from a phone.
+    implementation(libs.zxing.core)
 
     // Library database, with full-text search.
     implementation(libs.room.runtime)

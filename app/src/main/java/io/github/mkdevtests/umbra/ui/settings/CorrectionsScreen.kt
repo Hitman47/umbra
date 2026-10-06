@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -76,7 +77,7 @@ fun CorrectionsScreen(viewModel: LibraryViewModel, onOpenShow: (String) -> Unit,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    OutlinedTextField(filter, { filter = it }, label = { Text("Filtrer (dossier ou série)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(filter, { filter = it }, label = { Text("Filtrer (dossier ou série)") }, singleLine = true, modifier = Modifier.fillMaxWidth().remoteFriendly())
                 }
             }
             items(journal.take(MAX_JOURNAL), key = { "log:" + it.group }) { decision ->

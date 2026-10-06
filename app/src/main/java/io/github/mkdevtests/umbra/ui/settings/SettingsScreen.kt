@@ -1,5 +1,11 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import io.github.mkdevtests.umbra.settings.hostOf
+
+import io.github.mkdevtests.umbra.ui.theme.FormField
+
+import io.github.mkdevtests.umbra.ui.theme.AddressField
+
 import androidx.compose.material3.CircularProgressIndicator
 
 import androidx.compose.foundation.layout.heightIn
@@ -497,6 +503,16 @@ private fun CatalogFolderPicker(title: String, list: suspend (String) -> List<St
     )
 }
 
+/** The hosts of the NAS (home, Tailscale): Prowlarr, qBittorrent or the catalogue often run on it. */
+@Composable
+private fun nasHosts(): List<Pair<String, String>> {
+    val app = LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
+    return remember {
+        app.nas?.sources.orEmpty().flatMap { source -> listOf(hostOf(source.host) to "NAS", hostOf(source.fallbackHost) to "Tailscale") }
+            .filter { it.first.isNotBlank() }
+    }
+}
+
 /** The pages of Réglages. */
 private enum class SettingsTab(val label: String) {
     Library("Bibliothèque"),
@@ -575,22 +591,13 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
             title = { Text("Recherche externe") },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(prowlarrUrl, { prowlarrUrl = it }, label = { Text("Adresse de Prowlarr") }, placeholder = { Text("http://192.168.1.10:9696") }, singleLine = true)
-                    OutlinedTextField(
-                        prowlarrKey, { prowlarrKey = it }, label = { Text("Clé API de Prowlarr") }, singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    )
-                    OutlinedTextField(qbitUrl, { qbitUrl = it }, label = { Text("Adresse de qBittorrent") }, placeholder = { Text("http://192.168.1.10:8080") }, singleLine = true)
-                    OutlinedTextField(
-                        qbitKey, { qbitKey = it }, label = { Text("Clé API WebUI de qBittorrent") }, singleLine = true,
-                        supportingText = { Text("qBittorrent 5.2 ou plus récent. Sinon, identifiant et mot de passe ci-dessous.") },
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    )
-                    OutlinedTextField(qbitUser, { qbitUser = it }, label = { Text("Identifiant qBittorrent") }, singleLine = true)
-                    OutlinedTextField(
-                        qbitPassword, { qbitPassword = it }, label = { Text("Mot de passe qBittorrent") }, singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    )
+                    val hosts = nasHosts()
+                    AddressField("Prowlarr", prowlarrUrl, { prowlarrUrl = it }, defaultPort = 9696, suggestions = hosts + listOf(hostOf(qbitUrl) to "Comme qBittorrent"))
+                    FormField(prowlarrKey, { prowlarrKey = it }, "Clé API de Prowlarr", secret = true, supporting = "Prowlarr › Settings › General › API Key")
+                    AddressField("qBittorrent", qbitUrl, { qbitUrl = it }, defaultPort = 8080, suggestions = hosts + listOf(hostOf(prowlarrUrl) to "Comme Prowlarr"))
+                    FormField(qbitKey, { qbitKey = it }, "Clé API WebUI de qBittorrent", secret = true, supporting = "qBittorrent 5.2 ou plus récent. Sinon, identifiant et mot de passe ci-dessous.")
+                    FormField(qbitUser, { qbitUser = it }, "Identifiant qBittorrent")
+                    FormField(qbitPassword, { qbitPassword = it }, "Mot de passe qBittorrent", secret = true, last = true)
                 }
             },
             confirmButton = {
@@ -645,14 +652,12 @@ private fun CatalogSection(catalog: io.github.mkdevtests.umbra.catalog.CatalogSt
             onDismissRequest = { editing = false },
             title = { Text("Catalogue externe") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(home, { home = it }, label = { Text("Adresse à la maison") }, placeholder = { Text("http://192.168.1.10:8086") }, singleLine = true)
-                    OutlinedTextField(away, { away = it }, label = { Text("Adresse hors de chez moi (facultatif)") }, singleLine = true)
-                    OutlinedTextField(user, { user = it }, label = { Text("Identifiant (facultatif)") }, singleLine = true)
-                    OutlinedTextField(
-                        password, { password = it }, label = { Text("Mot de passe (facultatif)") }, singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    )
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val hosts = nasHosts()
+                    AddressField("À la maison", home, { home = it }, defaultPort = 8086, suggestions = hosts)
+                    AddressField("Hors de chez moi (facultatif)", away, { away = it }, defaultPort = 8086, suggestions = hosts.filter { it.second == "Tailscale" } + listOf(hostOf(home) to "Comme à la maison"))
+                    FormField(user, { user = it }, "Identifiant (facultatif)")
+                    FormField(password, { password = it }, "Mot de passe (facultatif)", secret = true, last = true)
                     Text("Lecture seule : rien n'est jamais modifié dans le catalogue.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
@@ -703,6 +708,19 @@ private fun TraktSection(trakt: Trakt) {
                 Item("Code : ${code.userCode}", "Entre-le sur ${code.verificationUrl} (téléphone ou PC). Nyxara attend la validation.") {
                     TextButton(onClick = { uri.openUri(code.verificationUrl) }) { Text("Ouvrir") }
                     TextButton(onClick = trakt::cancelConnect) { Text("Annuler") }
+                }
+                // From a TV: the phone's camera on the QR code opens the page, then the code is typed there.
+                Row(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    io.github.mkdevtests.umbra.ui.theme.QrCode(code.verificationUrl, size = 150.dp)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("1. Vise ce code avec l'appareil photo du téléphone", style = MaterialTheme.typography.bodyMedium)
+                        Text("2. Sur la page qui s'ouvre (${code.verificationUrl.substringAfter("://")}), entre :", style = MaterialTheme.typography.bodyMedium)
+                        Text(code.userCode, style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             !status.connected -> Item(
@@ -765,11 +783,8 @@ private fun OpenSubtitlesSection(service: OpenSubtitles, languages: List<String>
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(name, { name = it }, label = { Text("Identifiant") }, singleLine = true, modifier = Modifier.weight(1f))
-                OutlinedTextField(
-                    password, { password = it }, label = { Text("Mot de passe") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f),
-                )
+                FormField(name, { name = it }, "Identifiant", Modifier.weight(1f))
+                FormField(password, { password = it }, "Mot de passe", Modifier.weight(1f), secret = true, last = true)
                 TextButton(onClick = { service.login(name.trim(), password) }, enabled = name.isNotBlank() && password.isNotEmpty() && !status.busy) { Text("Connecter") }
             }
         }

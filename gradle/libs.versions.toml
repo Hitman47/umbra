@@ -23,6 +23,8 @@ kotlinx-serialization = "1.11.0"
 # KSP2 versions are independent of the Kotlin version.
 ksp = "2.3.12"
 room = "2.8.5"
+# QR codes (Trakt's sign-in on a TV).
+zxing = "3.5.3"
 
 [libraries]
 junit = { module = "junit:junit", version.ref = "junit" }
@@ -45,6 +47,7 @@ coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" 
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }

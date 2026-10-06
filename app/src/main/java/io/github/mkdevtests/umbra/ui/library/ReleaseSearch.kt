@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -111,7 +112,7 @@ fun ReleaseSearch(app: NyxaraApp, title: RemoteTitle, onClose: () -> Unit) {
             }
             Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
-                    query, { query = it }, singleLine = true, modifier = Modifier.weight(1f),
+                    query, { query = it }, singleLine = true, modifier = Modifier.weight(1f).remoteFriendly(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { if (!busy && query.isNotBlank()) search() }),
                 )

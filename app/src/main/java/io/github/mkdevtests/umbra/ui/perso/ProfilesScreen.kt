@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.perso
 
+import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import io.github.mkdevtests.umbra.nas.within
 import io.github.mkdevtests.umbra.perso.videosUnder
 import kotlinx.coroutines.launch
@@ -129,7 +130,7 @@ private fun ProfileGrid(app: NyxaraApp, catalog: CatalogIndex, onOpen: (String) 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
             query, { query = it }, singleLine = true, placeholder = { Text("Rechercher un profil") },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).remoteFriendly(),
         )
         FlowRow(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box {

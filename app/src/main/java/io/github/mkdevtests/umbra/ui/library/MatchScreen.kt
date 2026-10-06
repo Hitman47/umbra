@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -158,7 +159,7 @@ fun MatchScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { searched = query }),
                     trailingIcon = { TextButton(onClick = { searched = query }) { Text("Chercher") } },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().remoteFriendly(),
                 )
                 val pick = chosen
                 if (pick != null) {
