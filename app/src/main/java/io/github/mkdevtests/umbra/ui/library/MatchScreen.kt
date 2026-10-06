@@ -89,7 +89,7 @@ fun MatchScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 24.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← Retour") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onBack) { Text("← Retour") }
             Column(modifier = Modifier.padding(start = 8.dp)) {
                 Text("Corriger le matching", style = MaterialTheme.typography.headlineSmall)
                 Text(show.title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -159,7 +159,7 @@ fun MatchScreen(show: Show, viewModel: LibraryViewModel, onBack: () -> Unit) {
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { searched = query }),
-                    trailingIcon = { TextButton(onClick = { searched = query }) { Text("Chercher") } },
+                    trailingIcon = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { searched = query }) { Text("Chercher") } },
                     modifier = Modifier.fillMaxWidth().remoteFriendly(),
                 )
                 val pick = chosen
@@ -236,12 +236,12 @@ private fun ChosenShow(
         SearchResult(item, current = false, onClick = onCancel)
         Text("Saison", style = MaterialTheme.typography.titleMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            FilterChip(selected = season == null, onClick = { onSeason(null) }, label = { Text("Celle des fichiers") })
+            FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = season == null, onClick = { onSeason(null) }, label = { Text("Celle des fichiers") })
             seasons.forEach { s ->
                 val label = (if (s.number == 0) "Spéciaux" else "S${s.number}") +
                     (s.name?.takeIf { it != "Saison ${s.number}" && it != "Season ${s.number}" }?.let { " · $it" } ?: "") +
                     " · ${s.episodeCount} ép."
-                FilterChip(selected = season == s.number, onClick = { onSeason(s.number) }, label = { Text(label) })
+                FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = season == s.number, onClick = { onSeason(s.number) }, label = { Text(label) })
             }
         }
         if (season != null) {
@@ -256,7 +256,7 @@ private fun ChosenShow(
             Button(onClick = onApply, enabled = canApply) {
                 Text(if (folders > 1) "Appliquer aux $folders dossiers" else "Appliquer")
             }
-            TextButton(onClick = onCancel) { Text("Autre série") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onCancel) { Text("Autre série") }
         }
         Text(
             "La bibliothèque s'actualise pour appliquer le choix ; il reste valable aux prochains scans.",

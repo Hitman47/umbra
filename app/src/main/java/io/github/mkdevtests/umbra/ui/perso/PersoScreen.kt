@@ -85,8 +85,8 @@ fun PersoScreen(viewModel: PersoViewModel) {
     }
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            androidx.compose.material3.FilterChip(selected = !profiles, onClick = { profiles = false }, label = { Text("Dossiers") })
-            androidx.compose.material3.FilterChip(selected = profiles, onClick = { profiles = true }, label = { Text("Profils") })
+            androidx.compose.material3.FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = !profiles, onClick = { profiles = false }, label = { Text("Dossiers") })
+            androidx.compose.material3.FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = profiles, onClick = { profiles = true }, label = { Text("Profils") })
         }
         Box(modifier = Modifier.weight(1f)) {
             if (profiles) ProfilesScreen(app) else PersoFolders(viewModel)
@@ -210,7 +210,7 @@ private fun PersoFolders(viewModel: PersoViewModel) {
         }
         Row(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PersoSort.entries.forEach { entry ->
-                androidx.compose.material3.FilterChip(selected = sort == entry, onClick = { viewModel.sortBy(entry) }, label = { Text(entry.label) })
+                androidx.compose.material3.FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = sort == entry, onClick = { viewModel.sortBy(entry) }, label = { Text(entry.label) })
             }
         }
         HorizontalDivider()
@@ -319,13 +319,13 @@ private fun MenuDialog(title: String, onDismiss: () -> Unit, content: @Composabl
         onDismissRequest = onDismiss,
         title = { Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = { Column { content() } },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
+        confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDismiss) { Text("Fermer") } },
     )
 }
 
 @Composable
 private fun MenuItem(label: String, danger: Boolean = false, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
+    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onClick) {
         Text(label, color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
     }
 }
@@ -392,7 +392,7 @@ private fun FolderPicker(viewModel: PersoViewModel, onPick: (PickPlace) -> Unit,
             }
         },
         confirmButton = {
-            TextButton(onClick = { onPick(place) }, enabled = share != null && !already) {
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { onPick(place) }, enabled = share != null && !already) {
                 Text(if (place.sub.isEmpty()) "Choisir ce partage" else "Choisir ce dossier")
             }
         },
@@ -404,8 +404,8 @@ private fun FolderPicker(viewModel: PersoViewModel, onPick: (PickPlace) -> Unit,
                     place.source != null -> PickPlace()
                     else -> null
                 }
-                if (up != null) TextButton(onClick = { place = up }) { Text("Remonter") }
-                TextButton(onClick = onDismiss) { Text("Annuler") }
+                if (up != null) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { place = up }) { Text("Remonter") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDismiss) { Text("Annuler") }
             }
         },
     )
@@ -449,7 +449,7 @@ private fun PersoLockScreen(store: io.github.mkdevtests.umbra.perso.PersoStore) 
         )
         if (canFingerprint) {
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = { askFingerprint(context, store::unlockByFingerprint) }) { Text("Utiliser l'empreinte") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { askFingerprint(context, store::unlockByFingerprint) }) { Text("Utiliser l'empreinte") }
         }
     }
 }

@@ -208,7 +208,7 @@ fun MarkDialog(
                 extra?.invoke()
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
+        confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDismiss) { Text("Fermer") } },
     )
 }
 

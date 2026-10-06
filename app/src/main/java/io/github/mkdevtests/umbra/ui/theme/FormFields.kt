@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.theme
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.Arrangement
@@ -145,8 +146,8 @@ fun AddressField(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-            FilterChip(selected = !address.secure, onClick = { update(address.copy(secure = false)) }, label = { Text("http") })
-            FilterChip(selected = address.secure, onClick = { update(address.copy(secure = true)) }, label = { Text("https") })
+            FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = !address.secure, onClick = { update(address.copy(secure = false)) }, label = { Text("http") })
+            FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = address.secure, onClick = { update(address.copy(secure = true)) }, label = { Text("https") })
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FormField(

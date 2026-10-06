@@ -154,7 +154,7 @@ fun QueuePanel(queue: PlayerQueue, position: Double, duration: Double, onJump: (
         HorizontalDivider(color = Color(0xFF2E2944))
         Row(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (queue.perso) "Arrêter après cette vidéo" else "Arrêter après celle-ci", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
-            Switch(checked = queue.stopAfter, onCheckedChange = { queue.toggleStopAfter() })
+            Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = queue.stopAfter, onCheckedChange = { queue.toggleStopAfter() })
         }
     }
 }

@@ -91,9 +91,9 @@ fun UpdateBanner(updater: Updater) {
                 Text(release.notes, modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()))
             },
             confirmButton = {
-                TextButton(onClick = { showNotes = false; updater.install(release) }) { Text("Installer") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { showNotes = false; updater.install(release) }) { Text("Installer") }
             },
-            dismissButton = { TextButton(onClick = { showNotes = false }) { Text("Plus tard") } },
+            dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { showNotes = false }) { Text("Plus tard") } },
         )
     }
 }

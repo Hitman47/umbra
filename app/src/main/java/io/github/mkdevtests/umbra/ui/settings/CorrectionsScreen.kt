@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import androidx.compose.foundation.clickable
@@ -133,6 +134,6 @@ private fun CorrectionRow(correction: Correction, decision: MatchDecision?, onOp
                 Text("Dernière analyse : ${it.show} · ${it.how}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        TextButton(onClick = onRemove) { Text("Supprimer") }
+        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onRemove) { Text("Supprimer") }
     }
 }

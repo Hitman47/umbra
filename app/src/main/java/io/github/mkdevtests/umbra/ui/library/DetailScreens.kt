@@ -271,11 +271,11 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
             item {
                 val allSeen = shown.episodes.all { history[it.file]?.watched == true }
                 Row(modifier = Modifier.padding(horizontal = 12.dp)) {
-                    TextButton(onClick = { viewModel.markWatched(show, !allSeen, shown.episodes) }) {
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { viewModel.markWatched(show, !allSeen, shown.episodes) }) {
                         Icon(if (allSeen) NyxaraIcons.Close else NyxaraIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text(if (allSeen) "  Marquer la saison non vue" else "  Marquer la saison vue")
                     }
-                    TextButton(onClick = { viewModel.download(show, shown.episodes) }) {
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { viewModel.download(show, shown.episodes) }) {
                         Icon(NyxaraIcons.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("  Télécharger la saison")
                     }
@@ -307,7 +307,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                     context.startActivity(viewModel.playIntent(show, episode, version = chosen))
                 }
             },
-            confirmButton = { TextButton(onClick = { picking = null }) { Text("Annuler") } },
+            confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { picking = null }) { Text("Annuler") } },
         )
     }
 }
@@ -398,7 +398,7 @@ private fun localRows(viewModel: LibraryViewModel, movie: String? = null, show: 
 @Composable
 private fun RowTitle(title: String, onMore: (() -> Unit)? = null) {
     io.github.mkdevtests.umbra.ui.theme.SectionHeader(title, modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 10.dp)) {
-        onMore?.let { TextButton(onClick = it) { Text("Tout voir ›") } }
+        onMore?.let { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = it) { Text("Tout voir ›") } }
     }
 }
 
@@ -505,7 +505,7 @@ private fun languageName(label: String): String {
 /** Marks the title (or, [all], every episode) watched, or not watched any more. */
 @Composable
 private fun MarkButton(watched: Boolean, all: Boolean = false, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
+    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onClick) {
         Icon(if (watched) NyxaraIcons.Close else NyxaraIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp))
         Text(
             when {
@@ -555,7 +555,7 @@ internal fun downloadLabel(download: Download): String = when (download.state) {
 /** Hides the title from the lists, or shows it again. */
 @Composable
 private fun HideButton(hidden: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
+    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onClick) {
         Icon(if (hidden) NyxaraIcons.Show else NyxaraIcons.Hide, contentDescription = null, modifier = Modifier.size(18.dp))
         Text(if (hidden) "  Ne plus masquer" else "  Masquer ce titre")
     }

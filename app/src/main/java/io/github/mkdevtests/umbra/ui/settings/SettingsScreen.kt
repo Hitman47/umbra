@@ -172,8 +172,8 @@ fun SettingsScreen(
                                     sources.forEach { source ->
                                         val addresses = source.hosts().joinToString(" ou ")
                                         Item(source.label, "${source.protocol.label} · $addresses · ${source.shares.size} dossier${if (source.shares.size > 1) "s" else ""}") {
-                                            TextButton(onClick = { removing = source }) { Text("Retirer") }
-                                            TextButton(onClick = { onEditSource(source) }) { Text("Modifier ›") }
+                                            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { removing = source }) { Text("Retirer") }
+                                            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { onEditSource(source) }) { Text("Modifier ›") }
                                         }
                                         val documentaries = settings.documentaryFolders.count { folder -> source.shares.any { folder.within(source.rootOf(it)) } }
                                         Item(
@@ -185,22 +185,22 @@ fun SettingsScreen(
                                                 source.personal.size.takeIf { it > 0 }?.let { "$it Perso" },
                                             ).joinToString(" · ") + ". Bibliothèque, Documentaires, Perso ou non suivi, dossier par dossier.",
                                         ) {
-                                            TextButton(onClick = { onEditFolders(source) }) { Text("Choisir ›") }
+                                            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { onEditFolders(source) }) { Text("Choisir ›") }
                                         }
                                     }
                                     Item("Masquer ce qui est indisponible", "Les titres d'un NAS hors ligne quittent les listes, sauf ceux téléchargés. Aussi en haut de l'accueil, en touchant l'état des NAS.") {
-                                        Switch(checked = settings.hideUnavailable, onCheckedChange = { on -> store.update { it.copy(hideUnavailable = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.hideUnavailable, onCheckedChange = { on -> store.update { it.copy(hideUnavailable = on) } })
                                     }
                                     Item("Ajouter un NAS", "Les vues Films et Séries regroupent toutes les sources.") {
-                                        TextButton(onClick = onAddSource) { Text("Ajouter ›") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onAddSource) { Text("Ajouter ›") }
                                     }
                                     removing?.let { source ->
                                         AlertDialog(
                                             onDismissRequest = { removing = null },
                                             title = { Text("Retirer ${source.label} ?") },
                                             text = { Text("Ses titres quittent la bibliothèque. L'historique de lecture est gardé : il revient si le NAS est ajouté à nouveau.") },
-                                            confirmButton = { TextButton(onClick = { removing = null; onRemoveSource(source) }) { Text("Retirer") } },
-                                            dismissButton = { TextButton(onClick = { removing = null }) { Text("Annuler") } },
+                                            confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { removing = null; onRemoveSource(source) }) { Text("Retirer") } },
+                                            dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { removing = null }) { Text("Annuler") } },
                                         )
                                     }
                                 }
@@ -222,7 +222,7 @@ fun SettingsScreen(
 
                                 Section("Bibliothèque") {
                                     Item("Actualiser au lancement", "Seuls les fichiers nouveaux ou modifiés sont analysés.") {
-                                        Switch(checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.rescanAtLaunch, onCheckedChange = { on -> store.update { it.copy(rescanAtLaunch = on) } })
                                     }
                                     Item(
                                         "Bibliothèque enregistrée",
@@ -233,13 +233,13 @@ fun SettingsScreen(
                                         ).joinToString(" · "),
                                     )
                                     Item("Actualiser hors de chez moi", "Au lancement, même à travers Tailscale (plus lent). Sinon seulement à la maison.") {
-                                        Switch(checked = settings.scanAway, onCheckedChange = { on -> store.update { it.copy(scanAway = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.scanAway, onCheckedChange = { on -> store.update { it.copy(scanAway = on) } })
                                     }
                                     Item("Téléchargements", "Films et épisodes copiés sur la tablette, pour les regarder sans le NAS.") {
-                                        TextButton(onClick = onOpenDownloads) { Text("Voir ›") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onOpenDownloads) { Text("Voir ›") }
                                     }
                                     Item("Corrections de matching", if (fixes.isEmpty()) "Aucune" else "${fixes.size} dossier${if (fixes.size > 1) "s" else ""} corrigé${if (fixes.size > 1) "s" else ""}") {
-                                        TextButton(onClick = onOpenCorrections) { Text("Voir ›") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onOpenCorrections) { Text("Voir ›") }
                                     }
                                     Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
                                 }
@@ -279,13 +279,13 @@ fun SettingsScreen(
                                 Section("Lecture") {
                                     Item("Avancer, reculer", "Double appui sur un bord : 10 s. Maintenir ⏪ ou ⏩ : de plus en plus loin. Glisser sur l'image : des secondes aux minutes selon la longueur du geste.")
                                     Item("Passer les génériques tout seul", "Sinon, un bouton « Passer » apparaît pendant le générique (fichiers avec chapitres).") {
-                                        Switch(checked = settings.autoSkip, onCheckedChange = { on -> store.update { it.copy(autoSkip = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.autoSkip, onCheckedChange = { on -> store.update { it.copy(autoSkip = on) } })
                                     }
                                     Item("Épisode suivant au générique", "Compte à rebours de 10 s dès le générique de fin, annulable.") {
-                                        Switch(checked = settings.nextEpisodeCountdown, onCheckedChange = { on -> store.update { it.copy(nextEpisodeCountdown = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.nextEpisodeCountdown, onCheckedChange = { on -> store.update { it.copy(nextEpisodeCountdown = on) } })
                                     }
                                     Item("Image dans l'image", "Quitter le lecteur (bouton Accueil) garde la vidéo dans une petite fenêtre.") {
-                                        Switch(checked = settings.pictureInPicture, onCheckedChange = { on -> store.update { it.copy(pictureInPicture = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.pictureInPicture, onCheckedChange = { on -> store.update { it.copy(pictureInPicture = on) } })
                                     }
                                     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
                                     Item("Son en arrière-plan", "Écran éteint ou autre appli : le son continue, avec une notification pour mettre en pause.") {
@@ -296,19 +296,19 @@ fun SettingsScreen(
                                         })
                                     }
                                     Item("Version plus légère hors de chez moi", "Par Tailscale ou en données mobiles : la version jusqu'au 1080p plutôt que la 4K. Toujours modifiable sur la fiche.") {
-                                        Switch(checked = settings.lighterAway, onCheckedChange = { on -> store.update { it.copy(lighterAway = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.lighterAway, onCheckedChange = { on -> store.update { it.copy(lighterAway = on) } })
                                     }
                                     Item(
                                         "Son direct vers l'ampli ou la barre de son",
                                         "Dolby, DTS et Atmos envoyés tels quels quand la sortie HDMI les accepte (barre de son, ampli). Sinon, et sur les haut-parleurs de la TV ou de la tablette : son décodé, comme avant. Pas pendant le mode nuit.",
                                     ) {
-                                        Switch(checked = settings.audioPassthrough, onCheckedChange = { on -> store.update { it.copy(audioPassthrough = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.audioPassthrough, onCheckedChange = { on -> store.update { it.copy(audioPassthrough = on) } })
                                     }
                                     Item("Mode nuit", "Dialogues plus forts, explosions plus douces, à chaque lecture. Aussi dans le lecteur : Audio et sous-titres.") {
-                                        Switch(checked = settings.nightAudio, onCheckedChange = { on -> store.update { it.copy(nightAudio = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.nightAudio, onCheckedChange = { on -> store.update { it.copy(nightAudio = on) } })
                                     }
                                     Item("Amélioration anime (Anime4K)", "Traits plus nets sur les dessins animés, à chaque lecture. Demande plus à la tablette.") {
-                                        Switch(checked = settings.animeUpscale, onCheckedChange = { on -> store.update { it.copy(animeUpscale = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.animeUpscale, onCheckedChange = { on -> store.update { it.copy(animeUpscale = on) } })
                                     }
                                 }
 
@@ -338,22 +338,35 @@ fun SettingsScreen(
                                     }
                                     CardPreview(settings.cardScale)
                                     ChipsItem("Taille de l'interface", "Tout l'écran : textes, boutons, cartes. Automatique : 75 % sur une TV (qui dessine son écran en 960 × 540), 100 % ailleurs.") {
-                                        FilterChip(selected = settings.uiScale == 0f, onClick = { store.update { it.copy(uiScale = 0f) } }, label = { Text("Automatique") })
+                                        FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = settings.uiScale == 0f, onClick = { store.update { it.copy(uiScale = 0f) } }, label = { Text("Automatique") })
                                         io.github.mkdevtests.umbra.ui.theme.UI_SCALES.forEach { (value, label) ->
-                                            FilterChip(selected = settings.uiScale == value, onClick = { store.update { it.copy(uiScale = value) } }, label = { Text(label) })
+                                            FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = settings.uiScale == value, onClick = { store.update { it.copy(uiScale = value) } }, label = { Text(label) })
                                         }
                                     }
                                     Item("Sélection très visible (TV)", "Cadre blanc épais et halo autour de ce que la télécommande sélectionne.") {
-                                        Switch(checked = settings.strongFocus, onCheckedChange = { on -> store.update { it.copy(strongFocus = on) } })
+                                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.strongFocus, onCheckedChange = { on -> store.update { it.copy(strongFocus = on) } })
                                     }
                                 }
                                 Section("Sauvegarde") {
                                     Item(
                                         "Historique, corrections, réglages",
-                                        backupResult ?: "Dans un fichier que tu gardes où tu veux (jamais sur le NAS) ; à importer sur une autre tablette ou après une réinstallation. Les mots de passe des NAS n'y sont pas.",
+                                        backupResult ?: "Dans un fichier que tu gardes où tu veux (jamais sur le NAS) ; à importer sur une autre tablette ou après une réinstallation. Sans mots de passe ni clés.",
                                     ) {
-                                        TextButton(onClick = { exportTo.launch("nyxara-sauvegarde.json") }) { Text("Exporter") }
-                                        TextButton(onClick = { importFrom.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }) { Text("Importer") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { exportTo.launch("nyxara-sauvegarde.json") }) { Text("Exporter") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { importFrom.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }) { Text("Importer") }
+                                    }
+                                    var transfer by remember { mutableStateOf<Boolean?>(null) }
+                                    Item(
+                                        "D'un appareil à l'autre",
+                                        "Tout, mots de passe et clés compris, par le réseau de la maison : « Recevoir » sur la TV affiche un code, « Envoyer » ici le demande.",
+                                    ) {
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { transfer = false }) { Text("Recevoir") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { transfer = true }) { Text("Envoyer") }
+                                    }
+                                    when (transfer) {
+                                        true -> SendSettingsDialog(onDismiss = { transfer = null })
+                                        false -> ReceiveSettingsDialog(onDismiss = { transfer = null })
+                                        null -> Unit
                                     }
                                 }
 
@@ -365,14 +378,14 @@ fun SettingsScreen(
                                         }) { Text("Tester") }
                                     }
                                     Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
-                                        TextButton(onClick = onOpenStats) { Text("Voir ›") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onOpenStats) { Text("Voir ›") }
                                     }
                                 }
 
                                 Section("Mises à jour") {
                                     if (BuildConfig.UPDATES) {
                                         Item("Version installée", "${BuildConfig.VERSION_NAME} · GitHub ${Updater.REPOSITORY}${lastCheck?.let { " · $it" } ?: ""}") {
-                                            TextButton(onClick = updater::check) { Text("Rechercher") }
+                                            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = updater::check) { Text("Rechercher") }
                                         }
                                     } else {
                                         Item("Version installée", "${BuildConfig.VERSION_NAME} · version de test, mise à jour par le PC")
@@ -442,11 +455,11 @@ private fun ColumnScope.CatalogFolders(catalog: io.github.mkdevtests.umbra.catal
     val ignored by catalog.ignored.collectAsState()
     var picking by remember { mutableStateOf(false) }
     Item("Dossiers ignorés", if (ignored.isEmpty()) "Aucun. Ni affichés, ni lus, ni dans Profils." else "Ni affichés, ni lus, ni dans Profils.") {
-        TextButton(onClick = { picking = true }) { Text("Ajouter ›") }
+        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { picking = true }) { Text("Ajouter ›") }
     }
     ignored.forEach { folder ->
         Item(folder.substringAfterLast('/'), folder.replace("/", " › ")) {
-            TextButton(onClick = { catalog.setIgnored(ignored - folder) }) { Text("Retirer") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { catalog.setIgnored(ignored - folder) }) { Text("Retirer") }
         }
     }
     if (picking) {
@@ -483,7 +496,7 @@ private fun CatalogFolderPicker(title: String, list: suspend (String) -> List<St
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(if (path.isEmpty()) "Racine du catalogue" else path.replace("/", " › "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (path.isNotEmpty()) TextButton(onClick = { path = path.substringBeforeLast('/', "") }) { Text("‹ Remonter") }
+                if (path.isNotEmpty()) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { path = path.substringBeforeLast('/', "") }) { Text("‹ Remonter") }
                 val shown = folders
                 if (shown == null) {
                     CircularProgressIndicator(modifier = Modifier.padding(16.dp))
@@ -491,14 +504,14 @@ private fun CatalogFolderPicker(title: String, list: suspend (String) -> List<St
                     Column(modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                         if (shown.isEmpty()) Text("Aucun sous-dossier.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         shown.forEach { name ->
-                            TextButton(onClick = { path = if (path.isEmpty()) name else "$path/$name" }) { Text("$name ›") }
+                            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { path = if (path.isEmpty()) name else "$path/$name" }) { Text("$name ›") }
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onPick(path) }, enabled = path.isNotEmpty()) { Text("Choisir ce dossier") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+        confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { onPick(path) }, enabled = path.isNotEmpty()) { Text("Choisir ce dossier") } },
+        dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDismiss) { Text("Annuler") } },
     )
 }
 
@@ -531,13 +544,13 @@ private fun PersoSection(perso: PersoStore) {
     var chosen by remember { mutableStateOf("") }
     Section("Perso") {
         Item("Verrouiller l'onglet Perso", if (lock.enabled) "Code demandé à chaque retour dans l'appli." else "Un code (4 à 8 chiffres) avant d'afficher Perso.") {
-            Switch(checked = lock.enabled, onCheckedChange = { on -> step = if (on) "new" else "off" })
+            Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = lock.enabled, onCheckedChange = { on -> step = if (on) "new" else "off" })
         }
         if (lock.enabled) {
-            Item("Changer le code") { TextButton(onClick = { step = "new" }) { Text("Changer") } }
+            Item("Changer le code") { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { step = "new" }) { Text("Changer") } }
             if (fingerprintAvailable(context)) {
                 Item("Empreinte digitale", "Déverrouille Perso sans taper le code.") {
-                    Switch(checked = lock.fingerprint, onCheckedChange = perso::setFingerprint)
+                    Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = lock.fingerprint, onCheckedChange = perso::setFingerprint)
                 }
             }
         }
@@ -569,7 +582,7 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
                 if (settings.canSend) "qBittorrent : ${settings.qbitUrl}" else "qBittorrent : non réglé (envoi par Prowlarr)",
             ).joinToString(" · ") + ". Depuis la page d'un titre absent (titres similaires) : rechercher, choisir, envoyer. Catégories « Films Nyxara » et « Séries Nyxara ».",
         ) {
-            TextButton(onClick = { editing = true }) { Text("Régler") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { editing = true }) { Text("Régler") }
             if (settings.canSearch || settings.canSend) {
                 TextButton(onClick = {
                     result = "Test en cours…"
@@ -606,7 +619,7 @@ private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.Reques
                     editing = false
                 }) { Text("Enregistrer") }
             },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("Annuler") } },
+            dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { editing = false }) { Text("Annuler") } },
         )
     }
 }
@@ -623,11 +636,11 @@ private fun CatalogSection(catalog: io.github.mkdevtests.umbra.catalog.CatalogSt
         Item(
             "Adresse",
             if (address.configured) listOfNotNull(address.home, address.away.ifBlank { null }).joinToString(" · ") else "Aucune : la vue Profils de Perso reste cachée.",
-        ) { TextButton(onClick = { editing = true }) { Text(if (address.configured) "Modifier" else "Régler") } }
+        ) { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { editing = true }) { Text(if (address.configured) "Modifier" else "Régler") } }
         if (address.configured) {
             ChipsItem("Synchronisation", null) {
                 io.github.mkdevtests.umbra.catalog.CatalogSync.entries.forEach { entry ->
-                    FilterChip(selected = mode == entry, onClick = { catalog.setMode(entry) }, label = { Text(entry.label) })
+                    FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = mode == entry, onClick = { catalog.setMode(entry) }, label = { Text(entry.label) })
                 }
             }
             val state = when {
@@ -637,7 +650,7 @@ private fun CatalogSection(catalog: io.github.mkdevtests.umbra.catalog.CatalogSt
                 else -> "Jamais synchronisé"
             }
             Item("État", state) {
-                TextButton(onClick = catalog::sync, enabled = !status.syncing) { Text("Synchroniser") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = catalog::sync, enabled = !status.syncing) { Text("Synchroniser") }
             }
             index?.data?.root?.let { root -> CatalogFolders(catalog, root) }
         }
@@ -666,7 +679,7 @@ private fun CatalogSection(catalog: io.github.mkdevtests.umbra.catalog.CatalogSt
                     editing = false
                 }) { Text("Enregistrer") }
             },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("Annuler") } },
+            dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { editing = false }) { Text("Annuler") } },
         )
     }
 }
@@ -691,7 +704,7 @@ private fun PinDialog(title: String, onDismiss: () -> Unit, onPin: (String) -> B
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+        confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDismiss) { Text("Annuler") } },
     )
 }
 
@@ -705,8 +718,8 @@ private fun TraktSection(trakt: Trakt) {
             !status.configured -> Item("Clé Trakt absente", "Ajoute trakt.clientId dans local.properties puis recompile.")
             code != null -> {
                 Item("Code : ${code.userCode}", "Entre-le sur ${code.verificationUrl} (téléphone ou PC). Nyxara attend la validation.") {
-                    TextButton(onClick = { uri.openUri(code.verificationUrl) }) { Text("Ouvrir") }
-                    TextButton(onClick = trakt::cancelConnect) { Text("Annuler") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { uri.openUri(code.verificationUrl) }) { Text("Ouvrir") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = trakt::cancelConnect) { Text("Annuler") }
                 }
                 // From a TV: the phone's camera on the QR code opens the page, then the code is typed there.
                 Row(
@@ -726,19 +739,19 @@ private fun TraktSection(trakt: Trakt) {
                 "Compte",
                 if (status.connecting) "Demande du code à Trakt…" else "Non connecté. Nyxara lit l'historique Trakt et y ajoute ce que tu regardes ; il n'efface jamais rien.",
             ) {
-                TextButton(onClick = trakt::connect, enabled = !status.connecting) { Text(if (status.error != null) "Réessayer ›" else "Connecter ›") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = trakt::connect, enabled = !status.connecting) { Text(if (status.error != null) "Réessayer ›" else "Connecter ›") }
             }
             else -> {
                 val last = if (status.lastSync > 0) DateUtils.getRelativeTimeSpanString(status.lastSync).toString() else "jamais"
                 Item("Synchronisation", if (status.syncing) status.syncingShows?.let { "Séries : $it" } ?: "En cours…" else "Dernière : $last") {
-                    TextButton(onClick = { trakt.sync(force = true) }, enabled = !status.syncing) { Text("Synchroniser") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { trakt.sync(force = true) }, enabled = !status.syncing) { Text("Synchroniser") }
                 }
                 BatteryItem()
                 Item("Envoyer ce que je regarde", "Vu à 80 % : ajouté à l'historique Trakt. Avant : point de reprise.") {
-                    Switch(checked = status.scrobble, onCheckedChange = trakt::setScrobble)
+                    Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = status.scrobble, onCheckedChange = trakt::setScrobble)
                 }
                 Item("Déconnecter", "Oublie le compte sur la tablette. Rien n'est effacé sur Trakt.") {
-                    TextButton(onClick = trakt::disconnect) { Text("Déconnecter") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = trakt::disconnect) { Text("Déconnecter") }
                 }
             }
         }
@@ -766,12 +779,12 @@ private fun OpenSubtitlesSection(service: OpenSubtitles, languages: List<String>
             }
         }
         Item("Chercher tout seul", "Si le fichier n'a pas de sous-titres dans ta langue : le meilleur est ajouté dès le début, sans rien demander.") {
-            Switch(checked = auto, onCheckedChange = onAuto)
+            Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = auto, onCheckedChange = onAuto)
         }
         val user = status.user
         if (user != null) {
             Item("Compte $user", status.allowed?.let { "$it téléchargements par jour" }) {
-                TextButton(onClick = service::logout) { Text("Déconnecter") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = service::logout) { Text("Déconnecter") }
             }
         } else {
             var name by remember { mutableStateOf("") }
@@ -784,7 +797,7 @@ private fun OpenSubtitlesSection(service: OpenSubtitles, languages: List<String>
             ) {
                 FormField(name, { name = it }, "Identifiant", Modifier.weight(1f))
                 FormField(password, { password = it }, "Mot de passe", Modifier.weight(1f), secret = true, last = true)
-                TextButton(onClick = { service.login(name.trim(), password) }, enabled = name.isNotBlank() && password.isNotEmpty() && !status.busy) { Text("Connecter") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { service.login(name.trim(), password) }, enabled = name.isNotBlank() && password.isNotEmpty() && !status.busy) { Text("Connecter") }
             }
         }
         status.error?.let { Item("Erreur", it) }

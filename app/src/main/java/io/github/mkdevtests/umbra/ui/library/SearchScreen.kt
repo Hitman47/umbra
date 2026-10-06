@@ -107,7 +107,7 @@ fun SearchScreen(
                     if (query.isNotEmpty()) {
                         IconButton(onClick = { viewModel.searchQuery.value = "" }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Close, contentDescription = "Effacer") }
                     }
-                    TextButton(onClick = startDictation) { Text("🎤") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = startDictation) { Text("🎤") }
                 }
             },
             shape = RoundedCornerShape(50),
@@ -153,7 +153,7 @@ fun SearchScreen(
                 onSelect = { viewModel.searchFilters.value = filters.copy(decade = it) },
             )
             if (filters != SearchFilters()) {
-                TextButton(onClick = { viewModel.searchFilters.value = SearchFilters() }) { Text("Tout effacer") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { viewModel.searchFilters.value = SearchFilters() }) { Text("Tout effacer") }
             }
         }
         val found = results ?: return@Column
@@ -175,7 +175,7 @@ fun SearchScreen(
 internal fun <T> Dropdown(text: String, active: Boolean, options: List<Pair<T, String>>, onSelect: (T) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        FilterChip(selected = active, onClick = { open = true }, label = { Text("$text  ▾") })
+        FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = active, onClick = { open = true }, label = { Text("$text  ▾") })
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 420.dp)) {
             options.forEach { (value, label) ->
                 DropdownMenuItem(text = { Text(label) }, onClick = { open = false; onSelect(value) })

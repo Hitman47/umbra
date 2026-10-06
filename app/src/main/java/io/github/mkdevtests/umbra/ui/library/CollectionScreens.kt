@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,8 +68,8 @@ fun ShortcutScreen(root: String, viewModel: LibraryViewModel, links: TitleLinks,
             onLongClick = { menu(TitleTarget(it.key, it.isShow)) },
             chips = {
                 if (library.movies.isNotEmpty() && library.shows.isNotEmpty()) {
-                    FilterChip(selected = only == false, onClick = { only = if (only == false) null else false }, label = { Text("Films") })
-                    FilterChip(selected = only == true, onClick = { only = if (only == true) null else true }, label = { Text("Séries") })
+                    FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = only == false, onClick = { only = if (only == false) null else false }, label = { Text("Films") })
+                    FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = only == true, onClick = { only = if (only == true) null else true }, label = { Text("Séries") })
                 }
             },
         )

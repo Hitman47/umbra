@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -46,7 +48,7 @@ fun MeasuresScreen(log: PlaybackLog, onBack: () -> Unit) {
                 clipboard.setPrimaryClip(ClipData.newPlainText("Mesures Nyxara", text))
                 Toast.makeText(context, "Mesures copiées", Toast.LENGTH_SHORT).show()
             }, enabled = measures.isNotEmpty()) { Text("Copier") }
-            TextButton(onClick = log::clear, enabled = measures.isNotEmpty()) { Text("Effacer") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = log::clear, enabled = measures.isNotEmpty()) { Text("Effacer") }
         }
         if (measures.isEmpty()) {
             Text(

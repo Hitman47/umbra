@@ -1468,7 +1468,7 @@ private fun DelayRow(value: Double, enabled: Boolean, stepSeconds: Double = 0.1,
             modifier = Modifier.widthIn(min = 72.dp),
         )
         OutlinedButton(onClick = { onShift(stepSeconds) }, enabled = enabled) { Text("+", color = Color.White) }
-        if (abs(value) > 0.001) TextButton(onClick = { onShift(-value) }) { Text("Remettre à 0") }
+        if (abs(value) > 0.001) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { onShift(-value) }) { Text("Remettre à 0") }
     }
 }
 
@@ -1536,7 +1536,7 @@ private fun FailurePanel(report: String, onClose: () -> Unit) {
                     clipboard.setText(androidx.compose.ui.text.AnnotatedString(report))
                     copied = true
                 }) { Text(if (copied) "Copié" else "Copier", color = Color.White) }
-                TextButton(onClick = onClose) { Text("Fermer", color = Color.White) }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onClose) { Text("Fermer", color = Color.White) }
             }
         }
     }
@@ -1562,7 +1562,7 @@ private fun Preparing(text: String, onBack: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (text == "Préparation…") CircularProgressIndicator(color = Color.White)
             Text(text, color = Color.White, fontSize = 16.sp)
-            TextButton(onClick = onBack) { Text("Fermer") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onBack) { Text("Fermer") }
         }
     }
 }
@@ -1646,7 +1646,7 @@ private fun OnlineChoices(online: OnlineSubtitles, onClose: () -> Unit) {
                         Text("Sous-titres en ligne", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                         quota(status)?.let { Text(it, color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp) }
                     }
-                    TextButton(onClick = onClose) { Text("Fermer") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onClose) { Text("Fermer") }
                 }
                 val results = online.results
                 Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(top = 8.dp)) {

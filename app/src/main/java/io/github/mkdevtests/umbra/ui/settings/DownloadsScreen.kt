@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -69,8 +71,8 @@ fun DownloadsScreen(viewModel: LibraryViewModel, onBack: () -> Unit) {
                             LinearProgressIndicator(progress = { download.fraction }, modifier = Modifier.fillMaxWidth())
                         }
                     }
-                    if (download.state == DownloadState.Failed) TextButton(onClick = { viewModel.retryDownload(download.key) }) { Text("Réessayer") }
-                    TextButton(onClick = { viewModel.removeDownload(download.key) }) { Text(if (download.state == DownloadState.Done) "Supprimer" else "Annuler") }
+                    if (download.state == DownloadState.Failed) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { viewModel.retryDownload(download.key) }) { Text("Réessayer") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { viewModel.removeDownload(download.key) }) { Text(if (download.state == DownloadState.Done) "Supprimer" else "Annuler") }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHigh)
             }

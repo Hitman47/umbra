@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import android.content.Intent
 import android.net.Uri
@@ -116,7 +117,7 @@ fun ReleaseSearch(app: NyxaraApp, title: RemoteTitle, onClose: () -> Unit) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { if (!busy && query.isNotBlank()) search() }),
                 )
-                TextButton(onClick = ::search, enabled = !busy && query.isNotBlank()) { Text("Chercher") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = ::search, enabled = !busy && query.isNotBlank()) { Text("Chercher") }
             }
             if (all.isNotEmpty()) {
                 Chips {
@@ -130,20 +131,20 @@ fun ReleaseSearch(app: NyxaraApp, title: RemoteTitle, onClose: () -> Unit) {
                     }
                 }
                 Chips {
-                    FilterChip(selected = filter.withSeeders, onClick = { filter = filter.copy(withSeeders = !filter.withSeeders) }, label = { Text("Avec sources") })
+                    FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = filter.withSeeders, onClick = { filter = filter.copy(withSeeders = !filter.withSeeders) }, label = { Text("Avec sources") })
                     qualitiesOf(all).forEach { q ->
-                        FilterChip(selected = filter.quality == q, onClick = { filter = filter.copy(quality = q.takeIf { it != filter.quality }) }, label = { Text(q) })
+                        FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = filter.quality == q, onClick = { filter = filter.copy(quality = q.takeIf { it != filter.quality }) }, label = { Text(q) })
                     }
                     languagesOf(all).forEach { l ->
-                        FilterChip(selected = filter.language == l, onClick = { filter = filter.copy(language = l.takeIf { it != filter.language }) }, label = { Text(l) })
+                        FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = filter.language == l, onClick = { filter = filter.copy(language = l.takeIf { it != filter.language }) }, label = { Text(l) })
                     }
                     if (title.isShow) {
                         all.mapNotNull { it.parsed.season }.distinct().sorted().forEach { s ->
-                            FilterChip(selected = filter.season == s, onClick = { filter = filter.copy(season = s.takeIf { it != filter.season }) }, label = { Text("Saison $s") })
+                            FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = filter.season == s, onClick = { filter = filter.copy(season = s.takeIf { it != filter.season }) }, label = { Text("Saison $s") })
                         }
                     }
                     all.mapNotNull { it.indexer }.distinct().sorted().forEach { i ->
-                        FilterChip(selected = filter.indexer == i, onClick = { filter = filter.copy(indexer = i.takeIf { it != filter.indexer }) }, label = { Text(i) })
+                        FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = filter.indexer == i, onClick = { filter = filter.copy(indexer = i.takeIf { it != filter.indexer }) }, label = { Text(i) })
                     }
                 }
                 Text(
@@ -248,7 +249,7 @@ private fun ReleaseDetails(release: Release, others: List<Release>, isShow: Bool
                     Text("Aussi sur : " + others.mapNotNull { it.indexer }.distinct().joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 release.infoUrl?.let { url ->
-                    TextButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }) { Text("Page sur l'indexeur") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }) { Text("Page sur l'indexeur") }
                 }
                 Text(
                     if (viaQbit) "Envoyé à qBittorrent, catégorie « ${categoryFor(isShow)} »." else "Envoyé par Prowlarr à son client de téléchargement.",
@@ -257,8 +258,8 @@ private fun ReleaseDetails(release: Release, others: List<Release>, isShow: Bool
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onSend) { Text("Envoyer") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+        confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onSend) { Text("Envoyer") } },
+        dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDismiss) { Text("Annuler") } },
     )
 }
 

@@ -480,7 +480,7 @@ private fun Shelf(
         SectionHeader(title, onClick = onMore) {
             if (mode != null) {
                 Selection.entries.forEach { entry ->
-                    FilterChip(selected = entry == mode, onClick = { onMode(entry) }, label = { Text(entry.label) })
+                    FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = entry == mode, onClick = { onMode(entry) }, label = { Text(entry.label) })
                 }
             }
             onRefresh?.let {

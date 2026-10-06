@@ -131,14 +131,14 @@ private fun ProfileGrid(app: NyxaraApp, catalog: CatalogIndex, onOpen: (String) 
         )
         FlowRow(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box {
-                FilterChip(selected = category != null, onClick = { categoryMenu = true }, label = { Text(category ?: "Catégorie") })
+                FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = category != null, onClick = { categoryMenu = true }, label = { Text(category ?: "Catégorie") })
                 DropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
                     DropdownMenuItem(text = { Text("Toutes") }, onClick = { category = null; categoryMenu = false })
                     catalog.categories.forEach { name -> DropdownMenuItem(text = { Text(name) }, onClick = { category = name; categoryMenu = false }) }
                 }
             }
-            FilterChip(selected = followed, onClick = { followed = !followed }, label = { Text("Suivis") })
-            ProfileSort.entries.forEach { entry -> FilterChip(selected = sort == entry, onClick = { sort = entry }, label = { Text(entry.label) }) }
+            FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = followed, onClick = { followed = !followed }, label = { Text("Suivis") })
+            ProfileSort.entries.forEach { entry -> FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = sort == entry, onClick = { sort = entry }, label = { Text(entry.label) }) }
         }
         Text(
             "${shown.size} profils",
@@ -266,7 +266,7 @@ private fun ProfilePage(app: NyxaraApp, catalog: CatalogIndex, id: String, onBac
                 item {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = if (textOpen) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
-                        TextButton(onClick = { textOpen = !textOpen }) { Text(if (textOpen) "Moins" else "Lire plus") }
+                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { textOpen = !textOpen }) { Text(if (textOpen) "Moins" else "Lire plus") }
                     }
                 }
             }
@@ -279,7 +279,7 @@ private fun ProfilePage(app: NyxaraApp, catalog: CatalogIndex, id: String, onBac
                     if (selecting) {
                         GlowButton("Lire (${selected.size})", onClick = { play(false, selection = paths.filter { it in selected }) })
                         GlassButton("Aléatoire", onClick = { play(true, selection = paths.filter { it in selected }) }, icon = NyxaraIcons.Shuffle)
-                        TextButton(onClick = { selected = emptySet() }) { Text("Annuler") }
+                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { selected = emptySet() }) { Text("Annuler") }
                     } else if (paths.isNotEmpty()) {
                         GlowButton("Aléatoire", onClick = { play(true) }, icon = NyxaraIcons.Shuffle)
                         GlassButton("Dans l'ordre", onClick = { play(false) }, icon = NyxaraIcons.Play)

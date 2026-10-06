@@ -415,10 +415,10 @@ private fun MovieGrid(library: Library, history: Map<String, Progress>, emptyTex
         onLongClick = { item -> if (!item.key.startsWith(UNIVERSE)) menu(TitleTarget(item.key)) },
         chips = {
             if (sagas.isNotEmpty()) {
-                FilterChip(selected = view == MovieView.Sagas, onClick = { view = if (view == MovieView.Sagas) MovieView.Films else MovieView.Sagas }, label = { Text("Sagas") })
+                FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = view == MovieView.Sagas, onClick = { view = if (view == MovieView.Sagas) MovieView.Films else MovieView.Sagas }, label = { Text("Sagas") })
             }
             if (universes.isNotEmpty()) {
-                FilterChip(selected = view == MovieView.Universes, onClick = { view = if (view == MovieView.Universes) MovieView.Films else MovieView.Universes }, label = { Text("Univers") })
+                FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = view == MovieView.Universes, onClick = { view = if (view == MovieView.Universes) MovieView.Films else MovieView.Universes }, label = { Text("Univers") })
             }
         },
     )
@@ -553,7 +553,7 @@ internal fun PosterGrid(
                                 onSelect = { decade = it },
                             )
                         }
-                        if (filtered) TextButton(onClick = { seen = null; genre = null; decade = null }) { Text("Effacer") }
+                        if (filtered) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { seen = null; genre = null; decade = null }) { Text("Effacer") }
                     }
                 }
             }
@@ -664,7 +664,7 @@ private fun TraktBatteryBanner() {
                     runCatching { ask.launch(request) }
                         .onFailure { ask.launch(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
                 }) { Text("Autoriser") }
-                androidx.compose.material3.TextButton(onClick = { dismissed = true }) { Text("Plus tard") }
+                androidx.compose.material3.TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { dismissed = true }) { Text("Plus tard") }
             }
         }
     }
@@ -686,7 +686,7 @@ private fun ShowGrid(shows: List<Show>, history: Map<String, Progress>, emptyTex
             // Only kinds the library has; none when everything is of one kind.
             if (kinds.size > 1) {
                 io.github.mkdevtests.umbra.library.ShowKind.entries.filter { it in kinds }.forEach { entry ->
-                    FilterChip(selected = kind == entry, onClick = { kind = entry.takeIf { it != kind } }, label = { Text(entry.label) })
+                    FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = kind == entry, onClick = { kind = entry.takeIf { it != kind } }, label = { Text(entry.label) })
                 }
             }
         },
@@ -710,8 +710,8 @@ private fun DocumentaryGrid(documentaries: Library, history: Map<String, Progres
         onLongClick = { menu(TitleTarget(it.key, it.isShow)) },
         chips = {
             if (documentaries.movies.isNotEmpty() && documentaries.shows.isNotEmpty()) {
-                FilterChip(selected = only == false, onClick = { only = if (only == false) null else false }, label = { Text("Films") })
-                FilterChip(selected = only == true, onClick = { only = if (only == true) null else true }, label = { Text("Séries") })
+                FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = only == false, onClick = { only = if (only == false) null else false }, label = { Text("Films") })
+                FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = only == true, onClick = { only = if (only == true) null else true }, label = { Text("Séries") })
             }
         },
     )

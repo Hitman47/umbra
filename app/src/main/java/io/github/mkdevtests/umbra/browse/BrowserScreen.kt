@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.browse
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.mkdevtests.umbra.ui.theme.menuKey
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
@@ -109,16 +110,16 @@ fun BrowserScreen(
             title = { Text(entry.name) },
             text = {
                 Column {
-                    TextButton(onClick = { menu = null; viewModel.open(entry.path) }) { Text("Ouvrir le dossier") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null; viewModel.open(entry.path) }) { Text("Ouvrir le dossier") }
                     if (canExclude) {
-                        TextButton(onClick = { menu = null; onPersonal(entry.path) }) { Text("Déplacer dans Perso") }
-                        TextButton(onClick = { menu = null; excluding = entry.path }) {
+                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null; onPersonal(entry.path) }) { Text("Déplacer dans Perso") }
+                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null; excluding = entry.path }) {
                             Text("Exclure de la bibliothèque", color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { menu = null }) { Text("Fermer") } },
+            confirmButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null }) { Text("Fermer") } },
         )
     }
 
@@ -136,13 +137,13 @@ fun BrowserScreen(
                     onExcluded()
                 }) { Text("Exclure") }
             },
-            dismissButton = { TextButton(onClick = { excluding = null }) { Text("Annuler") } },
+            dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { excluding = null }) { Text("Annuler") } },
         )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (state.path.isNotEmpty()) TextButton(onClick = { viewModel.up() }) { Text("←") }
+            if (state.path.isNotEmpty()) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { viewModel.up() }) { Text("←") }
             Column(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
                 Text(
                     text = state.crumbs.lastOrNull().orEmpty(),
@@ -159,8 +160,8 @@ fun BrowserScreen(
                 )
             }
             // A folder inside a share; a whole share is left out by unticking it in the source.
-            if ('\\' in state.path) TextButton(onClick = { excluding = state.path }) { Text("Exclure") }
-            if (state.path.isEmpty() && onPickLocalFile != null) TextButton(onClick = onPickLocalFile) { Text("Fichier de l'appareil") }
+            if ('\\' in state.path) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { excluding = state.path }) { Text("Exclure") }
+            if (state.path.isEmpty() && onPickLocalFile != null) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onPickLocalFile) { Text("Fichier de l'appareil") }
         }
         HorizontalDivider()
 

@@ -168,8 +168,8 @@ fun FoldersScreen(source: NasSource, viewModel: BrowserViewModel, onBack: () -> 
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { dismissed = dismissed + keyOf(share, sub) }) { Text("Ignorer") }
-                TextButton(onClick = { setRole(share, sub, FolderRole.Documentaries) }) { Text("Classer") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { dismissed = dismissed + keyOf(share, sub) }) { Text("Ignorer") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { setRole(share, sub, FolderRole.Documentaries) }) { Text("Classer") }
             }
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -227,7 +227,7 @@ fun FoldersScreen(source: NasSource, viewModel: BrowserViewModel, onBack: () -> 
 private fun RolePicker(row: FolderRow, onPick: (FolderRole) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) {
+        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { open = true }) {
             Text(
                 row.role.label,
                 color = if (row.role == FolderRole.Off) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,

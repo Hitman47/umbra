@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.browse
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -134,7 +136,7 @@ fun SourceScreen(
                 Text("Connexion au NAS", style = MaterialTheme.typography.titleMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Protocol.entries.forEach { entry ->
-                        FilterChip(selected = entry == protocol, onClick = { protocol = entry; error = null }, label = { Text(entry.label) })
+                        FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = entry == protocol, onClick = { protocol = entry; error = null }, label = { Text(entry.label) })
                     }
                 }
                 Text(
@@ -199,7 +201,7 @@ fun SourceScreen(
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (onCancel != null) TextButton(onClick = onCancel, enabled = !busy) { Text("Annuler") }
+                    if (onCancel != null) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onCancel, enabled = !busy) { Text("Annuler") }
                     Button(onClick = ::discover, enabled = !busy && host.isNotBlank()) {
                         if (busy) Spinner() else Text("Continuer")
                     }
@@ -268,7 +270,7 @@ fun SourceScreen(
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { step = SetupStep.Login; error = null }, enabled = !busy) { Text("Retour") }
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { step = SetupStep.Login; error = null }, enabled = !busy) { Text("Retour") }
                     Button(onClick = ::connect, enabled = !busy && selected.any { it in shares }) {
                         if (busy) Spinner() else Text("Terminer")
                     }

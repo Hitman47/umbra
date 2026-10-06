@@ -224,6 +224,13 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         switchTo(existing + added.map { it.withRoots(existing.map { c -> c.source }) }.map(NasClient::of))
     }
 
+    /** Known NAS given their password by a transfer from another device: they connect at once. */
+    @Synchronized
+    fun updateSources(updated: List<NasSource>) {
+        val byId = updated.associateBy { it.id }
+        switchTo(nas?.connections.orEmpty().map { connection -> byId[connection.source.id]?.let(NasClient::of) ?: connection })
+    }
+
     /** Moves [path] (a folder of the library's shares) to the Perso tab: out of the library, played as plain videos. */
     fun addPersonal(path: String) {
         val source = nas?.sourceOf(path) ?: return

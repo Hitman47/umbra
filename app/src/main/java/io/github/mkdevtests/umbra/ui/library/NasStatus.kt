@@ -115,7 +115,7 @@ fun NasStatusChip(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        if (!state.online) TextButton(onClick = onRetry) { Text("Réessayer") }
+                        if (!state.online) TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onRetry) { Text("Réessayer") }
                     }
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
@@ -132,7 +132,7 @@ fun NasStatusChip(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = hide, onCheckedChange = onHide)
+                    Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = hide, onCheckedChange = onHide)
                 }
                 var showHistory by remember { mutableStateOf(false) }
                 TextButton(onClick = { showHistory = !showHistory }, modifier = Modifier.padding(horizontal = 8.dp)) {
