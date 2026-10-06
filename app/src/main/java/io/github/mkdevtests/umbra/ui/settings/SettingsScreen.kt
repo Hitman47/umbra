@@ -92,6 +92,7 @@ fun SettingsScreen(
     catalog: io.github.mkdevtests.umbra.catalog.CatalogStore,
     /** The folders below a NAS path ("" for the shares), to choose the documentaries. */
     listFolders: suspend (String) -> List<String>,
+    requests: io.github.mkdevtests.umbra.requests.RequestStore,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -263,6 +264,8 @@ fun SettingsScreen(
                 }
             }
 
+            RequestsSection(requests)
+
             PersoSection(perso)
             CatalogSection(catalog)
 
@@ -333,6 +336,66 @@ private fun PersoSection(perso: PersoStore) {
         "off" -> PinDialog("Code actuel", onDismiss = { step = null }) { pin ->
             perso.unlock(pin).also { ok -> if (ok) { perso.removeLock(); step = null } }
         }
+    }
+}
+
+/** Prowlarr (search) and qBittorrent (download) for the titles the library doesn't have. */
+@Composable
+private fun RequestsSection(requests: io.github.mkdevtests.umbra.requests.RequestStore) {
+    val settings by requests.settings.collectAsState()
+    val scope = rememberCoroutineScope()
+    var editing by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    Section("Recherche externe") {
+        Item(
+            "Prowlarr et qBittorrent",
+            result ?: listOf(
+                if (settings.canSearch) "Prowlarr : ${settings.prowlarrUrl}" else "Prowlarr : non réglé",
+                if (settings.canSend) "qBittorrent : ${settings.qbitUrl}" else "qBittorrent : non réglé",
+            ).joinToString(" · ") + ". Depuis la page d'un titre absent (titres similaires) : rechercher, choisir, envoyer.",
+        ) {
+            TextButton(onClick = { editing = true }) { Text("Régler") }
+            if (settings.canSearch || settings.canSend) {
+                TextButton(onClick = {
+                    result = "Test en cours…"
+                    scope.launch { result = requests.check(settings) }
+                }) { Text("Tester") }
+            }
+        }
+    }
+    if (editing) {
+        var prowlarrUrl by remember { mutableStateOf(settings.prowlarrUrl) }
+        var prowlarrKey by remember { mutableStateOf(settings.prowlarrKey) }
+        var qbitUrl by remember { mutableStateOf(settings.qbitUrl) }
+        var qbitUser by remember { mutableStateOf(settings.qbitUser) }
+        var qbitPassword by remember { mutableStateOf(settings.qbitPassword) }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Recherche externe") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(prowlarrUrl, { prowlarrUrl = it }, label = { Text("Adresse de Prowlarr") }, placeholder = { Text("http://192.168.1.10:9696") }, singleLine = true)
+                    OutlinedTextField(
+                        prowlarrKey, { prowlarrKey = it }, label = { Text("Clé API de Prowlarr") }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    )
+                    OutlinedTextField(qbitUrl, { qbitUrl = it }, label = { Text("Adresse de qBittorrent") }, placeholder = { Text("http://192.168.1.10:8080") }, singleLine = true)
+                    OutlinedTextField(qbitUser, { qbitUser = it }, label = { Text("Identifiant qBittorrent") }, singleLine = true)
+                    OutlinedTextField(
+                        qbitPassword, { qbitPassword = it }, label = { Text("Mot de passe qBittorrent") }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    requests.save(io.github.mkdevtests.umbra.requests.RequestSettings(prowlarrUrl, prowlarrKey, qbitUrl, qbitUser, qbitPassword))
+                    result = null
+                    editing = false
+                }) { Text("Enregistrer") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Annuler") } },
+        )
     }
 }
 

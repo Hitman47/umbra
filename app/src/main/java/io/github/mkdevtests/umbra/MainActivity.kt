@@ -72,6 +72,7 @@ private sealed interface Detail {
     data class Shortcut(val root: String) : Detail
     data class Universe(val name: String) : Detail
     data class Shelf(val id: String) : Detail
+    data class Remote(val tmdbId: Int, val isShow: Boolean) : Detail
     data object Settings : Detail
     data object Measures : Detail
     data object Corrections : Detail
@@ -127,6 +128,7 @@ private fun NyxaraRoot(
         onOpenShow = { stack.add(Detail.ShowDetail(it)) },
         onOpenSaga = { stack.add(Detail.Saga(it)) },
         onOpenUniverse = { stack.add(Detail.Universe(it)) },
+        onOpenRemote = { id, isShow -> stack.add(Detail.Remote(id, isShow)) },
         // An actor or a director: the search tab, with their titles in the library.
         onPerson = { name ->
             libraryViewModel.searchFilters.value = SearchFilters()
@@ -160,6 +162,7 @@ private fun NyxaraRoot(
             is Detail.Saga -> SagaScreen(detail.id, libraryViewModel, links.titleLinks, back)
             is Detail.Universe -> UniverseScreen(detail.name, libraryViewModel, links.titleLinks, back)
             is Detail.Shortcut -> ShortcutScreen(detail.root, libraryViewModel, links.titleLinks, back)
+            is Detail.Remote -> io.github.mkdevtests.umbra.ui.library.RemoteScreen(detail.tmdbId, detail.isShow, libraryViewModel, links.titleLinks, back)
             is Detail.Shelf -> io.github.mkdevtests.umbra.ui.library.ShelfScreen(detail.id, libraryViewModel, links.titleLinks, back)
             is Detail.FixMatch -> showOf(detail.key)?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
             Detail.Settings -> SettingsScreen(
@@ -187,6 +190,7 @@ private fun NyxaraRoot(
                 perso = app.perso,
                 catalog = app.catalog,
                 listFolders = { path -> browserViewModel.folders(path).map { it.path } },
+                requests = app.requests,
                 onBack = back,
             )
             Detail.Measures -> MeasuresScreen(app.measures, back)

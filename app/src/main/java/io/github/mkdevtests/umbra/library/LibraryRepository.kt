@@ -53,6 +53,15 @@ class LibraryRepository(private val app: NyxaraApp) {
             }
             .build()
     }
+    /** Pages of absent titles opened lately (a week, 200 at most). */
+    private val remoteTitles by lazy { RemoteTitles(File(app.cacheDir, "remote-titles.json")) }
+
+    /** An absent title's page: kept a week, else from TMDB; null offline. */
+    suspend fun remote(tmdbId: Int, isShow: Boolean): RemoteTitle? = remoteTitles.get(tmdbId, isShow)
+        ?: runCatching { (if (isShow) tmdb.show(tmdbId).toRemote() else tmdb.movie(tmdbId).toRemote()).also(remoteTitles::put) }
+            .onFailure { Log.w(TAG, "remote $tmdbId", it) }
+            .getOrNull()
+
     private val tmdb by lazy { Tmdb(BuildConfig.TMDB_TOKEN, metadataHttp) }
     private val tvdb by lazy { BuildConfig.THETVDB_TOKEN.takeIf { it.isNotBlank() }?.let { Tvdb(it, metadataHttp) } }
     private var scanJob: Job? = null

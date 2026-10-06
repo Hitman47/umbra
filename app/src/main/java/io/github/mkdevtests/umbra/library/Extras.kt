@@ -3,8 +3,16 @@ package io.github.mkdevtests.umbra.library
 /** Someone of the cast or crew on a title's page; [role] is the character or the job. */
 data class Person(val name: String, val role: String?, val photo: String?)
 
-/** A title shown next to another; [movie] or [show] is set when it is in the library. */
-data class Related(val title: String, val year: Int?, val poster: String?, val movie: String? = null, val show: String? = null) {
+/** A title shown next to another; [movie] or [show] is set when it is in the library, [tmdbId] opens it when it isn't. */
+data class Related(
+    val title: String,
+    val year: Int?,
+    val poster: String?,
+    val movie: String? = null,
+    val show: String? = null,
+    val tmdbId: Int? = null,
+    val isShow: Boolean = false,
+) {
     val owned get() = movie != null || show != null
 }
 
@@ -89,9 +97,9 @@ private fun TmdbSearchItem.toRelated(library: Library, isShow: Boolean): Related
     val year = (releaseDate ?: firstAirDate)?.take(4)?.toIntOrNull()
     val title = (title ?: name).orEmpty()
     return if (isShow) {
-        Related(title, year, posterPath, show = library.shows.firstOrNull { it.tmdbId == id }?.key)
+        Related(title, year, posterPath, show = library.shows.firstOrNull { it.tmdbId == id }?.key, tmdbId = id, isShow = true)
     } else {
-        Related(title, year, posterPath, movie = library.movies.firstOrNull { it.tmdbId == id }?.file)
+        Related(title, year, posterPath, movie = library.movies.firstOrNull { it.tmdbId == id }?.file, tmdbId = id)
     }
 }
 

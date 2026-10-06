@@ -98,6 +98,8 @@ class DetailLinks(
     val onOpenSaga: (Int) -> Unit,
     val onPerson: (String) -> Unit,
     val onOpenUniverse: (String) -> Unit = {},
+    /** A title the library doesn't have, by its TMDB id: its page. */
+    val onOpenRemote: (Int, Boolean) -> Unit = { _, _ -> },
 ) {
     val titleLinks get() = TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse)
 }
@@ -452,6 +454,7 @@ private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks, 
     LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(items) { item ->
             val open = item.movie?.let { { links.onOpenMovie(it) } } ?: item.show?.let { { links.onOpenShow(it) } }
+                ?: item.tmdbId?.let { id -> { links.onOpenRemote(id, item.isShow) } }
             Column(
                 modifier = Modifier
                     .width(110.dp)

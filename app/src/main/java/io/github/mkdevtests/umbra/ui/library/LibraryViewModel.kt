@@ -93,6 +93,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onFolderExcluded() = repository.onFolderExcluded()
 
+    suspend fun remote(tmdbId: Int, isShow: Boolean) = repository.remote(tmdbId, isShow)
+
     suspend fun search(query: String, filters: SearchFilters): List<Found> {
         val hits = if (query.isBlank()) null else repository.search(query)
         return searchResults(library.value, hidden.value, query, hits, filters, history.value)

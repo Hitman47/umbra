@@ -30,6 +30,7 @@ import io.github.mkdevtests.umbra.subtitles.SubtitleMemory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,6 +102,9 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** The external catalogue shown as Profils in the Perso tab: read only, kept on the device. */
     val catalog by lazy { io.github.mkdevtests.umbra.catalog.CatalogStore(this, io.github.mkdevtests.umbra.catalog.CatalogClient(OkHttpClient()), { nas }, scope) }
 
+    /** Prowlarr and qBittorrent: an absent title searched, and the release chosen sent. */
+    val requests by lazy { io.github.mkdevtests.umbra.requests.RequestStore(this, OkHttpClient()) }
+
     /** The videos of the Perso folders played last, for a shuffle that starts at once. */
     val persoTrees by lazy { io.github.mkdevtests.umbra.perso.PersoTrees(noBackupFilesDir.resolve("perso-trees")) }
 
@@ -133,6 +137,12 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         _sourceList.value = nas?.sources.orEmpty()
         LocalImages.url = { path -> streamServer.imageUrl(path) }
         streamServer.remoteImages = { key -> catalog.picture(key) }
+        // A title asked for and now in the library leaves the "Demandé" list.
+        scope.launch {
+            library.library.collect { lib ->
+                requests.prune { id, isShow -> if (isShow) lib.shows.any { it.tmdbId == id } else lib.movies.any { it.tmdbId == id } }
+            }
+        }
         catalog.syncIfDue()
         watchNetwork()
         watchForeground()
