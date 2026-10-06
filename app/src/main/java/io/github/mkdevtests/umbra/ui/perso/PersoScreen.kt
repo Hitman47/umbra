@@ -192,7 +192,7 @@ private fun PersoFolders(viewModel: PersoViewModel) {
                 }
             }
         }
-        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        androidx.compose.foundation.layout.FlowRow(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             GlowButton("Aléatoire", onClick = { context.startActivity(viewModel.playIntent(state.path, shuffle = true)) }, icon = NyxaraIcons.Shuffle)
             GlassButton("Dans l'ordre", onClick = { context.startActivity(viewModel.playIntent(state.path, shuffle = false)) }, icon = NyxaraIcons.Play)
         }

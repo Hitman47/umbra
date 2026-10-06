@@ -126,7 +126,7 @@ fun MovieDetailScreen(movie: Movie, viewModel: LibraryViewModel, links: DetailLi
                 genres = movie.genres,
             ) {
                 if (progress?.inProgress == true) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         GlowButton(
                             "Reprendre · il reste ${formatRuntime((progress.remaining / 60).toInt().coerceAtLeast(1))}",
                             onClick = { context.startActivity(viewModel.playIntent(movie, version = version)) },
@@ -203,7 +203,7 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
             ) {
                 val resume = nextUp(show, history)
                 val next = resume?.episode ?: show.regularEpisodes().firstOrNull() ?: season?.episodes?.firstOrNull()
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (next != null) {
                         val code = "S%02dE%02d".format(next.season, next.number)
                         GlowButton(if (resume?.progress != null) "Reprendre $code" else "Lecture $code", onClick = { context.startActivity(viewModel.playIntent(show, next)) })
@@ -471,7 +471,7 @@ private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks, 
 private fun MediaBlock(info: MediaInfo) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         val badges = info.badges()
-        if (badges.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { badges.forEach { Tag(it) } }
+        if (badges.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { badges.forEach { Tag(it) } }
         val audio = info.audioLanguages()
         val subtitles = info.subtitleLanguages()
         if (audio.isNotEmpty()) CreditLine("Audio", audio.joinToString(", ") { languageName(it) })

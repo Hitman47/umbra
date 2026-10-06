@@ -237,7 +237,7 @@ private fun ProfilePage(app: NyxaraApp, catalog: CatalogIndex, id: String, onBac
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("${videos.size} vidéos · ${size(videos.sumOf { it.size })}", style = MaterialTheme.typography.titleMedium)
                 if (catalog.data.root == null) Text("Dossier du catalogue introuvable dans Perso.", color = MaterialTheme.colorScheme.error)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (selecting) {
                         GlowButton("Lire (${selected.size})", onClick = { play(false, selection = paths.filter { it in selected }) })
                         GlassButton("Aléatoire", onClick = { play(true, selection = paths.filter { it in selected }) }, icon = NyxaraIcons.Shuffle)

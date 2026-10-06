@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.io.IOException
+import io.github.mkdevtests.umbra.nas.within
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -52,6 +53,12 @@ private const val NUMBERING_RETRY_AGE = 12 * 3600_000L
 /** Tries before a listing that times out fails the scan. */
 private const val LIST_ATTEMPTS = 3
 
+/** Folders failing one after the other: the NAS is gone, not one folder. */
+private const val MAX_FAILING_IN_A_ROW = 25
+
+/** Before the folders that didn't answer are asked again. */
+private const val RETRY_FAILED_AFTER_MS = 5_000L
+
 /**
  * Builds the library like Infuse: walks every selected share, whatever the
  * folder layout (genre folders, loose files, one folder per film), and tells
@@ -82,6 +89,9 @@ class LibraryScanner(
     /** Shares of the last scan whose NAS didn't answer: their titles were kept from the previous library. */
     var offline: Set<String> = emptySet()
         private set
+
+    /** The folders an analysis cut off had listed: read from there, not from the NAS again. */
+    var resume: ScanJournal? = null
 
     /** How each group of episodes got its show in the last [scan]: what Réglages › Corrections shows. */
     val decisions = java.util.concurrent.ConcurrentLinkedQueue<MatchDecision>()
@@ -135,7 +145,7 @@ class LibraryScanner(
         }.toMap()
         val movies = scanMovies(movieFiles, knownFiles, counts)
         val shows = scanShows(episodes, previous.shows, counts)
-        val scanned = keepOffline(Library(movies = movies, shows = shows), previous, this.offline)
+        val scanned = keepOffline(Library(movies = movies, shows = shows), previous, this.offline + failed)
         return Library(
             version = Library.VERSION,
             source = source,
@@ -178,43 +188,69 @@ class LibraryScanner(
 
     // --- Walking the shares ---
 
-    /** The videos of every share; a share whose NAS doesn't answer is added to [offline] instead. */
-    private suspend fun walk(offline: MutableSet<String>): List<VideoFile> = coroutineScope {
+    /** Folders that didn't answer, even when asked again at the end: their titles stay as the last analysis left them. */
+    var failed: Set<String> = emptySet()
+        private set
+
+    /**
+     * The videos of every share; a share whose NAS doesn't answer is added to
+     * [offline] instead, a folder that doesn't answer to [failed] (asked again
+     * once at the end): an analysis of tens of thousands of folders no longer
+     * fails for one of them.
+     */
+    private suspend fun walk(offline: MutableSet<String>): List<VideoFile> {
         val found = ConcurrentLinkedQueue<VideoFile>()
         val art = ConcurrentLinkedQueue<LocalArt>()
         val folders = AtomicInteger()
+        val failing = ConcurrentHashMap<String, List<String>>()
+        val inARow = AtomicInteger()
 
-        fun visit(path: String, names: List<String>) {
-            launch(Dispatchers.IO) {
-                val entries = listings.withPermit {
-                    if (names.isNotEmpty()) return@withPermit listOrSkip(path)
-                    // A share's root: its NAS may be off or out of reach, the other NAS are scanned all the same.
-                    try {
-                        listOrSkip(path)
-                    } catch (e: IOException) {
-                        offline += path
-                        emptyList()
+        suspend fun explore(starts: List<Pair<String, List<String>>>) = coroutineScope {
+            fun visit(path: String, names: List<String>) {
+                launch(Dispatchers.IO) {
+                    val entries = listings.withPermit {
+                        try {
+                            listOrSkip(path).also { inARow.set(0) }
+                        } catch (e: IOException) {
+                            // A share's root: its NAS may be off or out of reach, the other NAS are scanned all the same.
+                            if (names.isEmpty()) {
+                                offline += path
+                            } else {
+                                // Many in a row: the NAS itself is gone, the analysis stops (library unchanged).
+                                if (inARow.incrementAndGet() >= MAX_FAILING_IN_A_ROW) throw e
+                                failing[path] = names
+                            }
+                            return@withPermit null
+                        }
+                    } ?: return@launch
+                    failing.remove(path)
+                    val videos = entries.filter { it.isVideo && !it.isExtra() }
+                    videos.forEach { video ->
+                        found += VideoFile(video, names, subtitlesFor(video, entries).map { it.path })
+                    }
+                    // folder.jpg and the like: the folder's or a video's own artwork.
+                    val images = entries.filter { !it.isDirectory && isImageName(it.name) }.map { it.path }
+                    if (images.isNotEmpty()) art += folderArt(path, images, videos.map { it.path })
+                    onProgress("Exploration du NAS : ${folders.incrementAndGet()} dossiers, ${found.size} vidéos")
+                    if (names.size < MAX_DEPTH) {
+                        entries.filter { it.isDirectory && !it.isSkipped() }.forEach { visit(it.path, names + it.name) }
                     }
                 }
-                val videos = entries.filter { it.isVideo && !it.isExtra() }
-                videos.forEach { video ->
-                    found += VideoFile(video, names, subtitlesFor(video, entries).map { it.path })
-                }
-                // folder.jpg and the like: the folder's or a video's own artwork.
-                val images = entries.filter { !it.isDirectory && isImageName(it.name) }.map { it.path }
-                if (images.isNotEmpty()) art += folderArt(path, images, videos.map { it.path })
-                onProgress("Exploration du NAS : ${folders.incrementAndGet()} dossiers, ${found.size} vidéos")
-                if (names.size < MAX_DEPTH) {
-                    entries.filter { it.isDirectory && !it.isSkipped() }.forEach { visit(it.path, names + it.name) }
-                }
             }
+            starts.forEach { (path, names) -> visit(path, names) }
         }
 
-        list("").forEach { share -> visit(share.path, emptyList()) }
-        found to art
-    }.let { (found, art) ->
+        explore(list("").map { it.path to emptyList() })
+        if (failing.isNotEmpty()) {
+            // The NAS had a hiccup: the folders that didn't answer, once more.
+            delay(RETRY_FAILED_AFTER_MS)
+            onProgress("Exploration du NAS : nouvel essai de ${failing.size} dossiers")
+            explore(failing.map { (path, names) -> path to names })
+        }
+        failed = failing.keys.toSet()
+        if (failed.isNotEmpty()) Log.w(TAG, "${failed.size} folders kept as they were: ${failed.take(5)}")
         localArt = LocalArt(art.flatMap { it.posters.entries }.associate { it.toPair() }, art.flatMap { it.backdrops.entries }.associate { it.toPair() })
-        found.toList()
+        return found.toList()
     }
 
     /**
@@ -223,9 +259,10 @@ class LibraryScanner(
      * missing whole folders would drop their titles from the library.
      */
     private suspend fun listOrSkip(path: String): List<NasEntry> {
+        resume?.get(path)?.let { return it }
         repeat(LIST_ATTEMPTS) { attempt ->
             try {
-                return list(path)
+                return list(path).also { resume?.put(path, it) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -680,7 +717,8 @@ class LibraryScanner(
  */
 fun keepOffline(scanned: Library, previous: Library, offline: Set<String>): Library {
     if (offline.isEmpty()) return scanned
-    fun isOffline(file: String) = file.substringBefore('\\') in offline
+    // A share's root, or a folder of it.
+    fun isOffline(file: String) = offline.any { file.within(it) }
     val ids = scanned.movies.mapNotNullTo(HashSet()) { it.tmdbId }
     val movies = scanned.movies + previous.movies.filter { isOffline(it.file) && (it.tmdbId == null || it.tmdbId !in ids) }
 

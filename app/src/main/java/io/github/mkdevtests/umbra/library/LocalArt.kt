@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.library
 
+import io.github.mkdevtests.umbra.nas.within
+
 import io.github.mkdevtests.umbra.browse.isImageName
 import kotlinx.serialization.Serializable
 
@@ -18,8 +20,8 @@ data class LocalArt(val posters: Map<String, String> = emptyMap(), val backdrops
 
     /** Only what is under [roots] (the shares that didn't answer: their art is kept as it was). */
     fun under(roots: Set<String>) = LocalArt(
-        posters.filterKeys { it.substringBefore('\\') in roots },
-        backdrops.filterKeys { it.substringBefore('\\') in roots },
+        posters.filterKeys { path -> roots.any { path.within(it) } },
+        backdrops.filterKeys { path -> roots.any { path.within(it) } },
     )
 }
 

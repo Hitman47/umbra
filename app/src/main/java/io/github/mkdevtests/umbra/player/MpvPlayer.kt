@@ -94,6 +94,20 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     @Volatile private var stalls = 0
     @Volatile private var stalledMs = 0L
 
+    /** mpv's log while a file opens, read when it fails; stopped once the picture plays. */
+    private val logFile = java.io.File(context.cacheDir, "player.log")
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** The file of this load has started: an end of file before is the previous one's. */
+    @Volatile private var started = false
+
+    private val _failure = MutableStateFlow<String?>(null)
+
+    /** Why the file doesn't play (no picture): the player's errors, the codecs; null while it plays or opens. */
+    val failure: StateFlow<String?> = _failure.asStateFlow()
+
+    private val watchdog = Runnable { if (openMs == null && !_ended.value) fail("Aucune image au bout de ${FAILURE_AFTER_MS / 1000} s.") }
+
     /** The file played to its end (mpv keeps the last frame: keep-open). */
     private val _ended = MutableStateFlow(false)
     val ended: StateFlow<Boolean> = _ended.asStateFlow()
@@ -140,6 +154,8 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.setOptionString("keep-open", "yes")
         mpv.setOptionString("input-default-bindings", "no")
 
+        // While a file opens, mpv's messages go to a file: they tell why a picture never comes.
+        mpv.setOptionString("log-file", logFile.absolutePath)
         mpv.init()
 
         mpv.setOptionString("save-position-on-quit", "no")
@@ -188,6 +204,14 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         stalls = 0
         stalledMs = 0L
         mpv.setPropertyString("start", if (start > 0) start.toString() else "none")
+        _failure.value = null
+        started = false
+        runCatching {
+            logFile.writeText("")
+            mpv.setPropertyString("log-file", logFile.absolutePath)
+        }
+        main.removeCallbacks(watchdog)
+        main.postDelayed(watchdog, FAILURE_AFTER_MS)
         if (surfaceAttached) {
             mpv.command(arrayOf("loadfile", url, "replace"))
         } else {
@@ -311,7 +335,24 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         }
     }
 
+    /** Why the file doesn't play: [reason], what the file holds, and the player's warnings and errors while opening. */
+    private fun fail(reason: String) {
+        if (_failure.value != null) return
+        fun p(name: String) = runCatching { mpv.getPropertyString(name) }.getOrNull()?.takeIf { it.isNotBlank() }
+        val file = listOfNotNull(
+            p("file-format")?.let { "Conteneur : $it" },
+            p("video-codec")?.let { "Vidéo : $it" + (p("hwdec-current")?.let { hw -> " (décodeur : $hw)" } ?: "") },
+            p("audio-codec-name")?.let { "Audio : $it" },
+            p("track-list/count")?.let { "Pistes : $it" },
+        )
+        val messages = runCatching { logFile.readLines() }.getOrDefault(emptyList())
+            .filter { LOG_PROBLEM.containsMatchIn(it) }
+            .takeLast(30)
+        _failure.value = (listOf(reason) + file + listOf("") + messages.ifEmpty { listOf("(aucun message d'erreur du lecteur)") }).joinToString("\n")
+    }
+
     fun release() {
+        main.removeCallbacks(watchdog)
         mpv.removeObserver(this)
         mpv.destroy()
     }
@@ -400,6 +441,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 if (openMs == null) {
                     openMs = now - loadAt
                     firstFrameAt = now
+                    main.removeCallbacks(watchdog)
+                    // The picture plays: no more log (it would grow for the whole film).
+                    main.postDelayed({ runCatching { mpv.setPropertyString("log-file", "") } }, 10_000)
                 } else if (seekAt != 0L) {
                     seeks += now - seekAt
                     seekAt = 0L
@@ -415,7 +459,12 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 publishTracks()
                 publishChapters()
             }
-            MPVLib.MpvEvent.MPV_EVENT_END_FILE -> Log.i(TAG, "end of file")
+            START_FILE -> started = true
+            MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
+                Log.i(TAG, "end of file")
+                // Ended before its first picture: it couldn't be played.
+                if (started && openMs == null) main.post { fail("Le lecteur s'est arrêté avant la première image.") }
+            }
         }
     }
 
@@ -509,6 +558,15 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     private companion object {
         const val TAG = "MpvPlayer"
         const val VO = "gpu-next"
+
+        /** No picture after this long: the file is reported as not playing. */
+        const val FAILURE_AFTER_MS = 25_000L
+
+        /** mpv's log lines worth showing: fatal, errors, warnings ("[  1.234][e][ffmpeg] …"). */
+        val LOG_PROBLEM = Regex("""\]\[[few]\]""")
+
+        /** MPV_EVENT_START_FILE in mpv's client.h. */
+        const val START_FILE = 6
 
         /** MPV_EVENT_PLAYBACK_RESTART in mpv's client.h. */
         const val PLAYBACK_RESTART = 21

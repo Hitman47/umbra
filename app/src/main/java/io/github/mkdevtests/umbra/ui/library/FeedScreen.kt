@@ -355,7 +355,7 @@ private fun HeroPage(item: Featured, wide: Boolean) {
                     drawStopIndicator = {},
                 )
             }
-            Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            androidx.compose.foundation.layout.FlowRow(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 GlowButton(item.playLabel, onClick = item.play)
                 GlassButton("Infos", onClick = item.open, icon = NyxaraIcons.Info)
             }

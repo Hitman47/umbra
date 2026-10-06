@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1160,6 +1161,10 @@ private fun PlayerScreen(
 
         if (choosing && online != null) OnlineChoices(online) { choosing = false }
 
+        // No picture: what the player said, to read or to send.
+        val failure by player.failure.collectAsState()
+        failure?.let { report -> FailurePanel(report, onClose = onBack) }
+
         // The next episode: at the credits, in the last seconds, or at the end.
         val credits = skip?.kind == ChapterKind.Credits
         val tail = !hasCredits(chapters, duration) && duration > 300 && position > 0 && duration - position <= TAIL_SECONDS
@@ -1344,6 +1349,35 @@ private fun TrackRow(label: String, detail: String?, selected: Boolean, onClick:
             if (!detail.isNullOrEmpty()) Text(detail, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
         }
         if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+    }
+}
+
+/** The file doesn't play: why, as the player tells it, with a button to copy it all. */
+@Composable
+private fun FailurePanel(report: String, onClose: () -> Unit) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).safeDrawingPadding().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier.widthIn(max = 720.dp).clip(RoundedCornerShape(16.dp)).background(PanelColor).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Lecture impossible", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                report,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(report))
+                    copied = true
+                }) { Text(if (copied) "Copié" else "Copier", color = Color.White) }
+                TextButton(onClick = onClose) { Text("Fermer", color = Color.White) }
+            }
+        }
     }
 }
 

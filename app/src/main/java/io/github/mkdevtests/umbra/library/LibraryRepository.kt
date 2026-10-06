@@ -35,8 +35,26 @@ class LibraryRepository(private val app: NyxaraApp) {
     /** Where earlier versions kept the library: imported once, so its TMDB matches aren't looked up again. */
     private val legacyFile = File(app.filesDir, "library.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val tmdb by lazy { Tmdb(BuildConfig.TMDB_TOKEN, OkHttpClient()) }
-    private val tvdb by lazy { BuildConfig.THETVDB_TOKEN.takeIf { it.isNotBlank() }?.let { Tvdb(it, OkHttpClient()) } }
+    /**
+     * TMDB and TheTVDB answers are kept a day on the device: an analysis cut
+     * off recognizes again the thousands of titles it had done in seconds.
+     */
+    private val metadataHttp by lazy {
+        OkHttpClient.Builder()
+            .cache(okhttp3.Cache(File(app.cacheDir, "metadata-http"), 64L shl 20))
+            .addNetworkInterceptor { chain ->
+                val request = chain.request()
+                val response = chain.proceed(request)
+                if (request.method == "GET" && response.isSuccessful) {
+                    response.newBuilder().header("Cache-Control", "public, max-age=$METADATA_CACHE_S").removeHeader("Pragma").build()
+                } else {
+                    response
+                }
+            }
+            .build()
+    }
+    private val tmdb by lazy { Tmdb(BuildConfig.TMDB_TOKEN, metadataHttp) }
+    private val tvdb by lazy { BuildConfig.THETVDB_TOKEN.takeIf { it.isNotBlank() }?.let { Tvdb(it, metadataHttp) } }
     private var scanJob: Job? = null
     /** Groups whose correction was removed, matched again by the next scan. */
     private val rematch = java.util.Collections.synchronizedSet(HashSet<String>())
@@ -258,6 +276,10 @@ class LibraryRepository(private val app: NyxaraApp) {
                 val again = synchronized(rematch) { rematch.toSet() }
                 val numberings = NumberingCache(File(app.filesDir, "tvdb-numbering.json"))
                 val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings) { _scan.value = ScanState(running = true, progress = it) }
+                // A large share takes long: what an analysis cut off had listed is not listed again.
+                val listed = ScanJournal(File(app.cacheDir, "scan-journal.jsonl"))
+                scanner.resume = listed
+                ScanService.start(app)
                 val started = System.currentTimeMillis()
                 val requests = tmdb.requests.get()
                 val tvdbRequests = tvdb?.requests?.get() ?: 0
@@ -267,6 +289,7 @@ class LibraryRepository(private val app: NyxaraApp) {
                 extras.clear() // "in the library" may have changed
                 // Read back: the next launch starts from what is on the device, not from memory.
                 if (!persist(result)) return@launch
+                listed.finish()
                 numberings.save()
                 val journal = scanner.decisions.sortedBy { it.group.lowercase() }
                 _decisions.value = journal
@@ -281,7 +304,10 @@ class LibraryRepository(private val app: NyxaraApp) {
                     "scan done in ${(System.currentTimeMillis() - started) / 1000} s, ${tmdb.requests.get() - requests} TMDB requests, " +
                         "${(tvdb?.requests?.get() ?: 0) - tvdbRequests} TheTVDB requests",
                 )
-                _scan.value = ScanState(error = offlineMessage(nas, scanner.offline))
+                _scan.value = ScanState(
+                    error = offlineMessage(nas, scanner.offline)
+                        ?: scanner.failed.size.takeIf { it > 0 }?.let { "$it dossier${if (it > 1) "s" else ""} sans réponse : leurs titres sont gardés tels quels." },
+                )
             } catch (e: CancellationException) {
                 _scan.value = ScanState()
                 throw e
@@ -334,6 +360,9 @@ class LibraryRepository(private val app: NyxaraApp) {
 
     companion object {
         private const val TAG = "LibraryRepository"
+
+        /** A day: new episodes get their titles the next day at the latest. */
+        private const val METADATA_CACHE_S = 24 * 3600
 
         /** The shares scanned, to tell a library of other shares: rescanned. */
         fun keyOf(sources: List<NasSource>) =

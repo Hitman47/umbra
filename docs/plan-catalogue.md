@@ -63,12 +63,6 @@ Dans l'onglet Perso, un sélecteur en haut : **Dossiers** (l'actuel) | **Profils
 
 ## Reste à faire
 
-1. Brancher `CatalogStore` dans `NyxaraApp` (`catalog`, `streamServer.remoteImages`,
-   `syncIfDue()` au lancement).
-2. Section Réglages › Perso › Catalogue externe.
-3. Écrans : sélecteur Dossiers | Profils, grille, fiche, sélection multiple.
-4. `PersoRequest` (profil / sélection) et `preparePerso` qui prend les chemins du
-   catalogue.
-5. Tests JVM : `CatalogIndex` (rattachement, Groupes, chemins), `parseProfile`,
-   `CatalogReadOnlyTest`.
-6. Version 1.1.0, commit au titre neutre, CI.
+- Vérifier sur appareil : réglages, synchro, dossier racine détecté, photos, lecture.
+- Recherche par alias : le catalogue ne donne les alias que fiche par fiche ; la
+  recherche porte sur le nom seulement.

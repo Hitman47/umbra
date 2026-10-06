@@ -37,4 +37,13 @@ class KeepOfflineTest {
         assertEquals(listOf("tmdb:1"), keepOffline(Library(), previous, setOf("Bureau")).shows.map { it.key })
         assertEquals(emptyList<Show>(), keepOffline(Library(), previous, emptySet()).shows)
     }
+
+    @Test
+    fun aFolderThatDidNotAnswerKeepsItsTitles() {
+        val kept = Movie("Media\\Films\\A\\Heat.mkv", 1, tmdbId = 11, title = "Heat")
+        val neighbour = Movie("Media\\Films\\B\\Old.mkv", 1, tmdbId = 12, title = "Old")
+        val previous = Library(movies = listOf(kept, neighbour))
+        // Only "Films\A" failed: its film stays, the deleted one next to it goes.
+        assertEquals(listOf("Media\\Films\\A\\Heat.mkv"), keepOffline(Library(), previous, setOf("Media\\Films\\A")).movies.map { it.file })
+    }
 }
