@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.theme
 
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -75,6 +77,9 @@ fun Modifier.remoteFriendly(): Modifier = composed {
                 } else {
                     false
                 }
+                // On a TV, before typing: ◀ ▶ go to what is beside the field ("Afficher", the port).
+                Key.DirectionLeft -> tv && !typing && focus.moveFocus(FocusDirection.Left)
+                Key.DirectionRight -> tv && !typing && focus.moveFocus(FocusDirection.Right)
                 Key.DirectionDown -> focus.moveFocus(FocusDirection.Down)
                 Key.DirectionUp -> focus.moveFocus(FocusDirection.Up)
                 else -> false
@@ -97,22 +102,25 @@ fun FormField(
 ) {
     val focus = LocalFocusManager.current
     var shown by remember { mutableStateOf(false) }
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        placeholder = placeholder?.let { { Text(it) } },
-        supportingText = supporting?.let { { Text(it) } },
-        singleLine = true,
-        trailingIcon = if (secret) ({ androidx.compose.material3.TextButton(onClick = { shown = !shown }) { Text(if (shown) "Masquer" else "Afficher") } }) else null,
-        visualTransformation = if (secret && !shown) PasswordVisualTransformation() else VisualTransformation.None,
-        keyboardOptions = KeyboardOptions(
-            keyboardType = if (secret) KeyboardType.Password else keyboardType,
-            imeAction = if (last) ImeAction.Done else ImeAction.Next,
-        ),
-        keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }, onDone = { focus.clearFocus() }),
-        modifier = modifier.remoteFriendly(),
-    )
+    // "Afficher" beside the field, not inside it: a remote reaches it (▶ from the field never leaves it).
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(label) },
+            placeholder = placeholder?.let { { Text(it) } },
+            supportingText = supporting?.let { { Text(it) } },
+            singleLine = true,
+            visualTransformation = if (secret && !shown) PasswordVisualTransformation() else VisualTransformation.None,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (secret) KeyboardType.Password else keyboardType,
+                imeAction = if (last) ImeAction.Done else ImeAction.Next,
+            ),
+            keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }, onDone = { focus.clearFocus() }),
+            modifier = Modifier.weight(1f).remoteFriendly(),
+        )
+        if (secret) TextButton(onClick = { shown = !shown }, modifier = Modifier.focusRing()) { Text(if (shown) "Masquer" else "Afficher") }
+    }
 }
 
 /**
