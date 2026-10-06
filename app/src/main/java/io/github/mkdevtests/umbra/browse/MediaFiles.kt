@@ -5,8 +5,10 @@ import io.github.mkdevtests.umbra.nas.NasEntry
 private val VIDEO_EXTENSIONS = setOf(
     "mkv", "mp4", "m4v", "avi", "mov", "wmv", "flv", "webm",
     "ts", "m2ts", "mts", "mpg", "mpeg", "vob", "ogv", "3gp",
+    "divx", "asf", "rm", "rmvb", "ogm", "m2v", "f4v", "mk3d", "3g2",
 )
-private val SUBTITLE_EXTENSIONS = setOf("srt", "ass", "ssa", "vtt", "sub")
+// "sup": PGS pictures; "idx" goes with its "sub" (VobSub); "smi": SAMI.
+private val SUBTITLE_EXTENSIONS = setOf("srt", "ass", "ssa", "vtt", "sub", "sup", "idx", "smi")
 
 /** NAS housekeeping folders (Synology, Windows, macOS) nobody wants to browse. */
 private val JUNK_FOLDERS = setOf("@eadir", "#recycle", "\$recycle.bin", "system volume information", "lost+found")

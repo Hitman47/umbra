@@ -75,13 +75,15 @@ class LibraryScanner(
     /** Anime numbering; none without a TheTVDB key. */
     private val tvdb: Tvdb? = null,
     private val numberings: NumberingCache? = null,
+    /** In the background (the launch's scan): fewer things at once, the screens stay smooth. */
+    gentle: Boolean = false,
     private val onProgress: (String) -> Unit,
 ) {
     /** Parallel TMDB calls: their latency overlaps without hitting the rate limit. */
-    private val workers = Semaphore(6)
+    private val workers = Semaphore(if (gentle) 2 else 6)
 
     /** Parallel NAS listings: each waits on a round trip, the NAS serves many at once. */
-    private val listings = Semaphore(16)
+    private val listings = Semaphore(if (gentle) 4 else 16)
 
     /** TMDB seasons fetched by this scan: a TheTVDB numbering needs them all, the episode details again. */
     private val tmdbSeasons = ConcurrentHashMap<Pair<Int, Int>, TmdbSeason>()

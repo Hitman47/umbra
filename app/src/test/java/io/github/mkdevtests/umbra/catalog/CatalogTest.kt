@@ -31,6 +31,23 @@ class CatalogTest {
     }
 
     @Test
+    fun foldersApartAndLeftOutStayOutOfTheProfiles() {
+        val people = listOf(CatalogPerson("a", "Anna", folders = listOf("Cat/Anna")))
+        val videos = listOf(
+            CatalogVideo("Cat/Anna/1.mp4"),
+            CatalogVideo("Misc/Mix/2.mp4"),
+            CatalogVideo("Misc/Mix/Sub/3.mp4"),
+            CatalogVideo("Misc/Skip/4.mp4"),
+            CatalogVideo("Misc/5.mp4"),
+        )
+        val index = CatalogIndex(CatalogData(people, videos, root = "Media\\Divers"), apart = listOf("Misc/Mix"), ignored = listOf("misc/skip/"))
+        assertEquals(listOf("Cat/Anna/1.mp4"), index.videosOf("a").map { it.path })
+        assertEquals(listOf("Misc/Mix/2.mp4", "Misc/Mix/Sub/3.mp4"), index.apartVideos("Misc/Mix").map { it.path })
+        assertEquals(listOf("Misc/5.mp4"), index.ungrouped.map { it.path })
+        assertEquals(listOf("Media\\Divers\\misc\\skip"), index.ignoredNasPaths)
+    }
+
+    @Test
     fun pages_and_profile_are_read_from_the_server_json() {
         val (people, total) = parsePeople(
             obj("""{"total":1240,"performers":[{"id":"x1","name":"Anna","folders":["Cat/Anna"],"categories":["Cat"],"video_count":3,"size_bytes":42,"followed":true,"photo_version":17.0}]}"""),

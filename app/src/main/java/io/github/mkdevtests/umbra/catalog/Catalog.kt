@@ -45,9 +45,21 @@ data class CatalogData(
 /**
  * The catalogue as the screens use it: each profile's videos (a video
  * belongs to the profile owning the nearest of its parent folders), and the
- * rest, apart. Built once per sync.
+ * rest, apart. Built once per sync. The user's [apart] folders (paths below
+ * the catalogue's root) are cards of their own, out of the profiles; the
+ * [ignored] ones are left out everywhere.
  */
-class CatalogIndex(val data: CatalogData) {
+class CatalogIndex(val data: CatalogData, val apart: List<String> = emptyList(), val ignored: List<String> = emptyList()) {
+    private val apartKeys = apart.map(::folderKey)
+    private val ignoredKeys = ignored.map(::folderKey)
+    private val byApart = HashMap<String, MutableList<CatalogVideo>>()
+
+    /** The catalogue's videos in [folder], one of [apart]. */
+    fun apartVideos(folder: String): List<CatalogVideo> = byApart[folderKey(folder)].orEmpty()
+
+    /** The NAS paths of the [ignored] folders, for Perso's folders too. */
+    val ignoredNasPaths: List<String> get() = ignored.mapNotNull(::nasPath)
+
     val people: List<CatalogPerson> = data.people
     val byId: Map<String, CatalogPerson> = people.associateBy { it.id }
     private val byPerson: Map<String, List<CatalogVideo>>
@@ -64,6 +76,12 @@ class CatalogIndex(val data: CatalogData) {
         val grouped = HashMap<String, MutableList<CatalogVideo>>()
         val rest = ArrayList<CatalogVideo>()
         data.videos.forEach { video ->
+            val key = folderKey(video.path)
+            if (ignoredKeys.any { key.isIn(it) }) return@forEach
+            apartKeys.firstOrNull { key.isIn(it) }?.let { folder ->
+                byApart.getOrPut(folder) { ArrayList() } += video
+                return@forEach
+            }
             val id = ownerOf(video.path, owner)
             if (id == null) rest += video else grouped.getOrPut(id) { ArrayList() } += video
         }
@@ -87,6 +105,11 @@ class CatalogIndex(val data: CatalogData) {
         return null
     }
 }
+
+/** "Divers\Clips/" → "divers/clips": a catalogue path to compare. */
+private fun folderKey(path: String) = path.replace('\\', '/').trim('/').lowercase()
+
+private fun String.isIn(folder: String) = this == folder || startsWith("$folder/")
 
 /** What a profile's page shows beyond the card: other names, facts, a text. */
 @Serializable

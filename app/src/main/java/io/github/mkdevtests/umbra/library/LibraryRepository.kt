@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -72,14 +73,13 @@ class LibraryRepository(private val app: NyxaraApp) {
 
     /** Images found next to the videos (folder.jpg…), kept apart: TMDB's artwork stays in the database. */
     private val artFile = File(app.filesDir, "local-art.json")
-    private val _localArt = MutableStateFlow(runCatching { Json.decodeFromString(LocalArt.serializer(), artFile.readText()) }.getOrDefault(LocalArt()))
+    // Read with the library, off the main thread (loadJob).
+    private val _localArt = MutableStateFlow(LocalArt())
     val localArt: StateFlow<LocalArt> = _localArt.asStateFlow()
 
     /** How the last scan matched each group of episodes, kept for Réglages › Corrections. */
     private val journalFile = File(app.filesDir, "match-journal.json")
-    private val _decisions = MutableStateFlow(
-        runCatching { Json.decodeFromString(ListSerializer(MatchDecision.serializer()), journalFile.readText()) }.getOrDefault(emptyList()),
-    )
+    private val _decisions = MutableStateFlow<List<MatchDecision>>(emptyList())
     val decisions: StateFlow<List<MatchDecision>> = _decisions.asStateFlow()
 
     /** The library as shown: NAS images in place of TMDB's where the NAS has some. */
@@ -94,6 +94,8 @@ class LibraryRepository(private val app: NyxaraApp) {
     val scan: StateFlow<ScanState> = _scan.asStateFlow()
 
     private val loadJob = scope.launch {
+        if (artFile.exists()) runCatching { _localArt.value = Json.decodeFromString(LocalArt.serializer(), artFile.readText()) }
+        if (journalFile.exists()) runCatching { _decisions.value = Json.decodeFromString(ListSerializer(MatchDecision.serializer()), journalFile.readText()) }
         val stored = runCatching { dao.load() ?: importLegacyFile() }
             .onFailure { Log.w(TAG, "library unreadable, rescanning", it) }
             .getOrNull() ?: return@launch
@@ -118,7 +120,15 @@ class LibraryRepository(private val app: NyxaraApp) {
             val stale = _library.value.source != keyOf(nas.sources) || _library.value.scannedAt == 0L
             val settings = app.settings.settings.value
             // Away from home, the whole NAS through Tailscale: only when asked (Réglages), or when there is no library yet.
-            if (stale || (settings.rescanAtLaunch && (settings.scanAway || nas.atHome()))) startScan()
+            when {
+                // No library yet: at once, at full speed.
+                stale -> startScan()
+                settings.rescanAtLaunch && (settings.scanAway || nas.atHome()) -> {
+                    // The app's first moments are for the screens: a gentle scan, half a minute later.
+                    delay(LAUNCH_SCAN_DELAY_MS)
+                    startScan(gentle = true)
+                }
+            }
         }
     }
 
@@ -270,11 +280,24 @@ class LibraryRepository(private val app: NyxaraApp) {
         }
     }
 
+    /** The scan running is the launch's gentle one. */
+    @Volatile private var gentleScan = false
+
+    /**
+     * Scans the NAS: at full speed when asked, [gentle] for the launch's. Asked
+     * while a gentle one runs: that one gives way (what it listed is not listed again).
+     */
     @Synchronized
-    fun startScan() {
-        if (scanJob?.isActive == true) return
+    fun startScan(gentle: Boolean = false) {
+        if (scanJob?.isActive == true) {
+            if (gentle || !gentleScan) return
+            scanJob?.cancel()
+        }
         val nas = app.nas ?: return
+        val previousJob = scanJob
+        gentleScan = gentle
         scanJob = scope.launch {
+            previousJob?.join()
             loadJob.join()
             _scan.value = ScanState(running = true, progress = "Lecture du NAS…")
             try {
@@ -284,7 +307,15 @@ class LibraryRepository(private val app: NyxaraApp) {
                 val fixes = app.matchFixes.load()
                 val again = synchronized(rematch) { rematch.toSet() }
                 val numberings = NumberingCache(File(app.filesDir, "tvdb-numbering.json"))
-                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings) { _scan.value = ScanState(running = true, progress = it) }
+                var shownAt = 0L
+                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings, gentle) { progress ->
+                    // Twice a second at most: each message redraws the home screen.
+                    val now = System.currentTimeMillis()
+                    if (now - shownAt >= PROGRESS_EVERY_MS) {
+                        shownAt = now
+                        _scan.value = ScanState(running = true, progress = progress)
+                    }
+                }
                 // A large share takes long: what an analysis cut off had listed is not listed again.
                 val listed = ScanJournal(File(app.cacheDir, "scan-journal.jsonl"))
                 scanner.resume = listed
@@ -360,6 +391,12 @@ class LibraryRepository(private val app: NyxaraApp) {
 
     companion object {
         private const val TAG = "LibraryRepository"
+
+        /** The launch's scan waits this long: the first screens come first. */
+        private const val LAUNCH_SCAN_DELAY_MS = 30_000L
+
+        /** A scan's progress shown at most this often. */
+        private const val PROGRESS_EVERY_MS = 500L
 
         /** A day: new episodes get their titles the next day at the latest. */
         private const val METADATA_CACHE_S = 24 * 3600

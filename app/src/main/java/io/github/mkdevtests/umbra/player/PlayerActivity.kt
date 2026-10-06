@@ -64,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -318,7 +319,8 @@ class PlayerActivity : ComponentActivity() {
             val began = SystemClock.elapsedRealtime()
             var grown = began
             val all = try {
-                videosUnder(nas, request.folder) { batch ->
+                val ignored = app.catalog.index.value?.ignoredNasPaths.orEmpty()
+                videosUnder(nas, request.folder, skip = { path -> ignored.any { path.within(it) } }) { batch ->
                     withContext(Dispatchers.Main) {
                         batch.forEach { known.putIfAbsent(it.path, it) }
                         val now = SystemClock.elapsedRealtime()
@@ -802,7 +804,8 @@ private fun PlayerScreen(
     val next = queue.upNext
     // Previous, next, shuffle, repeat and the queue: only with more than one video.
     val many = queue.size > 1
-    val position by player.position.collectAsState()
+    // Read only where it is shown (the controls, the queue): the screen itself isn't redrawn as playback runs.
+    val positionState = player.position.collectAsState()
     val duration by player.duration.collectAsState()
     val paused by player.paused.collectAsState()
     val buffering by player.buffering.collectAsState()
@@ -864,7 +867,7 @@ private fun PlayerScreen(
     var nextCancelled by remember(item) { mutableStateOf(false) }
     // Intro or credits skipped by themselves: once per chapter, a seek back plays it.
     val autoSkipped = remember(item) { mutableSetOf<Int>() }
-    val skip = skippableAt(chapters, position, duration)
+    val skip = remember(chapters, duration) { derivedStateOf { skippableAt(chapters, positionState.value, duration) } }.value
 
     /** Jumps [seconds] (negative: back); jumps in a row add up on the screen. */
     fun jump(seconds: Int) {
@@ -1000,6 +1003,26 @@ private fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // HDR / Dolby Vision on a TV, straight from its decoder: mpv draws no subtitles, their text is shown here.
+        val direct by player.direct.collectAsState()
+        if (direct) {
+            val text by player.subtitleText.collectAsState()
+            if (text.isNotBlank()) {
+                Text(
+                    text,
+                    color = Color.White,
+                    fontSize = (24 * settings.subtitleSize.scale.toFloat()).sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 6f)),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(start = 64.dp, end = 64.dp, bottom = 40.dp)
+                        .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+        }
+
         if (buffering) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.Center).size(if (inPip) 24.dp else 48.dp))
         }
@@ -1020,7 +1043,7 @@ private fun PlayerScreen(
         }
 
         swipeTarget?.let { target ->
-            val delta = (target - position).toInt()
+            val delta = (target - positionState.value).toInt()
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -1091,6 +1114,7 @@ private fun PlayerScreen(
                         .padding(horizontal = 24.dp, vertical = 8.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val position = positionState.value
                         val shown = dragPosition?.toDouble() ?: position
                         Text(formatTime(shown), color = Color.White, fontSize = 13.sp)
                         Slider(
@@ -1169,7 +1193,7 @@ private fun PlayerScreen(
             exit = slideOutHorizontally { it },
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
-            QueuePanel(queue, position, duration, onJump = onJump, onClose = { queueOpen = false })
+            QueuePanel(queue, positionState.value, duration, onJump = onJump, onClose = { queueOpen = false })
         }
 
         // What happened online: added (in sync? the next one), searching, a failure, or an offer.
@@ -1205,14 +1229,16 @@ private fun PlayerScreen(
 
         // The next episode: at the credits, in the last seconds, or at the end.
         val credits = skip?.kind == ChapterKind.Credits
-        val tail = !hasCredits(chapters, duration) && duration > 300 && position > 0 && duration - position <= TAIL_SECONDS
+        val tail = remember(chapters, duration) {
+            derivedStateOf { !hasCredits(chapters, duration) && duration > 300 && positionState.value > 0 && duration - positionState.value <= TAIL_SECONDS }
+        }.value
         if (!perso && next != null && queue.repeat != Repeat.One && !nextCancelled && (ended || (settings.nextEpisodeCountdown && (credits || tail)))) {
             NextUp(
                 next = next,
                 seconds = when {
                     ended -> 8
                     credits -> 10
-                    else -> (duration - position).toInt().coerceAtLeast(1)
+                    else -> (duration - positionState.value).toInt().coerceAtLeast(1)
                 },
                 onPlay = onNext,
                 onCancel = { nextCancelled = true; controlsVisible = true },

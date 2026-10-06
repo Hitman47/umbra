@@ -50,6 +50,19 @@ class CatalogStore(
 
     private val _index = MutableStateFlow<CatalogIndex?>(null)
 
+    /** The last sync's data, to build the index again when the folders below change. */
+    @Volatile private var data: CatalogData? = null
+
+    private val _apart = MutableStateFlow(readFolders(APART))
+
+    /** Folders (below the catalogue's root) shown as cards of their own, like the groups. */
+    val apart: StateFlow<List<String>> = _apart.asStateFlow()
+
+    private val _ignored = MutableStateFlow(readFolders(IGNORED))
+
+    /** Folders left out of Perso altogether. */
+    val ignored: StateFlow<List<String>> = _ignored.asStateFlow()
+
     /** The last sync; null before the first one. */
     val index: StateFlow<CatalogIndex?> = _index.asStateFlow()
 
@@ -58,9 +71,27 @@ class CatalogStore(
 
     init {
         scope.launch(Dispatchers.IO) {
-            runCatching { if (file.exists()) _index.value = CatalogIndex(json.decodeFromString(CatalogData.serializer(), file.readText())) }
+            runCatching { if (file.exists()) use(json.decodeFromString(CatalogData.serializer(), file.readText())) }
                 .onFailure { Log.w(TAG, "catalog unreadable", it) }
         }
+    }
+
+    private fun use(data: CatalogData) {
+        this.data = data
+        _index.value = CatalogIndex(data, _apart.value, _ignored.value)
+    }
+
+    private fun readFolders(key: String) = prefs.getString(key, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
+
+    /** The folders apart and the folders left out (see [apart], [ignored]). */
+    fun setFolders(apart: List<String>, ignored: List<String>) {
+        prefs.edit {
+            putString(APART, apart.joinToString("\n"))
+            putString(IGNORED, ignored.joinToString("\n"))
+        }
+        _apart.value = apart
+        _ignored.value = ignored
+        data?.let(::use)
     }
 
     private fun readAddress() = CatalogAddress(
@@ -113,7 +144,7 @@ class CatalogStore(
                 val root = rootOf(videos) ?: _index.value?.data?.root
                 val data = CatalogData(people, videos, System.currentTimeMillis(), root)
                 file.writeText(json.encodeToString(CatalogData.serializer(), data))
-                _index.value = CatalogIndex(data)
+                use(data)
                 prefs.edit { putLong(LAST, data.syncedAt) }
                 _status.value = CatalogStatus(error = if (root == null) "Dossier introuvable dans Perso : ajoute le dossier racine du catalogue à Perso." else null)
             } catch (e: Exception) {
@@ -189,5 +220,7 @@ class CatalogStore(
         const val PASSWORD = "password"
         const val MODE = "mode"
         const val LAST = "last"
+        const val APART = "apart"
+        const val IGNORED = "ignored"
     }
 }

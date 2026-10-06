@@ -15,7 +15,7 @@ data class ParsedName(
     val tmdbId: Int? = null,
 )
 
-private val VIDEO_EXTENSION = Regex("""\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|ogv|3gp)$""", RegexOption.IGNORE_CASE)
+private val VIDEO_EXTENSION = Regex("""\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|ogv|3gp|divx|asf|rm|rmvb|ogm|m2v|f4v|mk3d|3g2)$""", RegexOption.IGNORE_CASE)
 
 /** Release group tags in front of anime files: "[SubsPlease] ". */
 private val LEADING_GROUPS = Regex("""^\s*(?:\[[^\]]*\]\s*)+""")

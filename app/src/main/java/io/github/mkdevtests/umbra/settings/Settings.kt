@@ -56,6 +56,8 @@ data class Settings(
     val hideUnavailable: Boolean = false,
     /** Every card's size against the usual one (0.8 to 1.3). */
     val cardScale: Float = 1f,
+    /** The sound sent as it is (Dolby, DTS, Atmos) to a sound bar or an amplifier that takes it; else decoded. */
+    val audioPassthrough: Boolean = true,
 )
 
 
@@ -94,6 +96,7 @@ class SettingsStore(context: Context) {
             putString(KEY_DOCUMENTARIES, updated.documentaryFolders.joinToString("\n"))
             putBoolean(KEY_HIDE_UNAVAILABLE, updated.hideUnavailable)
             putFloat(KEY_CARD_SCALE, updated.cardScale)
+            putBoolean(KEY_PASSTHROUGH, updated.audioPassthrough)
         }
     }
 
@@ -128,6 +131,7 @@ class SettingsStore(context: Context) {
             documentaryFolders = prefs.getString(KEY_DOCUMENTARIES, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
             hideUnavailable = prefs.getBoolean(KEY_HIDE_UNAVAILABLE, defaults.hideUnavailable),
             cardScale = prefs.getFloat(KEY_CARD_SCALE, defaults.cardScale).coerceIn(0.8f, 1.3f),
+            audioPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, defaults.audioPassthrough),
         )
     }
 
@@ -150,6 +154,7 @@ class SettingsStore(context: Context) {
         const val KEY_DOCUMENTARIES = "documentary_folders"
         const val KEY_HIDE_UNAVAILABLE = "hide_unavailable"
         const val KEY_CARD_SCALE = "card_scale"
+        const val KEY_PASSTHROUGH = "audio_passthrough"
         const val NONE = "none"
     }
 }

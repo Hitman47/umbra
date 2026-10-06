@@ -113,8 +113,26 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     private val _ended = MutableStateFlow(false)
     val ended: StateFlow<Boolean> = _ended.asStateFlow()
 
-    /** A TV's GPU is weaker than a tablet's: mpv's lighter renderer there. */
-    private val vo = if (context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)) TV_VO else VO
+    private val tv = context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+
+    /** A TV's GPU is weaker than a tablet's: mpv's lighter renderer there, for SDR pictures. */
+    private val vo = if (tv) TV_VO else VO
+
+    /**
+     * How the picture is drawn now. On a TV it follows the file: the light renderer for
+     * SDR; for HDR or Dolby Vision, the TV's own decoder straight to the screen ([DIRECT]:
+     * native HDR, nearly no work; mpv draws no subtitles then, the app shows their text),
+     * or the full renderer when the subtitles are pictures (PGS, VobSub) mpv must draw.
+     */
+    @Volatile private var render = vo
+
+    private val _direct = MutableStateFlow(false)
+
+    /** The picture goes straight to the screen: the subtitles' text is shown by the app ([subtitleText]). */
+    val direct: StateFlow<Boolean> = _direct.asStateFlow()
+
+    private val _subtitleText = MutableStateFlow("")
+    val subtitleText: StateFlow<String> = _subtitleText.asStateFlow()
 
     init {
         val cacheDir = context.cacheDir.absolutePath
@@ -133,10 +151,12 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         // Cheap scalers, no dithering, no per-frame HDR peak detection:
         // the default quality settings drop frames on 4K HDR with a tablet GPU.
         mpv.setOptionString("profile", "fast")
-        mpv.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
+        // VC-1 / WMV and MPEG-1 too: a TV's processor can't decode them alone.
+        mpv.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,mpeg1video,vc1,wmv3,vp8,vp9,av1")
 
         // TrueHD / DTS are decoded in software and downmixed for the device.
         mpv.setOptionString("ao", "audiotrack,opensles")
+        // An amplifier or a sound bar (HDMI, eARC) that takes Dolby / DTS: sent as it is (see play()).
 
         // No fontconfig on Android: point libass at the system fonts.
         // Fonts embedded in MKV files (typical for anime ASS) still win.
@@ -183,6 +203,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.observeProperty("chapter-list", MpvFormat.MPV_FORMAT_NONE)
         mpv.observeProperty("speed", MpvFormat.MPV_FORMAT_DOUBLE)
         mpv.observeProperty("eof-reached", MpvFormat.MPV_FORMAT_FLAG)
+        mpv.observeProperty("sub-text", MpvFormat.MPV_FORMAT_STRING)
     }
 
     /** Plays [url] from [start] seconds with extra subtitle files: now, or as soon as a Surface is available. */
@@ -210,6 +231,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         stalls = 0
         stalledMs = 0L
         mpv.setPropertyString("start", if (start > 0) start.toString() else "none")
+        mpv.setPropertyString("audio-spdif", passthroughCodecs())
+        // Each file starts with the light renderer; HDR or Dolby Vision switch it once the picture is known.
+        if (tv && render != vo) switchRender(vo)
         _failure.value = null
         started = false
         runCatching {
@@ -271,7 +295,11 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     fun selectAudio(id: Int) = mpv.setPropertyString("aid", id.toString())
 
     /** [NO_SUBTITLES] turns them off. */
-    fun selectSubtitles(id: Int) = mpv.setPropertyString("sid", if (id == NO_SUBTITLES) "no" else id.toString())
+    fun selectSubtitles(id: Int) {
+        mpv.setPropertyString("sid", if (id == NO_SUBTITLES) "no" else id.toString())
+        // Picture subtitles need mpv's renderer; text ones can be shown over the TV's own picture.
+        if (tv) main.post { adaptRender() }
+    }
 
     /** Subtitles later (positive) or earlier, in seconds; kept for the next files. */
     fun shiftSubtitles(seconds: Double) = mpv.command(arrayOf("add", "sub-delay", seconds.toString()))
@@ -301,6 +329,8 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.command(arrayOf("af", "remove", "@night"))
         if (on) mpv.command(arrayOf("af", "add", "@night:lavfi=[$NIGHT_FILTER]"))
         _nightAudio.value = on
+        // The night mode needs the decoded sound: no Dolby / DTS sent as it is meanwhile.
+        mpv.setPropertyString("audio-spdif", passthroughCodecs())
     }
 
     /** Anime4K (MIT, bundled in the assets): restores and doubles the lines of a drawn picture, on the GPU. */
@@ -334,7 +364,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         fun p(name: String) = mpv.getPropertyString(name) ?: "?"
         return buildString {
             appendLine("${p("video-codec")}  ${p("video-params/w")}x${p("video-params/h")}")
-            appendLine("hwdec: ${p("hwdec-current")}  vo: ${p("current-vo")}")
+            val hw = p("hwdec-current")
+            appendLine("hwdec: ${if (hw == "no") "logiciel (peut saccader)" else hw}  vo: ${p("current-vo")}")
+            appendLine("son direct : ${p("audio-spdif").ifBlank { "non (décodé)" }}")
             appendLine("gamma: ${p("video-params/gamma")}  primaries: ${p("video-params/primaries")}")
             appendLine("audio: ${p("audio-codec-name")}  ${p("audio-params/channel-count")} ch")
             append("fps: ${p("estimated-vf-fps")}  dropped: ${p("frame-drop-count")}  cache: ${p("demuxer-cache-duration")} s")
@@ -379,7 +411,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
             mpv.command(arrayOf("loadfile", file))
             pendingFile = null
         } else {
-            mpv.setPropertyString("vo", vo)
+            mpv.setPropertyString("vo", if (render == DIRECT) DIRECT_VO else render)
         }
     }
 
@@ -428,7 +460,55 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         }
     }
 
-    override fun eventProperty(property: String, value: String) {}
+    override fun eventProperty(property: String, value: String) {
+        if (property == "sub-text") _subtitleText.value = value
+    }
+
+    /** The codecs the HDMI output takes as they are, for mpv's "audio-spdif" ("" : all decoded). */
+    private fun passthroughCodecs(): String {
+        // The night mode works on the decoded sound.
+        if (!settings.audioPassthrough || _nightAudio.value) return ""
+        val audio = appContext.getSystemService(android.media.AudioManager::class.java) ?: return ""
+        val hdmi = setOf(android.media.AudioDeviceInfo.TYPE_HDMI, android.media.AudioDeviceInfo.TYPE_HDMI_ARC, android.media.AudioDeviceInfo.TYPE_HDMI_EARC)
+        val encodings = audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+            .filter { it.type in hdmi }
+            .flatMap { it.encodings.toList() }
+            .toSet()
+        return passthroughFor(encodings)
+    }
+
+    /** The picture is HDR or Dolby Vision (known once decoded). */
+    private fun isHdr(): Boolean {
+        val gamma = mpv.getPropertyString("video-params/gamma").orEmpty()
+        if (gamma == "pq" || gamma == "hlg") return true
+        val count = mpv.getPropertyString("track-list/count")?.toIntOrNull() ?: 0
+        return (0 until count).any { i ->
+            mpv.getPropertyString("track-list/$i/type") == "video" && mpv.getPropertyString("track-list/$i/selected") == "yes" &&
+                !mpv.getPropertyString("track-list/$i/dolby-vision-profile").isNullOrBlank()
+        }
+    }
+
+    /** The renderer this file needs on a TV (see [render]). */
+    private fun adaptRender() {
+        if (!tv) return
+        runCatching {
+            val target = when {
+                !isHdr() -> vo
+                readTracks().any { it.type == "sub" && it.selected && it.codec?.lowercase() in IMAGE_SUBTITLES } -> VO
+                else -> DIRECT
+            }
+            switchRender(target)
+        }.onFailure { Log.w(TAG, "render", it) }
+    }
+
+    private fun switchRender(target: String) {
+        if (target == render) return
+        Log.i(TAG, "render $render -> $target")
+        render = target
+        mpv.setPropertyString("vo", if (target == DIRECT) DIRECT_VO else target)
+        _direct.value = target == DIRECT
+        if (target != DIRECT) _subtitleText.value = ""
+    }
 
     /** A wait for the network while playing; those of the opening and of a seek are timed with them. */
     private fun countStall(waiting: Boolean) {
@@ -472,6 +552,8 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
                 publishChapters()
             }
             START_FILE -> started = true
+            // The picture's format is known: on a TV, the renderer it needs.
+            VIDEO_RECONFIG -> if (tv) main.post { adaptRender() }
             MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
                 Log.i(TAG, "end of file")
                 // Ended before its first picture: it couldn't be played.
@@ -571,6 +653,16 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         const val TAG = "MpvPlayer"
         const val VO = "gpu-next"
         const val TV_VO = "gpu"
+
+        /** On a TV: the picture straight from its decoder to the screen. */
+        const val DIRECT = "direct"
+        const val DIRECT_VO = "mediacodec_embed"
+
+        /** Subtitles drawn as pictures: only mpv's renderer shows them. */
+        val IMAGE_SUBTITLES = setOf("hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "pgssub", "dvdsub", "dvbsub", "xsub")
+
+        /** MPV_EVENT_VIDEO_RECONFIG in mpv's client.h. */
+        const val VIDEO_RECONFIG = 17
 
         /** The playback position is published to the screens when it moved this much (seconds). */
         const val POSITION_STEP = 0.25

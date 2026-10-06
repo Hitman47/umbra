@@ -1,5 +1,9 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import androidx.compose.material3.CircularProgressIndicator
+
+import androidx.compose.foundation.layout.heightIn
+
 import androidx.compose.foundation.layout.Box
 
 import androidx.compose.foundation.background
@@ -286,6 +290,12 @@ fun SettingsScreen(
                                     Item("Version plus légère hors de chez moi", "Par Tailscale ou en données mobiles : la version jusqu'au 1080p plutôt que la 4K. Toujours modifiable sur la fiche.") {
                                         Switch(checked = settings.lighterAway, onCheckedChange = { on -> store.update { it.copy(lighterAway = on) } })
                                     }
+                                    Item(
+                                        "Son direct vers l'ampli ou la barre de son",
+                                        "Dolby, DTS et Atmos envoyés tels quels quand la sortie HDMI les accepte (barre de son, ampli). Sinon, et sur les haut-parleurs de la TV ou de la tablette : son décodé, comme avant. Pas pendant le mode nuit.",
+                                    ) {
+                                        Switch(checked = settings.audioPassthrough, onCheckedChange = { on -> store.update { it.copy(audioPassthrough = on) } })
+                                    }
                                     Item("Mode nuit", "Dialogues plus forts, explosions plus douces, à chaque lecture. Aussi dans le lecteur : Audio et sous-titres.") {
                                         Switch(checked = settings.nightAudio, onCheckedChange = { on -> store.update { it.copy(nightAudio = on) } })
                                     }
@@ -406,6 +416,85 @@ private fun CardPreview(scale: Float) {
             }
         }
     }
+}
+
+/**
+ * Folders below the catalogue's root: apart (cards of their own in Profils, like
+ * the groups, out of the profiles) or left out of Perso altogether.
+ */
+@Composable
+private fun ColumnScope.CatalogFolders(catalog: io.github.mkdevtests.umbra.catalog.CatalogStore, root: String) {
+    val apart by catalog.apart.collectAsState()
+    val ignored by catalog.ignored.collectAsState()
+    var picking by remember { mutableStateOf<Boolean?>(null) } // true: apart, false: left out
+    Item("Dossiers à part", if (apart.isEmpty()) "Aucun. Chacun devient une carte en haut de Profils, comme Groupes, hors des profils." else "Une carte chacun en haut de Profils, hors des profils.") {
+        TextButton(onClick = { picking = true }) { Text("Ajouter ›") }
+    }
+    apart.forEach { folder ->
+        Item(folder.substringAfterLast('/'), folder.replace("/", " › ")) {
+            TextButton(onClick = { catalog.setFolders(apart - folder, ignored) }) { Text("Retirer") }
+        }
+    }
+    Item("Dossiers ignorés", if (ignored.isEmpty()) "Aucun. Ni affichés, ni lus, ni dans Profils." else "Ni affichés, ni lus, ni dans Profils.") {
+        TextButton(onClick = { picking = false }) { Text("Ajouter ›") }
+    }
+    ignored.forEach { folder ->
+        Item(folder.substringAfterLast('/'), folder.replace("/", " › ")) {
+            TextButton(onClick = { catalog.setFolders(apart, ignored - folder) }) { Text("Retirer") }
+        }
+    }
+    picking?.let { forApart ->
+        val app = LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
+        CatalogFolderPicker(
+            title = if (forApart) "Dossier à part" else "Dossier ignoré",
+            list = { relative ->
+                val nas = app.nas ?: return@CatalogFolderPicker emptyList()
+                val path = if (relative.isEmpty()) root else "$root\\" + relative.replace('/', '\\')
+                withContext(Dispatchers.IO) { runCatching { nas.list(path, withExcluded = true, withPersonal = true) }.getOrDefault(emptyList()) }
+                    .filter { it.isDirectory }.map { it.name }.sortedWith { a, b -> naturalCompare(a, b) }
+            },
+            onPick = { folder ->
+                picking = null
+                if (forApart) catalog.setFolders((apart + folder).distinct(), ignored - folder)
+                else catalog.setFolders(apart - folder, (ignored + folder).distinct())
+            },
+            onDismiss = { picking = null },
+        )
+    }
+}
+
+/** Walks down the catalogue's folders ([list] of a path below its root) to pick one. */
+@Composable
+private fun CatalogFolderPicker(title: String, list: suspend (String) -> List<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    var path by remember { mutableStateOf("") }
+    var folders by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(path) {
+        folders = null
+        folders = list(path)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (path.isEmpty()) "Racine du catalogue" else path.replace("/", " › "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (path.isNotEmpty()) TextButton(onClick = { path = path.substringBeforeLast('/', "") }) { Text("‹ Remonter") }
+                val shown = folders
+                if (shown == null) {
+                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                } else {
+                    Column(modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                        if (shown.isEmpty()) Text("Aucun sous-dossier.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        shown.forEach { name ->
+                            TextButton(onClick = { path = if (path.isEmpty()) name else "$path/$name" }) { Text("$name ›") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onPick(path) }, enabled = path.isNotEmpty()) { Text("Choisir ce dossier") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
 }
 
 /** The pages of Réglages. */
@@ -544,6 +633,7 @@ private fun CatalogSection(catalog: io.github.mkdevtests.umbra.catalog.CatalogSt
             Item("État", state) {
                 TextButton(onClick = catalog::sync, enabled = !status.syncing) { Text("Synchroniser") }
             }
+            index?.data?.root?.let { root -> CatalogFolders(catalog, root) }
         }
     }
     if (editing) {

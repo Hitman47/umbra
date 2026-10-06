@@ -1,5 +1,8 @@
 package io.github.mkdevtests.umbra.ui.theme
 
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.inset
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -179,9 +182,39 @@ fun Tag(text: String, modifier: Modifier = Modifier) {
  * A ring around what the remote is on (Android TV, a keyboard): a touch
  * screen never shows it. Put it before the clickable it follows.
  */
-fun Modifier.focusRing(shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(14.dp)): Modifier = composed {
-    var focused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    this
-        .onFocusChanged { focused = it.hasFocus }
-        .then(if (focused) Modifier.border(3.dp, Night.Violet, shape) else Modifier)
+fun Modifier.focusRing(shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(14.dp)): Modifier = this then FocusRingElement(shape)
+
+// A node rather than composed {}: grids hold hundreds of cards, each paying for it at every scroll.
+private data class FocusRingElement(val shape: androidx.compose.ui.graphics.Shape) : androidx.compose.ui.node.ModifierNodeElement<FocusRingNode>() {
+    override fun create() = FocusRingNode(shape)
+
+    override fun update(node: FocusRingNode) {
+        node.shape = shape
+    }
+}
+
+private class FocusRingNode(shape: androidx.compose.ui.graphics.Shape) :
+    Modifier.Node(), androidx.compose.ui.focus.FocusEventModifierNode, androidx.compose.ui.node.DrawModifierNode {
+    var shape = shape
+        set(value) {
+            field = value
+            if (focused) invalidateDraw()
+        }
+    private var focused = false
+
+    override fun onFocusEvent(focusState: androidx.compose.ui.focus.FocusState) {
+        if (focusState.hasFocus == focused) return
+        focused = focusState.hasFocus
+        invalidateDraw()
+    }
+
+    override fun androidx.compose.ui.graphics.drawscope.ContentDrawScope.draw() {
+        drawContent()
+        if (!focused) return
+        val width = 3.dp.toPx()
+        // Inside the edge, as a border would be.
+        inset(width / 2) {
+            drawOutline(shape.createOutline(size, layoutDirection, this), Night.Violet, style = androidx.compose.ui.graphics.drawscope.Stroke(width))
+        }
+    }
 }

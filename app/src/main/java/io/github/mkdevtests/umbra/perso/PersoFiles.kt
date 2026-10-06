@@ -34,6 +34,8 @@ private const val PARALLEL_LISTINGS = 4
 suspend fun videosUnder(
     nas: NasRouter,
     folder: String,
+    /** Folders left out (Réglages › Perso): not walked. */
+    skip: (String) -> Boolean = { false },
     onFound: (suspend (List<PersoVideo>) -> Unit)? = null,
 ): List<PersoVideo> = withContext(Dispatchers.IO) {
     val gate = Semaphore(PARALLEL_LISTINGS)
@@ -46,7 +48,7 @@ suspend fun videosUnder(
         val shown = sortForDisplay(listing)
         val found = shown.filter { it.isVideo }.map { video -> PersoVideo(video.path, subtitlesFor(video, listing).map { it.path }) }
         if (found.isNotEmpty()) onFound?.invoke(found)
-        val below = coroutineScope { shown.filter { it.isDirectory }.map { async { walk(it.path, top = false) } }.awaitAll() }
+        val below = coroutineScope { shown.filter { it.isDirectory && !skip(it.path) }.map { async { walk(it.path, top = false) } }.awaitAll() }
         return below.flatten() + found
     }
     walk(folder, top = true)

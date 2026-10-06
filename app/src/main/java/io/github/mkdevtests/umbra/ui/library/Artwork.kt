@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -25,14 +27,24 @@ import io.github.mkdevtests.umbra.library.Tmdb
 
 val PosterShape = RoundedCornerShape(14.dp)
 
+/** A grid card's usual width, in dp. */
+private const val POSTER_DP = 128
+
 /** 2:3 poster; shows the title on a plain card when TMDB has no artwork. */
 @Composable
-fun Poster(path: String?, title: String, modifier: Modifier = Modifier, size: String = "w342") {
+fun Poster(path: String?, title: String, modifier: Modifier = Modifier, size: String? = null) {
+    val top = MaterialTheme.colorScheme.surfaceContainerHighest
+    val bottom = MaterialTheme.colorScheme.surfaceContainer
+    val fill = remember(top, bottom) { Brush.verticalGradient(listOf(top, bottom)) }
+    // A card's width in pixels decides TMDB's picture: sharp on a dense screen or a bigger card, light otherwise.
+    val density = LocalDensity.current.density
+    val scale = io.github.mkdevtests.umbra.ui.theme.LocalCardScale.current
+    val picture = size ?: if (POSTER_DP * scale * density > 300) "w500" else "w342"
     Box(
         modifier = modifier
             .aspectRatio(2f / 3f)
             .clip(PosterShape)
-            .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.surfaceContainer)))
+            .background(fill)
             .border(1.dp, Color.White.copy(alpha = 0.06f), PosterShape),
         contentAlignment = Alignment.Center,
     ) {
@@ -45,7 +57,7 @@ fun Poster(path: String?, title: String, modifier: Modifier = Modifier, size: St
             )
         } else {
             AsyncImage(
-                model = Tmdb.image(path, size),
+                model = Tmdb.image(path, picture),
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

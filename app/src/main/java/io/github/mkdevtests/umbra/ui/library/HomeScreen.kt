@@ -62,6 +62,8 @@ import io.github.mkdevtests.umbra.history.Progress
 import io.github.mkdevtests.umbra.history.seenOf
 import io.github.mkdevtests.umbra.library.Library
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import io.github.mkdevtests.umbra.library.byTitle
@@ -204,14 +206,16 @@ private fun HomeContent(
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
     val nasStates by app.nasMonitor.states.collectAsState()
     val nasHistory by app.nasMonitor.history.collectAsState()
-    val downloads by app.downloads.list.collectAsState()
+    // Only the finished downloads matter here: a download's progress must not redraw the lists.
+    val localCopies by remember { app.downloads.list.map { list -> list.filter { it.state == io.github.mkdevtests.umbra.download.DownloadState.Done }.mapTo(HashSet()) { it.key } }.distinctUntilChanged() }
+        .collectAsState(initial = emptySet())
     val appSettings by app.settings.settings.collectAsState()
     val hide = appSettings.hideUnavailable
     val offlineIds = remember(nasStates) { nasStates.filter { !it.online }.mapTo(HashSet()) { it.id } }
     // A file of a NAS that doesn't answer, not downloaded: can't be read now.
-    val unavailable: (String) -> Boolean = remember(offlineIds, downloads) {
+    val unavailable: (String) -> Boolean = remember(offlineIds, localCopies) {
         val router = app.nas
-        val local = downloads.filter { it.state == io.github.mkdevtests.umbra.download.DownloadState.Done }.mapTo(HashSet()) { it.key }
+        val local = localCopies
         val test: (String) -> Boolean = { file -> file !in local && router?.sourceOf(file)?.id in offlineIds }
         test
     }

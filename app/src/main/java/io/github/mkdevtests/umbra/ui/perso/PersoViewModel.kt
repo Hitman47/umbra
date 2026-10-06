@@ -78,7 +78,10 @@ class PersoViewModel(app: Application) : AndroidViewModel(app) {
             val result = runCatching { withContext(Dispatchers.IO) { nas.list(path, withPersonal = true) } }
             ensureActive()
             _state.value = result.fold(
-                onSuccess = { found ->
+                onSuccess = { all ->
+                    // The folders left out (Réglages › Perso) are not shown.
+                    val ignored = nyxara.catalog.index.value?.ignoredNasPaths.orEmpty()
+                    val found = all.filterNot { entry -> ignored.any { entry.path.within(it) } }
                     listing = found
                     val shown = sortForDisplay(found)
                     nyxara.persoMedia.request(shown.filter { it.isVideo }.map { it.path to it.size })

@@ -25,8 +25,14 @@ import java.util.concurrent.ConcurrentHashMap
 class MediaInfoStore(private val file: File, private val nas: () -> NasRouter?, private val scope: CoroutineScope) {
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val _infos = MutableStateFlow(load())
+    private val _infos = MutableStateFlow<Map<String, MediaInfo>>(emptyMap())
     val infos: StateFlow<Map<String, MediaInfo>> = _infos.asStateFlow()
+
+    /** The file read off the main thread: it can hold thousands of entries. */
+    private val loaded = scope.launch(Dispatchers.IO) {
+        val stored = load()
+        _infos.update { stored + it }
+    }
 
     private val pending = ConcurrentHashMap.newKeySet<String>()
     /** Files that couldn't be read in this session (unknown format, NAS away): not asked again. */
@@ -36,6 +42,11 @@ class MediaInfoStore(private val file: File, private val nas: () -> NasRouter?, 
 
     /** Reads the files ([path] to its size) not known yet. */
     fun request(files: List<Pair<String, Long>>) {
+        // What is known already is not read again: the file first.
+        if (!loaded.isCompleted) {
+            scope.launch { loaded.join(); request(files) }
+            return
+        }
         files.filter { (path, size) -> _infos.value[path]?.size != size && path !in failed && pending.add(path) }.forEach { (path, _) ->
             scope.launch(Dispatchers.IO) {
                 try {
@@ -68,6 +79,8 @@ class MediaInfoStore(private val file: File, private val nas: () -> NasRouter?, 
     private fun saveSoon() {
         saving?.cancel()
         saving = scope.launch(Dispatchers.IO) {
+            // Never written before the file is read: it would lose what it held.
+            loaded.join()
             delay(2_000)
             runCatching {
                 val temp = File(file.path + ".tmp")
