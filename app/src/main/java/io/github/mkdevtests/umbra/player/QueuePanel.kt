@@ -2,6 +2,8 @@ package io.github.mkdevtests.umbra.player
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -73,7 +75,7 @@ fun QueuePanel(queue: PlayerQueue, position: Double, duration: Double, onJump: (
             .width(440.dp)
             .background(Panel)
             // Taps inside the panel must not close it.
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .pointerInput(Unit) { detectTapGestures { } }
             .safeDrawingPadding()
             .padding(top = 12.dp),
     ) {

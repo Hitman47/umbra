@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.background
@@ -68,9 +69,9 @@ fun Poster(path: String?, title: String, modifier: Modifier = Modifier, size: St
 
 /** Full-width backdrop fading into the page background, Infuse style. */
 @Composable
-fun Backdrop(path: String?, modifier: Modifier = Modifier) {
+fun Backdrop(path: String?, modifier: Modifier = Modifier, height: androidx.compose.ui.unit.Dp? = null) {
     val background = MaterialTheme.colorScheme.background
-    Box(modifier = modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+    Box(modifier = modifier.fillMaxWidth().then(if (height != null) Modifier.height(height) else Modifier.aspectRatio(16f / 9f))) {
         AsyncImage(
             model = Tmdb.image(path, "w1280"),
             contentDescription = null,

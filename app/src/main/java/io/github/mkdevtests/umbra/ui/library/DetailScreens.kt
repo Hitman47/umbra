@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusRequester
 import io.github.mkdevtests.umbra.ui.theme.scaled
 import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.compose.foundation.background
@@ -602,10 +604,21 @@ private fun episodesOwned(show: Show, season: Int, owned: Int): String {
     return if (season > 0 && total > owned) " · $owned/$total" else ""
 }
 
+/**
+ * In landscape (a TV, a tablet held sideways) a 16:9 picture would fill the
+ * whole screen, the title and buttons below it: 55 % of the screen's height then.
+ */
+@Composable
+private fun landscapeBackdrop(): androidx.compose.ui.unit.Dp? {
+    val metrics = LocalContext.current.resources.displayMetrics
+    if (metrics.widthPixels <= metrics.heightPixels) return null
+    return (metrics.heightPixels / androidx.compose.ui.platform.LocalDensity.current.density * 0.55f).dp
+}
+
 @Composable
 private fun DetailHeader(backdrop: String?, onBack: () -> Unit) {
     Box {
-        Backdrop(backdrop)
+        Backdrop(backdrop, height = landscapeBackdrop())
         GlassIconButton(NyxaraIcons.Back, "Retour", onBack, modifier = Modifier.safeDrawingPadding().padding(12.dp))
     }
 }
@@ -634,7 +647,19 @@ private fun TitleBlock(
             if (genres.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { genres.take(3).forEach { Tag(it) } }
             }
-            Column(modifier = Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { action() }
+            // With a remote: on the first button (Lire, Reprendre) at once; OK plays.
+            val first = remember { androidx.compose.ui.focus.FocusRequester() }
+            val tv = io.github.mkdevtests.umbra.ui.theme.isTv()
+            LaunchedEffect(Unit) {
+                if (tv) {
+                    kotlinx.coroutines.delay(200)
+                    runCatching { first.requestFocus() }
+                }
+            }
+            Column(
+                modifier = Modifier.padding(top = 6.dp).focusRequester(first).focusGroup(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) { action() }
         }
     }
 }

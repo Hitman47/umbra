@@ -828,6 +828,8 @@ private fun PlayerScreen(
     val heldHidden = remember { intArrayOf(0) }
     // With a remote, as Infuse: the progress bar has the focus; ◀ ▶ move a mark, OK goes there.
     val barFocus = remember { FocusRequester() }
+    // The audio and subtitles panel: the remote goes in as it opens.
+    val panelFocus = remember { FocusRequester() }
     var scrub by remember { mutableStateOf<Double?>(null) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var panelOpen by remember { mutableStateOf(false) }
@@ -928,6 +930,20 @@ private fun PlayerScreen(
     // The remote (Android TV) or a keyboard: ⏪ ⏩ and pause without the controls, the controls on any other key.
     val keys = remember { FocusRequester() }
     LaunchedEffect(controlsVisible, panelOpen, queueOpen) { if (!controlsVisible && !panelOpen && !queueOpen) runCatching { keys.requestFocus() } }
+    LaunchedEffect(panelOpen) {
+        if (panelOpen && keyMode) {
+            delay(250)
+            runCatching { panelFocus.requestFocus() }
+        }
+    }
+    // Back with a remote: closes a panel, then the controls, before leaving the video.
+    androidx.activity.compose.BackHandler(enabled = panelOpen || queueOpen || (keyMode && controlsVisible)) {
+        when {
+            panelOpen -> panelOpen = false
+            queueOpen -> queueOpen = false
+            else -> controlsVisible = false
+        }
+    }
     LaunchedEffect(controlsVisible) {
         if (controlsVisible && keyMode) {
             // Once the controls are on screen: the remote starts on the progress bar, as in Infuse.
@@ -1231,7 +1247,7 @@ private fun PlayerScreen(
             exit = slideOutHorizontally { it },
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
-            TrackPanel(player, settings, online) { choosing = true; online?.load() }
+            TrackPanel(player, settings, online, panelFocus) { choosing = true; online?.load() }
         }
 
         AnimatedVisibility(
@@ -1365,7 +1381,7 @@ private fun scrubStep(repeat: Int): Double = when {
 
 /** Side panel: audio and subtitle tracks, their delays, subtitles found online. */
 @Composable
-private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubtitles?, onChooseOnline: () -> Unit) {
+private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubtitles?, first: FocusRequester, onChooseOnline: () -> Unit) {
     val audio by player.audioTracks.collectAsState()
     val subtitles by player.subtitleTracks.collectAsState()
     val delay by player.subtitleDelay.collectAsState()
@@ -1378,18 +1394,20 @@ private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubt
             .width(420.dp)
             .background(PanelColor)
             // Taps inside the panel must not close it.
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .pointerInput(Unit) { detectTapGestures { } }
             .safeDrawingPadding()
             .verticalScroll(rememberScrollState())
             .padding(vertical = 16.dp),
     ) {
         PanelTitle("Audio")
         if (audio.isEmpty()) PanelNote("Aucune piste audio")
-        audio.forEach { track -> TrackRow(track.label, track.detail, track.selected) { player.selectAudio(track.id) } }
+        audio.forEachIndexed { index, track ->
+            TrackRow(track.label, track.detail, track.selected, if (index == 0) Modifier.focusRequester(first) else Modifier) { player.selectAudio(track.id) }
+        }
 
         PanelTitle("Sous-titres")
         subtitles.forEach { track -> TrackRow(track.label, track.detail, track.selected) { player.selectSubtitles(track.id) } }
-        TrackRow("Désactivés", null, !subtitlesOn) { player.selectSubtitles(NO_SUBTITLES) }
+        TrackRow("Désactivés", null, !subtitlesOn, if (audio.isEmpty()) Modifier.focusRequester(first) else Modifier) { player.selectSubtitles(NO_SUBTITLES) }
 
         if (online != null) {
             PanelTitle("Sous-titres en ligne")
@@ -1477,10 +1495,11 @@ private fun PanelNote(text: String) {
 }
 
 @Composable
-private fun TrackRow(label: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
+private fun TrackRow(label: String, detail: String?, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .focusRing(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .background(if (selected) Color.White.copy(alpha = 0.08f) else Color.Transparent)
             .padding(horizontal = 20.dp, vertical = 10.dp),
