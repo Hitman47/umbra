@@ -441,7 +441,7 @@ class LibraryScanner(
                 fix != null -> fixedShow(fix, name, previousByKey) to "correction"
                 known == null -> matchShow(name) to "recherche TMDB « ${name.title} »"
                 // Matched by an older version, without the season sizes or the credits: refresh it.
-                known.seasonEpisodes.isEmpty() || !known.hasCredits || !known.linksChecked -> (lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known) to "reconnue avant"
+                known.seasonEpisodes.isEmpty() || !known.hasCredits || !known.linksChecked || known.detailsVersion < SHOW_DETAILS_VERSION -> (lookup("série ${known.title}") { tmdb.show(known.tmdbId!!).toShow(name) } ?: known) to "reconnue avant"
                 else -> known to "reconnue avant"
             }
             decisions += MatchDecision(group.first().group, group.size, how, show.key, show.title, show.year, show.tmdbId)
@@ -618,6 +618,10 @@ class LibraryScanner(
         characters = leadCharacters(credits?.cast.orEmpty().map { it.character }),
         universes = franchiseKeywords(keywords?.all.orEmpty().map { it.name }),
         linksChecked = true,
+        originCountries = originCountry,
+        originalLanguage = originalLanguage,
+        seasonInfo = seasons.map { SeasonInfo(it.number, it.overview?.ifBlank { null }, it.airDate?.ifBlank { null }, it.voteAverage?.takeIf { v -> v > 0 }, it.episodeCount) },
+        detailsVersion = SHOW_DETAILS_VERSION,
     )
 
     private suspend fun withSeasonDetails(showId: Int, season: Season): Season {

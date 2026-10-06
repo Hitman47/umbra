@@ -90,6 +90,8 @@ fun SettingsScreen(
     onImport: suspend (Uri) -> String,
     perso: PersoStore,
     catalog: io.github.mkdevtests.umbra.catalog.CatalogStore,
+    /** The folders below a NAS path ("" for the shares), to choose the documentaries. */
+    listFolders: suspend (String) -> List<String>,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -220,6 +222,8 @@ fun SettingsScreen(
                 Item("Cache des affiches", cacheSize?.let { "${formatSize(it)} sur 1 Go" } ?: "Calcul…")
             }
 
+            DocumentarySection(settings.documentaryFolders, listFolders) { folders -> store.update { it.copy(documentaryFolders = folders) } }
+
             Section("Lecture") {
                 Item("Avancer, reculer", "Double appui sur un bord : 10 s. Maintenir ⏪ ou ⏩ : de plus en plus loin. Glisser sur l'image : des secondes aux minutes selon la longueur du geste.")
                 Item("Passer les génériques tout seul", "Sinon, un bouton « Passer » apparaît pendant le générique (fichiers avec chapitres).") {
@@ -329,6 +333,35 @@ private fun PersoSection(perso: PersoStore) {
         "off" -> PinDialog("Code actuel", onDismiss = { step = null }) { pin ->
             perso.unlock(pin).also { ok -> if (ok) { perso.removeLock(); step = null } }
         }
+    }
+}
+
+/** The documentary folders: their titles go to the Docs tab, out of Films and Séries. */
+@Composable
+private fun DocumentarySection(folders: List<String>, listFolders: suspend (String) -> List<String>, onChange: (List<String>) -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    Section("Documentaires") {
+        Item(
+            "Dossiers de documentaires",
+            if (folders.isEmpty()) "Aucun : un onglet Docs apparaît dès qu'un dossier est choisi. Ses titres quittent Films et Séries." else "Leurs films et séries sont dans l'onglet Docs, plus dans Films ni Séries.",
+        ) { TextButton(onClick = { picking = true }) { Text("Ajouter ›") } }
+        folders.forEach { folder ->
+            Item(folder.substringAfterLast('\\'), folder.replace("\\", " › ")) {
+                TextButton(onClick = { onChange(folders - folder) }) { Text("Retirer") }
+            }
+        }
+    }
+    if (picking) {
+        FolderPickerDialog(
+            "Dossier de documentaires",
+            listFolders,
+            onPick = { path ->
+                picking = false
+                // A folder inside one already chosen adds nothing; one around others replaces them.
+                if (folders.none { path.equals(it, true) || path.startsWith("$it\\", true) }) onChange(folders.filterNot { it.startsWith("$path\\", true) } + path)
+            },
+            onDismiss = { picking = false },
+        )
     }
 }
 

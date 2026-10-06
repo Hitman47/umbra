@@ -256,6 +256,10 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                 }
             }
         }
+        // The season as TMDB tells it: poster, year, episodes, rating, text.
+        season?.let { shown -> show.seasonInfo.firstOrNull { it.number == shown.number } }?.let { info ->
+            item(key = "season-info-${info.number}") { SeasonHeader(season!!, info) }
+        }
         season?.takeIf { it.episodes.isNotEmpty() }?.let { shown ->
             item {
                 val allSeen = shown.episodes.all { history[it.file]?.watched == true }
@@ -697,3 +701,30 @@ private fun FileInfo(file: String, size: Long) {
 
 /** "2019-04-14" -> "14/04/2019". */
 private fun formatDate(iso: String): String = iso.split('-').takeIf { it.size == 3 }?.reversed()?.joinToString("/") ?: iso
+
+/** What TMDB says of a season: its poster, its year and size, its rating, its text (opened on a touch). */
+@Composable
+private fun SeasonHeader(season: io.github.mkdevtests.umbra.library.Season, info: io.github.mkdevtests.umbra.library.SeasonInfo) {
+    var open by remember(info.number) { mutableStateOf(false) }
+    val meta = listOfNotNull(
+        info.airDate?.take(4),
+        "${info.episodes.takeIf { it > 0 } ?: season.episodes.size} épisodes",
+        formatRating(info.rating),
+    ).joinToString("  ·  ")
+    Row(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        season.poster?.let { Poster(it, season.name ?: "", modifier = Modifier.width(72.dp), size = "w185") }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(season.name ?: if (season.number == 0) "Épisodes spéciaux" else "Saison ${season.number}", style = MaterialTheme.typography.titleMedium)
+            Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            info.overview?.let { text ->
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = if (open) Int.MAX_VALUE else 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { open = !open },
+                )
+            }
+        }
+    }
+}

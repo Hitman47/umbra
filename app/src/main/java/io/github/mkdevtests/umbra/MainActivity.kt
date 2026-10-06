@@ -71,6 +71,7 @@ private sealed interface Detail {
     data class Saga(val id: Int) : Detail
     data class Shortcut(val root: String) : Detail
     data class Universe(val name: String) : Detail
+    data class Shelf(val id: String) : Detail
     data object Settings : Detail
     data object Measures : Detail
     data object Corrections : Detail
@@ -150,6 +151,7 @@ private fun NyxaraRoot(
                 onOpenShortcut = { stack.add(Detail.Shortcut(it)) },
                 onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
                 onOpenSettings = { stack.add(Detail.Settings) },
+                onOpenShelf = { stack.add(Detail.Shelf(it)) },
             )
             is Detail.MovieDetail -> library.movies.firstOrNull { it.file == detail.file }?.let { MovieDetailScreen(it, libraryViewModel, links, back) } ?: back()
             is Detail.ShowDetail -> showOf(detail.key)?.let { show ->
@@ -158,6 +160,7 @@ private fun NyxaraRoot(
             is Detail.Saga -> SagaScreen(detail.id, libraryViewModel, links.titleLinks, back)
             is Detail.Universe -> UniverseScreen(detail.name, libraryViewModel, links.titleLinks, back)
             is Detail.Shortcut -> ShortcutScreen(detail.root, libraryViewModel, links.titleLinks, back)
+            is Detail.Shelf -> io.github.mkdevtests.umbra.ui.library.ShelfScreen(detail.id, libraryViewModel, links.titleLinks, back)
             is Detail.FixMatch -> showOf(detail.key)?.let { MatchScreen(it, libraryViewModel, back) } ?: back()
             Detail.Settings -> SettingsScreen(
                 store = app.settings,
@@ -183,6 +186,7 @@ private fun NyxaraRoot(
                 onImport = app.backups::import,
                 perso = app.perso,
                 catalog = app.catalog,
+                listFolders = { path -> browserViewModel.folders(path).map { it.path } },
                 onBack = back,
             )
             Detail.Measures -> MeasuresScreen(app.measures, back)

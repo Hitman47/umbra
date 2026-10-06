@@ -42,6 +42,10 @@ data class ShowRow(
     @ColumnInfo(defaultValue = "[]") val characters: List<String>,
     @ColumnInfo(defaultValue = "[]") val universes: List<String>,
     @ColumnInfo(defaultValue = "0") val linksChecked: Boolean,
+    @ColumnInfo(defaultValue = "[]") val originCountries: List<String>,
+    val originalLanguage: String?,
+    @ColumnInfo(defaultValue = "[]") val seasonInfo: List<SeasonInfo>,
+    @ColumnInfo(defaultValue = "0") val detailsVersion: Int,
 )
 
 @Entity(tableName = "seasons", primaryKeys = ["showKey", "number"])
@@ -88,6 +92,12 @@ class Converters {
 
     @TypeConverter
     fun toCounts(value: String): Map<Int, Int> = json.decodeFromString(value)
+
+    @TypeConverter
+    fun fromSeasonInfo(value: List<SeasonInfo>): String = json.encodeToString(value)
+
+    @TypeConverter
+    fun toSeasonInfo(value: String): List<SeasonInfo> = json.decodeFromString(value)
 }
 
 @Dao
@@ -193,21 +203,22 @@ abstract class LibraryDao {
 
     private fun Show.toRow() = ShowRow(
         key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups,
-        cast, directors, hasCredits, characters, universes, linksChecked,
+        cast, directors, hasCredits, characters, universes, linksChecked, originCountries, originalLanguage, seasonInfo, detailsVersion,
     )
 
     private fun ShowRow.toShow(seasons: List<Season>) = Show(
         key, tmdbId, title, originalTitle, year, overview, poster, backdrop, genres, rating, status, seasonEpisodes, folders, duplicates, groups,
         cast, directors, hasCredits, seasons, characters, universes, linksChecked,
+        originCountries = originCountries, originalLanguage = originalLanguage, seasonInfo = seasonInfo, detailsVersion = detailsVersion,
     )
 }
 
 @Database(
     entities = [Movie::class, ShowRow::class, SeasonRow::class, Episode::class, MetaRow::class, SearchRow::class],
-    version = 6,
+    version = 7,
     autoMigrations = [
         AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
-        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6),
+        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7),
     ],
 )
 @TypeConverters(Converters::class)

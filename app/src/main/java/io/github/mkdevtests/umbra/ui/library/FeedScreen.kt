@@ -100,6 +100,8 @@ fun FeedScreen(
     shortcuts: List<String>,
     onOpenShortcut: (String) -> Unit,
     onLongPress: (TitleTarget) -> Unit,
+    /** A row opened in full, as a grid: "resume", "fresh", "movies", "shows", "sagas", "genre:<name>". */
+    onOpenShelf: (String) -> Unit = {},
 ) {
     val onOpenMovie = links.onOpenMovie
     val onOpenShow = links.onOpenShow
@@ -215,7 +217,7 @@ fun FeedScreen(
         if (shortcuts.isNotEmpty()) item { Shortcuts(shortcuts, onOpenShortcut) }
         if (resume.isNotEmpty()) {
             item {
-                Shelf("Lecture en cours") {
+                Shelf("Lecture en cours", onMore = { onOpenShelf("resume") }) {
                     items(resume, key = { it.file }) { item ->
                         ResumeCard(
                             item, wide,
@@ -230,12 +232,13 @@ fun FeedScreen(
             }
         }
         if (fresh.isNotEmpty()) {
-            item { Shelf("Ajouts récents") { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } } }
+            item { Shelf("Ajouts récents", onMore = { onOpenShelf("fresh") }) { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } } }
         }
         if (movies.isNotEmpty()) {
             item {
                 Shelf(
                     "Sélection films",
+                    onMore = { onOpenShelf("movies") },
                     mode = movieMode,
                     onMode = { movieMode = it; movieSeed = Random.nextLong() },
                     onRefresh = { movieSeed = Random.nextLong() },
@@ -246,6 +249,7 @@ fun FeedScreen(
             item {
                 Shelf(
                     "Sélection séries",
+                    onMore = { onOpenShelf("shows") },
                     mode = showMode,
                     onMode = { showMode = it; showSeed = Random.nextLong() },
                     onRefresh = { showSeed = Random.nextLong() },
@@ -254,7 +258,7 @@ fun FeedScreen(
         }
         if (sagas.isNotEmpty()) {
             item {
-                Shelf("Sagas") {
+                Shelf("Sagas", onMore = { onOpenShelf("sagas") }) {
                     items(sagas, key = { it.id }) { saga ->
                         PosterCard(
                             sagaItem(saga, history), { links.onOpenSaga(saga.id) }, Modifier.width(POSTER),
@@ -266,7 +270,7 @@ fun FeedScreen(
         }
         genres.forEach { (genre, picks) ->
             item(key = "genre:$genre") {
-                Shelf(genre) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
+                Shelf(genre, onMore = { onOpenShelf("genre:$genre") }) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER), onLongClick = { press(it) }) } }
             }
         }
     }
@@ -460,13 +464,14 @@ private fun describe(item: Resume): String {
 @Composable
 private fun Shelf(
     title: String,
+    onMore: (() -> Unit)? = null,
     mode: Selection? = null,
     onMode: (Selection) -> Unit = {},
     onRefresh: (() -> Unit)? = null,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeader(title) {
+        SectionHeader(title, onClick = onMore) {
             if (mode != null) {
                 Selection.entries.forEach { entry ->
                     FilterChip(selected = entry == mode, onClick = { onMode(entry) }, label = { Text(entry.label) })

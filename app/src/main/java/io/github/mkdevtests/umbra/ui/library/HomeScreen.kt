@@ -63,6 +63,8 @@ import io.github.mkdevtests.umbra.library.decadeLabel
 import io.github.mkdevtests.umbra.library.Universe
 import io.github.mkdevtests.umbra.library.sagasOf
 import io.github.mkdevtests.umbra.library.universesOf
+import io.github.mkdevtests.umbra.library.kind
+import io.github.mkdevtests.umbra.library.splitDocumentaries
 import io.github.mkdevtests.umbra.history.without
 import io.github.mkdevtests.umbra.ui.theme.NyxaraIcons
 import io.github.mkdevtests.umbra.ui.theme.NyxaraLogo
@@ -70,14 +72,20 @@ import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.update.UpdateBanner
 import io.github.mkdevtests.umbra.update.Updater
 
-enum class HomeTab(val label: String, val icon: ImageVector) {
+enum class HomeTab(val label: String, val icon: ImageVector, val inBar: Boolean = true) {
     Home("Accueil", NyxaraIcons.Home),
     Movies("Films", NyxaraIcons.Movie),
     Shows("Séries", NyxaraIcons.Tv),
-    Search("Recherche", NyxaraIcons.Search),
-    Folders("Dossiers", NyxaraIcons.Folder),
+    Docs("Docs", NyxaraIcons.Explore),
+    // Reached from the icons at the top on a phone: the bar keeps five tabs.
+    Search("Recherche", NyxaraIcons.Search, inBar = false),
+    Folders("Dossiers", NyxaraIcons.Folder, inBar = false),
     Perso("Perso", NyxaraIcons.Person),
 }
+
+/** The tabs of the bar (a phone) or the rail (a tablet, which has room for all); Docs once its folders are chosen. */
+private fun tabsOf(wide: Boolean, documentaries: Boolean) =
+    HomeTab.entries.filter { (wide || it.inBar) && (documentaries || it != HomeTab.Docs) }
 
 /** The library's screens under one navigation: a bar at the bottom of a phone, a rail on the side of a tablet. */
 @Composable
@@ -94,20 +102,27 @@ fun HomeScreen(
     onOpenShortcut: (String) -> Unit,
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenShelf: (String) -> Unit = {},
 ) {
+    val settingsStore = (androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).settings
+    val settings by settingsStore.settings.collectAsState()
+    val documentaries = settings.documentaryFolders.isNotEmpty()
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val content: @Composable (Modifier) -> Unit = { modifier ->
             HomeContent(
                 libraryViewModel, browserViewModel, updater, tab, wide,
                 TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse), onOpenShortcut, onPickLocalFile, onOpenSettings, modifier,
+                documentaryFolders = settings.documentaryFolders,
+                onTabChange = onTabChange,
+                onOpenShelf = onOpenShelf,
             )
         }
         if (wide) {
             Row(modifier = Modifier.fillMaxSize()) {
                 NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     Spacer(modifier = Modifier.size(12.dp))
-                    HomeTab.entries.forEach { entry ->
+                    tabsOf(wide = true, documentaries).forEach { entry ->
                         NavigationRailItem(
                             selected = entry == tab,
                             onClick = { onTabChange(entry) },
@@ -130,7 +145,7 @@ fun HomeScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 content(Modifier.weight(1f))
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    HomeTab.entries.forEach { entry ->
+                    tabsOf(wide = false, documentaries).forEach { entry ->
                         NavigationBarItem(
                             selected = entry == tab,
                             onClick = { onTabChange(entry) },
@@ -157,6 +172,9 @@ private fun HomeContent(
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier,
+    documentaryFolders: List<String>,
+    onTabChange: (HomeTab) -> Unit,
+    onOpenShelf: (String) -> Unit,
 ) {
     val onOpenMovie = links.onOpenMovie
     val onOpenShow = links.onOpenShow
@@ -166,6 +184,8 @@ private fun HomeContent(
     val hidden by libraryViewModel.hidden.collectAsState()
     // Hidden titles stay out of every list; the search finds them with its "Masqués" filter.
     val library = remember(fullLibrary, hidden) { fullLibrary.without(hidden) }
+    // Documentaries leave Films and Séries for their own tab.
+    val (documentaries, titles) = remember(library, documentaryFolders) { library.splitDocumentaries(documentaryFolders) }
     val scan by libraryViewModel.scan.collectAsState()
     val history by libraryViewModel.history.collectAsState()
     val scanning = if (scan.running) "Analyse de la bibliothèque…" else null
@@ -184,8 +204,14 @@ private fun HomeContent(
             } else {
                 IconButton(onClick = libraryViewModel::rescan) { Icon(NyxaraIcons.Refresh, contentDescription = "Actualiser la bibliothèque") }
             }
-            IconButton(onClick = onPickLocalFile) { Icon(NyxaraIcons.Upload, contentDescription = "Lire un fichier de l'appareil") }
-            if (!wide) IconButton(onClick = onOpenSettings) { Icon(NyxaraIcons.Settings, contentDescription = "Réglages") }
+            if (wide) {
+                IconButton(onClick = onPickLocalFile) { Icon(NyxaraIcons.Upload, contentDescription = "Lire un fichier de l'appareil") }
+            } else {
+                // A phone's bar keeps five tabs: Recherche and Dossiers are up here.
+                IconButton(onClick = { onTabChange(HomeTab.Search) }) { Icon(NyxaraIcons.Search, contentDescription = "Recherche") }
+                IconButton(onClick = { onTabChange(HomeTab.Folders) }) { Icon(NyxaraIcons.Folder, contentDescription = "Dossiers") }
+                IconButton(onClick = onOpenSettings) { Icon(NyxaraIcons.Settings, contentDescription = "Réglages") }
+            }
         }
         UpdateBanner(updater)
         TraktBatteryBanner()
@@ -208,20 +234,17 @@ private fun HomeContent(
                 shortcuts = shortcuts,
                 onOpenShortcut = onOpenShortcut,
                 onLongPress = menu,
+                onOpenShelf = onOpenShelf,
             )
-            HomeTab.Movies -> MovieGrid(library, history, scanning ?: "Aucun film trouvé.", links, menu)
-            HomeTab.Shows -> PosterGrid(
-                items = showItems(library.shows, history),
-                emptyText = scanning ?: "Aucune série trouvée.",
-                onClick = onOpenShow,
-                noun = "série",
-                onLongClick = { menu(TitleTarget(it.key, isShow = true)) },
-            )
+            HomeTab.Movies -> MovieGrid(titles, history, scanning ?: "Aucun film trouvé.", links, menu)
+            HomeTab.Shows -> ShowGrid(titles.shows, history, scanning ?: "Aucune série trouvée.", onOpenShow, menu)
+            HomeTab.Docs -> DocumentaryGrid(documentaries, history, links, menu)
             HomeTab.Folders -> {
                 val art by libraryViewModel.localArt.collectAsState()
                 val context = androidx.compose.ui.platform.LocalContext.current
                 BrowserScreen(
                     browserViewModel, fullLibrary, art, onOpenMovie, onOpenShow,
+                    onPickLocalFile = onPickLocalFile.takeIf { !wide },
                     onExcluded = libraryViewModel::onFolderExcluded,
                     onPersonal = { (context.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).addPersonal(it); browserViewModel.refresh() },
                 )
@@ -535,4 +558,51 @@ private fun TraktBatteryBanner() {
             }
         }
     }
+}
+
+/** The Séries tab: every show, or only the series, the animation or the anime (from TMDB's genres and origin). */
+@Composable
+private fun ShowGrid(shows: List<Show>, history: Map<String, Progress>, emptyText: String, onOpenShow: (String) -> Unit, menu: (TitleTarget) -> Unit) {
+    var kind by rememberSaveable { mutableStateOf<io.github.mkdevtests.umbra.library.ShowKind?>(null) }
+    val kinds = remember(shows) { shows.groupBy { it.kind() } }
+    val shown = remember(shows, kind) { if (kind == null) shows else kinds[kind].orEmpty() }
+    PosterGrid(
+        items = showItems(shown, history),
+        emptyText = emptyText,
+        onClick = onOpenShow,
+        noun = "série",
+        onLongClick = { menu(TitleTarget(it.key, isShow = true)) },
+        chips = {
+            // Only kinds the library has; none when everything is of one kind.
+            if (kinds.size > 1) {
+                io.github.mkdevtests.umbra.library.ShowKind.entries.filter { it in kinds }.forEach { entry ->
+                    FilterChip(selected = kind == entry, onClick = { kind = entry.takeIf { it != kind } }, label = { Text(entry.label) })
+                }
+            }
+        },
+    )
+}
+
+/** The Docs tab: the films and shows of the documentary folders, apart from the rest. */
+@Composable
+private fun DocumentaryGrid(documentaries: Library, history: Map<String, Progress>, links: TitleLinks, menu: (TitleTarget) -> Unit) {
+    var only by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val items = remember(documentaries, history, only) {
+        val movies = if (only != true) documentaries.movies.map { movieItem(it, history) } else emptyList()
+        val shows = if (only != false) showItems(documentaries.shows, history) else emptyList()
+        (movies + shows).sortedWith { a, b -> io.github.mkdevtests.umbra.browse.naturalCompare(a.title, b.title) }
+    }
+    PosterGrid(
+        items = items,
+        emptyText = "Aucun documentaire dans les dossiers choisis (Réglages › Documentaires).",
+        onClick = { key -> if (items.first { it.key == key }.isShow) links.onOpenShow(key) else links.onOpenMovie(key) },
+        noun = "documentaire",
+        onLongClick = { menu(TitleTarget(it.key, it.isShow)) },
+        chips = {
+            if (documentaries.movies.isNotEmpty() && documentaries.shows.isNotEmpty()) {
+                FilterChip(selected = only == false, onClick = { only = if (only == false) null else false }, label = { Text("Films") })
+                FilterChip(selected = only == true, onClick = { only = if (only == true) null else true }, label = { Text("Séries") })
+            }
+        },
+    )
 }

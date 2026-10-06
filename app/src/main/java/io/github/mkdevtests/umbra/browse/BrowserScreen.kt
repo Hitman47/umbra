@@ -78,6 +78,8 @@ fun BrowserScreen(
     onExcluded: () -> Unit,
     /** A folder moved to the Perso tab. */
     onPersonal: (String) -> Unit = {},
+    /** A phone: playing a file of the device starts here (the top bar has no room for it). */
+    onPickLocalFile: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
@@ -147,6 +149,7 @@ fun BrowserScreen(
             }
             // A folder inside a share; a whole share is left out by unticking it in the source.
             if ('\\' in state.path) TextButton(onClick = { excluding = state.path }) { Text("Exclure") }
+            if (state.path.isEmpty() && onPickLocalFile != null) TextButton(onClick = onPickLocalFile) { Text("Fichier de l'appareil") }
         }
         HorizontalDivider()
 

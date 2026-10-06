@@ -128,11 +128,18 @@ fun ScreenTitle(title: String, onBack: () -> Unit, actions: @Composable RowScope
 
 /** A row's title, with an optional action on the right ("Tout voir ›"). */
 @Composable
-fun SectionHeader(title: String, modifier: Modifier = Modifier, actions: @Composable RowScope.() -> Unit = {}) {
+fun SectionHeader(title: String, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         val heading = @Composable { textModifier: Modifier ->
             Box(modifier = Modifier.size(width = 4.dp, height = 20.dp).clip(RoundedCornerShape(2.dp)).background(Night.Glow))
-            Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = textModifier)
+            // A row that opens in full: its title is a link ("Lecture en cours ›").
+            Text(
+                if (onClick != null) "$title ›" else title,
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = if (onClick != null) textModifier.clickable(onClick = onClick) else textModifier,
+            )
         }
         if (maxWidth < 600.dp) {
             // A phone: the actions under the title, scrolling sideways, the title keeps the width.

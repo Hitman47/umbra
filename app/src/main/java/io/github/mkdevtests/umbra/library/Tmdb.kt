@@ -288,6 +288,8 @@ data class TmdbShow(
     @SerialName("created_by") val createdBy: List<TmdbPerson> = emptyList(),
     val credits: TmdbCredits? = null,
     val keywords: TmdbKeywords? = null,
+    @SerialName("origin_country") val originCountry: List<String> = emptyList(),
+    @SerialName("original_language") val originalLanguage: String? = null,
 )
 
 @Serializable
@@ -296,6 +298,9 @@ data class TmdbSeasonSummary(
     val name: String? = null,
     @SerialName("poster_path") val posterPath: String? = null,
     @SerialName("episode_count") val episodeCount: Int = 0,
+    val overview: String? = null,
+    @SerialName("air_date") val airDate: String? = null,
+    @SerialName("vote_average") val voteAverage: Double? = null,
 )
 
 @Serializable

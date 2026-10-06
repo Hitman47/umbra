@@ -50,6 +50,8 @@ data class Settings(
     val scanAway: Boolean = false,
     /** Languages searched for subtitles online (ISO 639-1), in this order. */
     val onlineSubtitleLanguages: List<String> = listOf("fr", "en"),
+    /** Folders of documentaries (app paths): their titles leave Films and Séries for Documentaires. */
+    val documentaryFolders: List<String> = emptyList(),
 )
 
 
@@ -85,6 +87,7 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_NIGHT_AUDIO, updated.nightAudio)
             putBoolean(KEY_ANIME_UPSCALE, updated.animeUpscale)
             putBoolean(KEY_SCAN_AWAY, updated.scanAway)
+            putString(KEY_DOCUMENTARIES, updated.documentaryFolders.joinToString("\n"))
         }
     }
 
@@ -116,6 +119,7 @@ class SettingsStore(context: Context) {
             nightAudio = prefs.getBoolean(KEY_NIGHT_AUDIO, defaults.nightAudio),
             animeUpscale = prefs.getBoolean(KEY_ANIME_UPSCALE, defaults.animeUpscale),
             scanAway = prefs.getBoolean(KEY_SCAN_AWAY, defaults.scanAway),
+            documentaryFolders = prefs.getString(KEY_DOCUMENTARIES, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
         )
     }
 
@@ -135,6 +139,7 @@ class SettingsStore(context: Context) {
         const val KEY_NIGHT_AUDIO = "night_audio"
         const val KEY_ANIME_UPSCALE = "anime_upscale"
         const val KEY_SCAN_AWAY = "scan_away"
+        const val KEY_DOCUMENTARIES = "documentary_folders"
         const val NONE = "none"
     }
 }

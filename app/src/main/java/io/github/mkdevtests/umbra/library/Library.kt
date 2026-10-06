@@ -107,6 +107,26 @@ data class Show(
     val characters: List<String> = emptyList(),
     val universes: List<String> = emptyList(),
     val linksChecked: Boolean = false,
+    /** TMDB's countries and language of origin: an anime is Japanese animation. */
+    val originCountries: List<String> = emptyList(),
+    val originalLanguage: String? = null,
+    /** Each season as TMDB describes it: text, date, rating. */
+    val seasonInfo: List<SeasonInfo> = emptyList(),
+    /** Below [SHOW_DETAILS_VERSION]: fetched from TMDB again at the next analysis, for what came later. */
+    val detailsVersion: Int = 0,
+)
+
+/** 1: origin, seasons' text and dates. */
+const val SHOW_DETAILS_VERSION = 1
+
+/** A season as TMDB describes it, for the show's page. */
+@Serializable
+data class SeasonInfo(
+    val number: Int,
+    val overview: String? = null,
+    val airDate: String? = null,
+    val rating: Double? = null,
+    val episodes: Int = 0,
 )
 
 @Serializable
