@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.menuKey
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusRequester
 import io.github.mkdevtests.umbra.ui.theme.scaled
@@ -463,7 +464,7 @@ private fun RelatedRow(title: String, items: List<Related>, links: DetailLinks, 
                 modifier = Modifier
                     .width(110.dp * LocalCardScale.current)
                     .alpha(if (item.owned) 1f else 0.45f)
-                    .then(if (open != null) Modifier.clickable(onClick = open) else Modifier),
+                    .then(if (open != null) Modifier.focusRing().clickable(onClick = open) else Modifier),
             ) {
                 Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth(), size = "w185")
                 Text(item.title, style = MaterialTheme.typography.bodySmall.scaled(LocalCardScale.current), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
@@ -667,7 +668,7 @@ private fun TitleBlock(
 @Composable
 private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, media: MediaInfo?, download: Download?, onLongClick: () -> Unit, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().focusRing(RoundedCornerShape(12.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 24.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().focusRing(RoundedCornerShape(12.dp)).menuKey(onLongClick).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Box(

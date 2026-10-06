@@ -1,5 +1,16 @@
 package io.github.mkdevtests.umbra.ui.theme
 
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.inset
@@ -76,6 +87,7 @@ fun GlowButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
     Row(
         modifier = modifier
             .height(48.dp)
+            .focusRing(RoundedCornerShape(50))
             .clip(RoundedCornerShape(50))
             .background(Night.Glow)
             .alpha(if (enabled) 1f else 0.5f)
@@ -95,6 +107,7 @@ fun GlassButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
     Row(
         modifier = modifier
             .height(48.dp)
+            .focusRing(RoundedCornerShape(50))
             .clip(RoundedCornerShape(50))
             .background(Color.White.copy(alpha = 0.10f))
             .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
@@ -124,7 +137,7 @@ fun ScreenTitle(title: String, onBack: () -> Unit, actions: @Composable RowScope
         modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) { Icon(NyxaraIcons.Back, contentDescription = "Retour") }
+        IconButton(onClick = onBack, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Back, contentDescription = "Retour") }
         Text(title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         actions()
     }
@@ -142,7 +155,7 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier, onClick: (() -> 
                 style = MaterialTheme.typography.titleLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = if (onClick != null) textModifier.clickable(onClick = onClick) else textModifier,
+                modifier = if (onClick != null) textModifier.focusRing(RoundedCornerShape(8.dp)).clickable(onClick = onClick) else textModifier,
             )
         }
         if (maxWidth < 600.dp) {
@@ -177,6 +190,31 @@ fun Tag(text: String, modifier: Modifier = Modifier) {
             .background(Color.White.copy(alpha = 0.08f))
             .padding(horizontal = 10.dp, vertical = 4.dp),
     )
+}
+
+/**
+ * On TV, back from the page a card opened: the remote lands on that card
+ * again ([target]: it is the one last opened) rather than at the top.
+ */
+@Composable
+fun Modifier.refocusIf(target: Boolean): Modifier {
+    if (!target || !isTv()) return this
+    val requester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(120) // laid out and scrolled back first
+        runCatching { requester.requestFocus() }
+    }
+    return this.focusRequester(requester)
+}
+
+/**
+ * The remote's Menu (☰) key on a card or row does what a long press does
+ * (OK held does it too): the menu of the item. Put it before the clickable.
+ */
+fun Modifier.menuKey(action: (() -> Unit)?): Modifier = if (action == null) this else onKeyEvent { event ->
+    if (event.key != Key.Menu) return@onKeyEvent false
+    if (event.type == KeyEventType.KeyUp) action()
+    true
 }
 
 /**

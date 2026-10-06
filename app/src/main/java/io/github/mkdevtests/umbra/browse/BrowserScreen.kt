@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.browse
 
+import io.github.mkdevtests.umbra.ui.theme.menuKey
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -240,7 +241,7 @@ fun BrowserScreen(
 
 @Composable
 private fun Tile(title: String, caption: String?, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, artwork: @Composable () -> Unit) {
-    Column(modifier = Modifier.focusRing().combinedClickable(onLongClick = onLongClick, onClick = onClick)) {
+    Column(modifier = Modifier.focusRing().menuKey(onLongClick).combinedClickable(onLongClick = onLongClick, onClick = onClick)) {
         artwork()
         val scale = LocalCardScale.current
         Text(

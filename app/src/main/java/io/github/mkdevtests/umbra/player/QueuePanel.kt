@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.player
 
+import io.github.mkdevtests.umbra.ui.theme.menuKey
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -81,7 +83,7 @@ fun QueuePanel(queue: PlayerQueue, position: Double, duration: Double, onJump: (
     ) {
         Row(modifier = Modifier.padding(start = 24.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("File d'attente", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            IconButton(onClick = onClose) { Icon(NyxaraIcons.Close, contentDescription = "Fermer", tint = Color.White) }
+            IconButton(onClick = onClose, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Close, contentDescription = "Fermer", tint = Color.White) }
         }
         val noun = if (queue.perso) "vidéo" else "épisode"
         Text(
@@ -178,7 +180,7 @@ private fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
 @Composable
 private fun MenuRow(item: PlayItem, onPlay: () -> Unit, onFromStart: () -> Unit, onNext: () -> Unit, onRemove: (() -> Unit)?) {
     var menu by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.focusRing().combinedClickable(onLongClick = { menu = true }, onClick = onPlay)) {
+    Box(modifier = Modifier.focusRing().menuKey { menu = true }.combinedClickable(onLongClick = { menu = true }, onClick = onPlay)) {
         QueueRow(item, progress = null)
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Lire maintenant") }, onClick = { menu = false; onPlay() })

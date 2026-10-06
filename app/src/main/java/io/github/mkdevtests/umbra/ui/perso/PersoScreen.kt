@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.perso
 
+import io.github.mkdevtests.umbra.ui.theme.menuKey
+import androidx.compose.foundation.shape.CircleShape
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -145,7 +147,7 @@ private fun PersoFolders(viewModel: PersoViewModel) {
             LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
                 item {
                     SectionHeader("Perso", modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
-                        IconButton(onClick = { picking = true }) { Icon(NyxaraIcons.Add, contentDescription = "Ajouter un dossier") }
+                        IconButton(onClick = { picking = true }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Add, contentDescription = "Ajouter un dossier") }
                     }
                 }
                 if (folders.isEmpty()) {
@@ -188,7 +190,7 @@ private fun PersoFolders(viewModel: PersoViewModel) {
         }
 
         Row(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { viewModel.up() }) { Icon(NyxaraIcons.Back, contentDescription = "Retour") }
+            IconButton(onClick = { viewModel.up() }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Back, contentDescription = "Retour") }
             Column(modifier = Modifier.weight(1f)) {
                 Text(state.crumbs.lastOrNull().orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (state.crumbs.size > 1) {
@@ -263,7 +265,7 @@ private fun PersoFolders(viewModel: PersoViewModel) {
 @Composable
 private fun FolderRow(name: String, detail: String?, onClick: () -> Unit, onLongClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().focusRing().combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().focusRing().menuKey(onLongClick).combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -286,7 +288,7 @@ private fun VideoRow(
     onLongClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().focusRing().combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().focusRing().menuKey(onLongClick).combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {

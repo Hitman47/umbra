@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.shape.CircleShape
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -103,7 +105,7 @@ fun SearchScreen(
             trailingIcon = {
                 Row {
                     if (query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.searchQuery.value = "" }) { Icon(NyxaraIcons.Close, contentDescription = "Effacer") }
+                        IconButton(onClick = { viewModel.searchQuery.value = "" }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Close, contentDescription = "Effacer") }
                     }
                     TextButton(onClick = startDictation) { Text("🎤") }
                 }

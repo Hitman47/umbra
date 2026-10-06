@@ -9,14 +9,17 @@ import io.github.mkdevtests.umbra.NyxaraApp
 /** Receives the [PackageInstaller] outcome; shows Android's confirmation when it needs one. */
 class InstallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val app = context.applicationContext as NyxaraApp
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             @Suppress("DEPRECATION") // the typed overload needs API 33
             val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-            context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            app.updater.onConfirmNeeded(confirm)
+            // May be refused (app in the background, some TVs): the banner's "Confirmer" opens it then.
+            runCatching { context.startActivity(confirm) }
             return
         }
-        val app = context.applicationContext as NyxaraApp
         app.updater.onInstallResult(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))
     }
 }

@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -108,7 +109,7 @@ private fun CorrectionRow(correction: Correction, decision: MatchDecision?, onOp
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier)
+            .then(if (onOpen != null) Modifier.focusRing().clickable(onClick = onOpen) else Modifier)
             .padding(horizontal = 8.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

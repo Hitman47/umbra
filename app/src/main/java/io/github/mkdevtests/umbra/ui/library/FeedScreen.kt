@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.refocusIf
+import io.github.mkdevtests.umbra.ui.theme.menuKey
 import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -147,7 +149,9 @@ fun FeedScreen(
         }.filter { it.second.size >= 4 }
     }
     val sagas = remember(library) { sagasOf(library) }
-    val open = { pick: Pick -> if (pick.isShow) onOpenShow(pick.key) else onOpenMovie(pick.key) }
+    var lastOpened by rememberSaveable { mutableStateOf<String?>(null) }
+    // [shelf]: where the card was, the same title being on several rows.
+    val open = { pick: Pick, shelf: String -> lastOpened = shelf + pick.key; if (pick.isShow) onOpenShow(pick.key) else onOpenMovie(pick.key) }
     val press = { pick: Pick -> onLongPress(TitleTarget(pick.key, pick.isShow)) }
     val play = { item: Resume -> context.startActivity(viewModel.playIntent(item)) }
 
@@ -189,7 +193,7 @@ fun FeedScreen(
                         if (episode != null) context.startActivity(viewModel.playIntent(show, episode)) else onOpenShow(show.key)
                     }
                 },
-                open = { open(pick) },
+                open = { open(pick, "hero") },
             )
         }
         (resumed + arrivals).take(HERO_PAGES)
@@ -233,7 +237,7 @@ fun FeedScreen(
             }
         }
         if (fresh.isNotEmpty()) {
-            item { Shelf("Ajouts récents", onMore = { onOpenShelf("fresh") }) { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } } }
+            item { Shelf("Ajouts récents", onMore = { onOpenShelf("fresh") }) { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it, "fresh") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "fresh" + it.key), onLongClick = { press(it) }) } } }
         }
         if (movies.isNotEmpty()) {
             item {
@@ -243,7 +247,7 @@ fun FeedScreen(
                     mode = movieMode,
                     onMode = { movieMode = it; movieSeed = Random.nextLong() },
                     onRefresh = { movieSeed = Random.nextLong() },
-                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } }
+                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it, "movies") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "movies" + it.key), onLongClick = { press(it) }) } }
             }
         }
         if (shows.isNotEmpty()) {
@@ -254,7 +258,7 @@ fun FeedScreen(
                     mode = showMode,
                     onMode = { showMode = it; showSeed = Random.nextLong() },
                     onRefresh = { showSeed = Random.nextLong() },
-                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } }
+                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it, "shows") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "shows" + it.key), onLongClick = { press(it) }) } }
             }
         }
         if (sagas.isNotEmpty()) {
@@ -271,7 +275,7 @@ fun FeedScreen(
         }
         genres.forEach { (genre, picks) ->
             item(key = "genre:$genre") {
-                Shelf(genre, onMore = { onOpenShelf("genre:$genre") }) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it) }, Modifier.width(POSTER * LocalCardScale.current), onLongClick = { press(it) }) } }
+                Shelf(genre, onMore = { onOpenShelf("genre:$genre") }) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it, "genre:$genre") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "genre:$genre" + it.key), onLongClick = { press(it) }) } }
             }
         }
     }
@@ -321,7 +325,7 @@ private fun HeroPager(items: List<Featured>, wide: Boolean) {
 @Composable
 private fun HeroPage(item: Featured, wide: Boolean) {
     val background = MaterialTheme.colorScheme.background
-    Box(modifier = Modifier.fillMaxSize().clickable(onClick = item.open)) {
+    Box(modifier = Modifier.fillMaxSize().focusRing(RoundedCornerShape(20.dp)).clickable(onClick = item.open)) {
         AsyncImage(
             model = Tmdb.image(item.backdrop, "w1280"),
             contentDescription = null,
@@ -372,7 +376,7 @@ private fun HeroPage(item: Featured, wide: Boolean) {
 @Composable
 private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: () -> Unit, onLongPress: () -> Unit) {
     Column(
-        modifier = Modifier.width((if (wide) 300.dp else 260.dp) * LocalCardScale.current).focusRing(RoundedCornerShape(16.dp)).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
+        modifier = Modifier.width((if (wide) 300.dp else 260.dp) * LocalCardScale.current).focusRing(RoundedCornerShape(16.dp)).menuKey(onLongPress).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
@@ -398,7 +402,8 @@ private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: 
                     .size(52.dp)
                     .clip(CircleShape)
                     .background(Night.Glow)
-                    .clickable(onClick = onPlay),
+                    .focusRing(CircleShape)
+                .clickable(onClick = onPlay),
                 contentAlignment = Alignment.Center,
             ) { Icon(NyxaraIcons.Play, contentDescription = "Reprendre", tint = Color.White) }
             Text(
@@ -479,7 +484,7 @@ private fun Shelf(
                 }
             }
             onRefresh?.let {
-                IconButton(onClick = it) { Icon(NyxaraIcons.Shuffle, contentDescription = "Autre sélection") }
+                IconButton(onClick = it, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Shuffle, contentDescription = "Autre sélection") }
             }
         }
         LazyRow(

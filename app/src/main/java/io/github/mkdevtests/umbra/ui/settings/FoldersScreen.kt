@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -181,6 +182,7 @@ fun FoldersScreen(source: NasSource, viewModel: BrowserViewModel, onBack: () -> 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .focusRing()
                         .clickable(enabled = row.canOpen) { toggle(row.share, row.sub) }
                         .padding(start = 12.dp + 22.dp * row.depth, end = 12.dp, top = 2.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,

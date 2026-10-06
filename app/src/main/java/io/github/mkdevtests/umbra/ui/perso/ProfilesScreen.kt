@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.perso
 
+import androidx.compose.foundation.shape.CircleShape
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import io.github.mkdevtests.umbra.nas.within
 import kotlinx.coroutines.launch
@@ -236,7 +237,7 @@ private fun ProfilePage(app: NyxaraApp, catalog: CatalogIndex, id: String, onBac
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(NyxaraIcons.Back, contentDescription = "Retour") }
+                IconButton(onClick = onBack, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Back, contentDescription = "Retour") }
                 Text(person?.name ?: folder?.name ?: "Groupes", style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

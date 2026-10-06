@@ -4,12 +4,15 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import io.github.mkdevtests.umbra.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,8 +33,14 @@ sealed interface UpdateState {
     data object None : UpdateState
     data class Available(val release: Release) : UpdateState
     data class Downloading(val release: Release, val progress: Float) : UpdateState
-    /** Handed to Android, which asks the user to confirm (except for silent updates). */
-    data class Installing(val release: Release) : UpdateState
+    /**
+     * Handed to Android, which asks the user to confirm (except for silent
+     * updates). [confirm]: Android's confirmation, kept so that a button can
+     * show it again when it did not open on its own (some TVs).
+     */
+    data class Installing(val release: Release, val confirm: Intent? = null) : UpdateState
+    /** Android does not let Nyxara install apps yet: the user allows it in the system settings. */
+    data class NeedsPermission(val release: Release) : UpdateState
     data class Failed(val release: Release, val message: String) : UpdateState
 }
 
@@ -76,18 +85,51 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
         }
     }
 
+    /** Android lets Nyxara install apps ("sources inconnues" allowed for it). */
+    fun canInstall(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+
+    /** Opens the system page where the user allows Nyxara to install apps; false when the device has none. */
+    fun openInstallSettings(from: Context): Boolean {
+        val uri = Uri.parse("package:${context.packageName}")
+        val candidates = listOfNotNull(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, uri) else null,
+            Intent(Settings.ACTION_SECURITY_SETTINGS),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri),
+        )
+        return candidates.any { intent ->
+            runCatching { from.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+        }
+    }
+
     fun install(release: Release) {
         if (_state.value is UpdateState.Downloading || _state.value is UpdateState.Installing) return
+        if (!canInstall()) {
+            _state.value = UpdateState.NeedsPermission(release)
+            return
+        }
         scope.launch {
             try {
                 download(release)
                 _state.value = UpdateState.Installing(release)
                 commit()
+                // Android reports back within seconds; silence means the confirmation got lost.
+                delay(INSTALL_TIMEOUT_MS)
+                val current = _state.value
+                if (current is UpdateState.Installing && current.release == release && current.confirm == null) {
+                    _state.value = UpdateState.Failed(release, "Android n'a pas répondu : réessaie, ou installe l'APK à la main")
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "update failed", e)
                 _state.value = UpdateState.Failed(release, "Mise à jour impossible : ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    /** Called by [InstallReceiver] when Android needs the user to confirm: kept for the "Confirmer" button. */
+    internal fun onConfirmNeeded(confirm: Intent) {
+        val release = (_state.value as? UpdateState.Installing)?.release ?: return
+        _state.value = UpdateState.Installing(release, confirm)
     }
 
     /** Called by [InstallReceiver] when Android reports the outcome (success kills and restarts the app). */
@@ -166,6 +208,7 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
 
     companion object {
         private const val TAG = "Updater"
+        private const val INSTALL_TIMEOUT_MS = 60_000L
         const val REPOSITORY = "Hitman47/umbra"
 
         /** "0.10.0" is newer than "0.9.2"; suffixes ("-debug") are ignored. */

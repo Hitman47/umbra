@@ -1676,7 +1676,7 @@ private fun OnlineChoices(online: OnlineSubtitles, onClose: () -> Unit) {
 @Composable
 private fun ChoiceRow(subtitle: OnlineSubtitle, onClick: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().focusRing(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {

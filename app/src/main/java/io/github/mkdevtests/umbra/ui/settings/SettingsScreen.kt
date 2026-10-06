@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.settings.hostOf
 
 import io.github.mkdevtests.umbra.ui.theme.FormField
@@ -392,6 +394,7 @@ fun SettingsScreen(
                     Column(modifier = Modifier.width(220.dp).padding(start = 12.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         SettingsTab.entries.forEach { entry ->
                             NavigationDrawerItem(
+                                modifier = Modifier.focusRing(RoundedCornerShape(50)),
                                 label = { Text(entry.label) },
                                 selected = tab == entry,
                                 onClick = { tab = entry },
@@ -404,7 +407,7 @@ fun SettingsScreen(
                 Column(modifier = Modifier.fillMaxSize()) {
                     ScrollableTabRow(selectedTabIndex = tab.ordinal, edgePadding = 16.dp, containerColor = Color.Transparent) {
                         SettingsTab.entries.forEach { entry ->
-                            Tab(selected = tab == entry, onClick = { tab = entry }, text = { Text(entry.label) })
+                            Tab(selected = tab == entry, onClick = { tab = entry }, text = { Text(entry.label) }, modifier = Modifier.focusRing())
                         }
                     }
                     page(Modifier.fillMaxWidth())

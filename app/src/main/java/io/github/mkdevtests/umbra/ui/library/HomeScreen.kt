@@ -1,5 +1,8 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.refocusIf
+import io.github.mkdevtests.umbra.ui.theme.menuKey
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -145,6 +148,7 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.size(12.dp))
                     tabsOf(wide = true, documentaries).forEach { entry ->
                         NavigationRailItem(
+                            modifier = Modifier.focusRing(),
                             selected = entry == tab,
                             onClick = { onTabChange(entry) },
                             icon = { Icon(entry.icon, contentDescription = null) },
@@ -154,6 +158,7 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.weight(1f))
                     NavigationRailItem(
+                        modifier = Modifier.focusRing(),
                         selected = false,
                         onClick = onOpenSettings,
                         icon = { Icon(NyxaraIcons.Settings, contentDescription = null) },
@@ -168,6 +173,7 @@ fun HomeScreen(
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     tabsOf(wide = false, documentaries).forEach { entry ->
                         NavigationBarItem(
+                            modifier = Modifier.focusRing(),
                             selected = entry == tab,
                             onClick = { onTabChange(entry) },
                             icon = { Icon(entry.icon, contentDescription = null) },
@@ -257,15 +263,15 @@ private fun HomeContent(
                     CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                 }
             } else {
-                IconButton(onClick = { app.nasMonitor.checkNow(); libraryViewModel.rescan() }) { Icon(NyxaraIcons.Refresh, contentDescription = "Actualiser la bibliothèque") }
+                IconButton(onClick = { app.nasMonitor.checkNow(); libraryViewModel.rescan() }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Refresh, contentDescription = "Actualiser la bibliothèque") }
             }
             if (wide) {
-                IconButton(onClick = onPickLocalFile) { Icon(NyxaraIcons.Upload, contentDescription = "Lire un fichier de l'appareil") }
+                IconButton(onClick = onPickLocalFile, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Upload, contentDescription = "Lire un fichier de l'appareil") }
             } else {
                 // A phone's bar keeps five tabs: Recherche and Dossiers are up here.
-                IconButton(onClick = { onTabChange(HomeTab.Search) }) { Icon(NyxaraIcons.Search, contentDescription = "Recherche") }
-                IconButton(onClick = { onTabChange(HomeTab.Folders) }) { Icon(NyxaraIcons.Folder, contentDescription = "Dossiers") }
-                IconButton(onClick = onOpenSettings) { Icon(NyxaraIcons.Settings, contentDescription = "Réglages") }
+                IconButton(onClick = { onTabChange(HomeTab.Search) }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Search, contentDescription = "Recherche") }
+                IconButton(onClick = { onTabChange(HomeTab.Folders) }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Folder, contentDescription = "Dossiers") }
+                IconButton(onClick = onOpenSettings, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Settings, contentDescription = "Réglages") }
             }
         }
         UpdateBanner(updater)
@@ -461,6 +467,7 @@ internal fun PosterGrid(
     var seen by rememberSaveable(noun) { mutableStateOf<Boolean?>(null) }
     var genre by rememberSaveable(noun) { mutableStateOf<String?>(null) }
     var decade by rememberSaveable(noun) { mutableStateOf<Int?>(null) }
+    var lastOpened by rememberSaveable(noun) { mutableStateOf<String?>(null) }
     val genres = remember(items) { items.flatMap { it.genres }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key to it.value } }
     val decades = remember(items) { items.mapNotNull { it.year?.let { year -> year / 10 * 10 } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.key }.map { it.key to it.value } }
     val shown = remember(items, sort, seen, genre, decade) {
@@ -557,7 +564,12 @@ internal fun PosterGrid(
             }
         }
         items(shown, key = { it.key }) { item ->
-            PosterCard(item, onClick = { onClick(item.key) }, onLongClick = onLongClick?.let { { it(item) } })
+            PosterCard(
+                item,
+                onClick = { lastOpened = item.key; onClick(item.key) },
+                modifier = Modifier.refocusIf(item.key == lastOpened),
+                onLongClick = onLongClick?.let { { it(item) } },
+            )
         }
     }
     index?.let { (labels, positions) ->
@@ -594,7 +606,7 @@ private fun SortMenu(sort: GridSort, onSort: (GridSort) -> Unit) {
 /** A poster with its title and year below, its badge in the corner. A long press opens [onLongClick]'s menu. */
 @Composable
 internal fun PosterCard(item: PosterItem, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
-    Column(modifier = modifier.focusRing().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    Column(modifier = modifier.focusRing().menuKey(onLongClick).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         val unavailable = item.key in LocalUnavailable.current
         Box(modifier = if (unavailable) Modifier.alpha(0.4f) else Modifier) {
             Poster(item.poster, item.title, modifier = Modifier.fillMaxWidth())

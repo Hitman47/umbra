@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.ui.theme.remoteFriendly
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -199,6 +200,7 @@ private fun SearchResult(item: TmdbSearchItem, current: Boolean, onClick: () -> 
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (current) 0.9f else 0.4f))
+            .focusRing()
             .clickable(onClick = onClick)
             .padding(10.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
