@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.focus.onFocusChanged
 import io.github.mkdevtests.umbra.ui.theme.menuKey
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusRequester
@@ -197,6 +199,10 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
     LaunchedEffect(season) { viewModel.requestMediaInfo(season?.episodes.orEmpty().map { it.file to it.fileSize }) }
 
     val scan by viewModel.scan.collectAsState()
+    val upNext = remember(show, history) { nextUp(show, history) }
+    // Held sideways (TV, tablet): the episodes in a row, the one the remote is on described below.
+    val metrics = LocalContext.current.resources.displayMetrics
+    val landscape = metrics.widthPixels > metrics.heightPixels
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { DetailHeader(show.backdrop, onBack) }
         item {
@@ -208,12 +214,14 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                 meta = listOfNotNull(show.year?.toString(), statusLabel(show.status), seasonsOwned(show), "$episodes épisodes", formatRating(show.rating)),
                 genres = show.genres,
             ) {
-                val resume = nextUp(show, history)
+                val resume = upNext
                 val next = resume?.episode ?: show.regularEpisodes().firstOrNull() ?: season?.episodes?.firstOrNull()
                 androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (next != null) {
                         val code = "S%02dE%02d".format(next.season, next.number)
-                        GlowButton(if (resume?.progress != null) "Reprendre $code" else "Lecture $code", onClick = { context.startActivity(viewModel.playIntent(show, next)) })
+                        val left = resume?.progress?.let { " · " + formatRuntime((it.remaining / 60).toInt().coerceAtLeast(1)) }.orEmpty()
+                        GlowButton(if (resume?.progress != null) "Reprendre $code$left" else "Lecture $code", onClick = { context.startActivity(viewModel.playIntent(show, next)) })
+                        if (resume?.progress != null) GlassButton("Depuis le début", onClick = { context.startActivity(viewModel.playIntent(show, next, fromStart = true)) })
                     }
                     GlassButton("Corriger", onClick = onFixMatch, icon = NyxaraIcons.Edit)
                 }
@@ -258,7 +266,10 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                     FilterChip(
                         selected = it.number == selected,
                         onClick = { selected = it.number },
-                        label = { Text((if (it.number == 0) "Spéciaux" else "Saison ${it.number}") + episodesOwned(show, it.number, it.episodes.size)) },
+                        label = {
+                            val done = it.episodes.isNotEmpty() && it.episodes.all { episode -> history[episode.file]?.watched == true }
+                            Text((if (it.number == 0) "Spéciaux" else "Saison ${it.number}") + episodesOwned(show, it.number, it.episodes.size) + if (done) "  ✓" else "")
+                        },
                     )
                 }
             }
@@ -282,11 +293,19 @@ fun ShowDetailScreen(show: Show, viewModel: LibraryViewModel, links: DetailLinks
                 }
             }
         }
-        items(season?.episodes.orEmpty(), key = { "${it.season}-${it.number}" }) { episode ->
-            val versions = show.versionsOf(episode)
-            EpisodeRow(episode, history[episode.file], versions.size, infos[episode.file], downloads.firstOrNull { it.key == episode.file }, onLongClick = { pressed = episode }) {
-                // Several files of this episode: which one, first.
-                if (versions.size > 1) picking = episode else context.startActivity(viewModel.playIntent(show, episode))
+        // Several files of an episode: which one, first.
+        val play = { episode: Episode -> if (show.versionsOf(episode).size > 1) picking = episode else context.startActivity(viewModel.playIntent(show, episode)) }
+        if (landscape) {
+            item(key = "strip-$selected") {
+                EpisodeStrip(season?.episodes.orEmpty(), history, upNext?.episode?.file, onLongClick = { pressed = it }, onPlay = play)
+            }
+        } else {
+            items(season?.episodes.orEmpty(), key = { "${it.season}-${it.number}" }) { episode ->
+                val versions = show.versionsOf(episode)
+                EpisodeRow(
+                    episode, history[episode.file], versions.size, infos[episode.file], downloads.firstOrNull { it.key == episode.file },
+                    current = episode.file == upNext?.episode?.file, onLongClick = { pressed = episode },
+                ) { play(episode) }
             }
         }
         item { Column(modifier = Modifier.padding(bottom = 32.dp)) { ExtrasRows(extras, links, localRows(viewModel, show = show.key)) } }
@@ -666,9 +685,13 @@ private fun TitleBlock(
 }
 
 @Composable
-private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, media: MediaInfo?, download: Download?, onLongClick: () -> Unit, onClick: () -> Unit) {
+private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, media: MediaInfo?, download: Download?, current: Boolean, onLongClick: () -> Unit, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().focusRing(RoundedCornerShape(12.dp)).menuKey(onLongClick).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 24.dp, vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .then(if (current) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(14.dp)) else Modifier)
+            .focusRing(RoundedCornerShape(12.dp)).menuKey(onLongClick).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Box(
@@ -699,12 +722,16 @@ private fun EpisodeRow(episode: Episode, progress: Progress?, versions: Int, med
             if (progress?.watched == true) CornerBadge("✓ Vu", Modifier.align(Alignment.TopEnd))
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                "${episode.number}. ${episode.title ?: "Épisode ${episode.number}"}",
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${episode.number}. ${episode.title ?: "Épisode ${episode.number}"}",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (current) NowPill(if (progress?.inProgress == true) "EN COURS" else "À SUIVRE")
+            }
             val meta = listOfNotNull(formatRuntime(episode.runtime), episode.airDate?.let(::formatDate), "$versions versions".takeIf { versions > 1 })
             if (meta.isNotEmpty()) {
                 Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -728,6 +755,97 @@ private fun FileInfo(file: String, size: Long) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 32.dp),
     )
+}
+
+/** "EN COURS" on the episode under way. */
+@Composable
+private fun NowPill(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onPrimary,
+        modifier = modifier.background(MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * A season's episodes in a row (TV, tablet held sideways): pictures with
+ * their progress, the episode under way ([current]) marked and scrolled to;
+ * the episode the remote is on is described below the row.
+ */
+@Composable
+private fun EpisodeStrip(episodes: List<Episode>, history: Map<String, Progress>, current: String?, onLongClick: (Episode) -> Unit, onPlay: (Episode) -> Unit) {
+    if (episodes.isEmpty()) return
+    val start = episodes.indexOfFirst { it.file == current }.coerceAtLeast(0)
+    var described by remember(episodes) { mutableStateOf(episodes[start]) }
+    val state = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = (start - 1).coerceAtLeast(0))
+    val width = 236.dp * LocalCardScale.current
+    Column(modifier = Modifier.padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(
+            state = state,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            items(episodes, key = { it.file }) { episode ->
+                val progress = history[episode.file]
+                val watched = progress?.watched == true
+                Column(
+                    modifier = Modifier
+                        .width(width)
+                        .onFocusChanged { if (it.isFocused) described = episode }
+                        .focusRing(RoundedCornerShape(12.dp))
+                        .menuKey { onLongClick(episode) }
+                        .combinedClickable(onClick = { onPlay(episode) }, onLongClick = { onLongClick(episode) }),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (episode.still != null) {
+                            AsyncImage(
+                                model = Tmdb.image(episode.still, "w300"),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                alpha = if (watched && episode.file != current) 0.6f else 1f,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Text("E${episode.number}", style = MaterialTheme.typography.titleMedium)
+                        }
+                        if (episode.file == current) NowPill(if (progress?.inProgress == true) "EN COURS" else "À SUIVRE", Modifier.align(Alignment.TopStart).padding(8.dp))
+                        if (watched) CornerBadge("✓ Vu", Modifier.align(Alignment.TopEnd))
+                        if (progress?.inProgress == true) {
+                            LinearProgressIndicator(
+                                progress = { progress.fraction },
+                                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp),
+                                drawStopIndicator = {},
+                            )
+                        }
+                    }
+                    Text(
+                        "E${episode.number} · ${episode.title ?: "Épisode ${episode.number}"}",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Column(modifier = Modifier.padding(horizontal = 24.dp).widthIn(max = 900.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val meta = listOfNotNull(
+                "E${described.number} · ${described.title ?: "Épisode ${described.number}"}",
+                formatRuntime(described.runtime),
+                described.airDate?.let(::formatDate),
+            )
+            Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.labelLarge)
+            described.overview?.let { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
 }
 
 /** "2019-04-14" -> "14/04/2019". */
