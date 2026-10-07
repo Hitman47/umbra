@@ -90,3 +90,36 @@ private fun chooseSubtitles(tracks: List<Track>, audio: Track?, language: Langua
     }
     return audioForced?.id ?: NO_SUBTITLES
 }
+
+/**
+ * The tracks chosen by hand for a series, used again for its next episodes:
+ * the audio and subtitles in the same language (the same title when the
+ * release names them alike), or no subtitles, and the subtitles' delay.
+ */
+@kotlinx.serialization.Serializable
+data class TrackMemory(
+    val audioLang: String? = null,
+    val audioTitle: String? = null,
+    val subtitlesOff: Boolean = false,
+    val subLang: String? = null,
+    val subTitle: String? = null,
+    val subForced: Boolean = false,
+    val subDelay: Double = 0.0,
+)
+
+/** [memory] applied to this file's tracks; null where nothing matches (the usual choice stays). */
+fun rememberedTracks(memory: TrackMemory, audio: List<Track>, subtitles: List<Track>): TrackChoice {
+    fun language(tag: String?) = Language.entries.firstOrNull { it.matches(tag) }?.name ?: tag?.trim()?.lowercase()
+    fun sameLanguage(tag: String?, remembered: String?) = remembered != null && language(tag) == language(remembered)
+    fun sameTitle(a: String?, b: String?) = a != null && b != null && a.trim().equals(b.trim(), ignoreCase = true)
+    val chosenAudio = audio.firstOrNull { sameLanguage(it.lang, memory.audioLang) && sameTitle(it.title, memory.audioTitle) }
+        ?: audio.firstOrNull { sameLanguage(it.lang, memory.audioLang) && !it.isCommentary }
+        ?: audio.firstOrNull { memory.audioLang == null && sameTitle(it.title, memory.audioTitle) }
+    val chosenSubtitles = when {
+        memory.subtitlesOff -> NO_SUBTITLES
+        else -> subtitles.firstOrNull { sameLanguage(it.lang, memory.subLang) && it.isForced == memory.subForced && sameTitle(it.title, memory.subTitle) }?.id
+            ?: subtitles.firstOrNull { sameLanguage(it.lang, memory.subLang) && it.isForced == memory.subForced }?.id
+            ?: subtitles.firstOrNull { memory.subLang == null && sameTitle(it.title, memory.subTitle) }?.id
+    }
+    return TrackChoice(chosenAudio?.id, chosenSubtitles)
+}

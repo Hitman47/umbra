@@ -25,6 +25,8 @@ data class PlayItem(
     /** Its heading in the queue panel: "Saison 2". */
     val group: String? = null,
     val minutes: Int? = null,
+    /** The series of an episode (its key in the library): its tracks chosen by hand are kept for the next ones. */
+    val show: String? = null,
 ) {
     /** Its key in the queue: the NAS file, else the URL (a file of the device). */
     val key get() = file ?: url

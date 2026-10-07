@@ -244,13 +244,13 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             nyxara.downloads.localFile(item.file)?.takeIf { version == null || item.file != episode.file }?.let { local ->
                 return@map PlayItem(
                     local.local, show.title, listOfNotNull(code, item.title).joinToString(" · "), local.localSubtitles, item.file, start, trakt,
-                    image = item.still, group = seasonLabel(item.season), minutes = item.runtime,
+                    image = item.still, group = seasonLabel(item.season), minutes = item.runtime, show = show.key,
                 )
             }
             PlayItem(
                 url(other ?: item.file), show.title, listOfNotNull(code, item.title).joinToString(" · "),
                 if (other == null) item.subtitles.map(::url) else emptyList(), item.file, start, trakt, stream = other,
-                image = item.still, group = seasonLabel(item.season), minutes = item.runtime,
+                image = item.still, group = seasonLabel(item.season), minutes = item.runtime, show = show.key,
             )
         }
         return PlayerActivity.intent(getApplication(), queue)

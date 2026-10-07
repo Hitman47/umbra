@@ -97,7 +97,7 @@ class PlaybackService : Service() {
                         android.graphics.drawable.Icon.createWithResource(context, android.R.drawable.ic_menu_close_clear_cancel), "Arrêter", service(ACTION_STOP, 2),
                     ).build(),
                 )
-                .setStyle(Notification.MediaStyle().setShowActionsInCompactView(0, 1))
+                .setStyle(Notification.MediaStyle().setShowActionsInCompactView(0, 1).apply { BackgroundPlayback.session?.let(::setMediaSession) })
                 .build()
         }
     }
@@ -110,4 +110,6 @@ object BackgroundPlayback {
     @Volatile var playing: Boolean = false
     @Volatile var toggle: (() -> Unit)? = null
     @Volatile var stop: (() -> Unit)? = null
+    /** The player's media session: the notification's controls and the lock screen act on it. */
+    @Volatile var session: android.media.session.MediaSession.Token? = null
 }

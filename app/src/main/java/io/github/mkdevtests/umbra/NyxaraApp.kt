@@ -69,6 +69,7 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     val updater by lazy { Updater(this, OkHttpClient()) }
 
     /** What the last playbacks cost to open, seek and play. */
+    val trackMemory by lazy { io.github.mkdevtests.umbra.player.TrackMemoryStore(this) }
     val measures by lazy { PlaybackLog(filesDir.resolve("playback-measures.json")) }
 
     /** The user's own data (history, match corrections), kept apart from the library cache. */

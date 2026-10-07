@@ -169,6 +169,9 @@ class PlayerActivity : ComponentActivity() {
     /** Playing out of sight, the sound only (Réglages › Son en arrière-plan). */
     private var background = false
 
+    /** Media keys, lock screen, voice assistant, headphones unplugged. */
+    private var mediaSession: PlayerSession? = null
+
     private val pipReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == ACTION_PIP_TOGGLE) player.togglePause()
@@ -189,6 +192,14 @@ class PlayerActivity : ComponentActivity() {
         if (items.isEmpty() && perso == null) return finish()
         player = MpvPlayer(this, settings)
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
+        mediaSession = PlayerSession(this, object : PlayerSession.Controls {
+            override fun play() { if (player.paused.value) player.togglePause() }
+            override fun pause() { if (!player.paused.value) player.togglePause() }
+            override fun seekTo(seconds: Double) = player.seekTo(seconds)
+            override fun jump(seconds: Int) = player.seekTo((player.position.value + seconds).coerceAtLeast(0.0))
+            override fun next() = playNext()
+            override fun stop() = finish()
+        }).also { BackgroundPlayback.session = it.session.sessionToken }
         perso?.let(::preparePerso) ?: run {
             // A film, or an episode and the next ones: in order, no loop.
             val byKey = items.associateBy(PlayItem::key)
@@ -246,6 +257,21 @@ class PlayerActivity : ComponentActivity() {
                         PlaybackService.update(this@PlayerActivity)
                     }
                 }
+        }
+        // Android's media controls follow the player; the position is extrapolated in between.
+        lifecycleScope.launch {
+            combine(player.paused, player.duration, player.ended) { paused, duration, ended -> Triple(!paused && duration > 0 && !ended, duration, ended) }
+                .distinctUntilChanged()
+                .collect { (playing, duration, _) ->
+                    current?.let { describeSession(it, duration) }
+                    mediaSession?.update(playing, player.position.value, queue?.upNext != null)
+                }
+        }
+        lifecycleScope.launch {
+            while (true) {
+                delay(5_000)
+                mediaSession?.update(!player.paused.value && !player.ended.value, player.position.value, queue?.upNext != null)
+            }
         }
         // Trakt follows what is played: start when the picture moves, pause with it.
         lifecycleScope.launch {
@@ -404,6 +430,7 @@ class PlayerActivity : ComponentActivity() {
 
     /** Saved, scrobbled and measured before another video starts. */
     private fun leaveCurrent() {
+        rememberTracks()
         saveProgress()
         scrobbler.stop()
         recordMeasure()
@@ -537,7 +564,23 @@ class PlayerActivity : ComponentActivity() {
         val read = item.stream ?: item.file
         val remote = read?.let { app.nas?.hostOf(it) }?.let(::isTailnet) == true
         val online = if (perso == null) item.file?.let(app.subtitleMemory::of).orEmpty() else emptyList()
+        player.memory = item.show?.let(app.trackMemory::get)
         player.play(toMpvPath(item.url), item.subtitles, item.start, online = online, remote = remote)
+        describeSession(item, 0.0)
+    }
+
+    /** Tracks chosen by hand in an episode: kept for its series' next episodes. */
+    private fun rememberTracks() {
+        if (!player.changedByHand) return
+        val show = current?.show ?: return
+        player.trackMemory()?.let { app.trackMemory.save(show, it) }
+        player.changedByHand = false
+    }
+
+    /** Perso's titles never leave the player: the system's controls show the app's name. */
+    private fun describeSession(item: PlayItem, duration: Double) {
+        if (perso != null) mediaSession?.describe("Nyxara", null, duration)
+        else mediaSession?.describe(item.title, item.subtitle, duration)
     }
 
     /** The file already measured: one measure per file. */
@@ -661,7 +704,11 @@ class PlayerActivity : ComponentActivity() {
         BackgroundPlayback.toggle = null
         BackgroundPlayback.stop = null
         runCatching { unregisterReceiver(pipReceiver) }
+        BackgroundPlayback.session = null
+        mediaSession?.release()
+        mediaSession = null
         if (::player.isInitialized) {
+            rememberTracks()
             recordMeasure()
             player.release()
             (application as NyxaraApp).streamServer.closeIdle()
@@ -1402,12 +1449,12 @@ private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubt
         PanelTitle("Audio")
         if (audio.isEmpty()) PanelNote("Aucune piste audio")
         audio.forEachIndexed { index, track ->
-            TrackRow(track.label, track.detail, track.selected, if (index == 0) Modifier.focusRequester(first) else Modifier) { player.selectAudio(track.id) }
+            TrackRow(track.label, track.detail, track.selected, if (index == 0) Modifier.focusRequester(first) else Modifier) { player.selectAudio(track.id); player.changedByHand = true }
         }
 
         PanelTitle("Sous-titres")
-        subtitles.forEach { track -> TrackRow(track.label, track.detail, track.selected) { player.selectSubtitles(track.id) } }
-        TrackRow("Désactivés", null, !subtitlesOn, if (audio.isEmpty()) Modifier.focusRequester(first) else Modifier) { player.selectSubtitles(NO_SUBTITLES) }
+        subtitles.forEach { track -> TrackRow(track.label, track.detail, track.selected) { player.selectSubtitles(track.id); player.changedByHand = true } }
+        TrackRow("Désactivés", null, !subtitlesOn, if (audio.isEmpty()) Modifier.focusRequester(first) else Modifier) { player.selectSubtitles(NO_SUBTITLES); player.changedByHand = true }
 
         if (online != null) {
             PanelTitle("Sous-titres en ligne")
@@ -1440,7 +1487,7 @@ private fun TrackPanel(player: MpvPlayer, settings: Settings, online: OnlineSubt
         TrackRow("Amélioration anime (Anime4K)", "Traits plus nets sur les dessins animés ; plus de travail pour la tablette", anime) { player.setAnimeUpscale(!anime) }
 
         PanelTitle("Décalage sous-titres")
-        DelayRow(delay, enabled = subtitlesOn) { player.shiftSubtitles(it) }
+        DelayRow(delay, enabled = subtitlesOn) { player.shiftSubtitles(it); player.changedByHand = true }
         PanelNote("Positif : les sous-titres arrivent plus tard.")
 
         PanelTitle("Décalage audio")

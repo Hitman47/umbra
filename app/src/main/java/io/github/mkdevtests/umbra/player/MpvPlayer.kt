@@ -12,6 +12,9 @@ import io.github.mkdevtests.umbra.settings.NO_SUBTITLES
 import io.github.mkdevtests.umbra.settings.Settings
 import io.github.mkdevtests.umbra.settings.Track
 import io.github.mkdevtests.umbra.settings.chooseTracks
+import io.github.mkdevtests.umbra.settings.TrackChoice
+import io.github.mkdevtests.umbra.settings.TrackMemory
+import io.github.mkdevtests.umbra.settings.rememberedTracks
 import io.github.mkdevtests.umbra.subtitles.OnlineTrack
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -220,6 +223,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         mpv.setPropertyString("cache-pause-wait", if (remote) "3" else "1")
         externalSubtitles = subtitles
         onlineSubtitles = online
+        changedByHand = false
         _ended.value = false
         _buffering.value = true
         // The previous file's values must not be saved as this one's progress.
@@ -578,13 +582,35 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         }
     }
 
+    /** The tracks chosen by hand for this file's series: they win over the language settings (see [rememberedTracks]). */
+    @Volatile var memory: TrackMemory? = null
+
+    /** Audio, subtitles or their delay changed in the panel since this file started. */
+    @Volatile var changedByHand = false
+
+    /** The tracks now playing, to keep for the series' next episodes. */
+    fun trackMemory(): TrackMemory? = runCatching {
+        val tracks = readTracks()
+        val audio = tracks.firstOrNull { it.type == "audio" && it.selected }
+        val sub = tracks.firstOrNull { it.type == "sub" && it.selected }
+        TrackMemory(
+            audioLang = audio?.lang, audioTitle = audio?.title,
+            subtitlesOff = sub == null, subLang = sub?.lang, subTitle = sub?.title,
+            subForced = sub?.let { Track(it.id, it.lang, it.title, it.forced).isForced } ?: false,
+            subDelay = _subtitleDelay.value,
+        )
+    }.getOrNull()
+
     /** Applies the language settings; any failure leaves mpv's own choice, playback goes on. */
     private fun selectTracks() {
         try {
             val tracks = readTracks()
             fun of(type: String) = tracks.filter { it.type == type }
                 .map { Track(it.id, it.lang, it.title, it.forced, it.default) }
-            val choice = chooseTracks(audio = of("audio"), subtitles = of("sub"), settings = settings)
+            val usual = chooseTracks(audio = of("audio"), subtitles = of("sub"), settings = settings)
+            val remembered = memory?.let { rememberedTracks(it, of("audio"), of("sub")) }
+            val choice = TrackChoice(remembered?.audio ?: usual.audio, remembered?.subtitles ?: usual.subtitles)
+            memory?.let { mpv.setPropertyString("sub-delay", it.subDelay.toString()) }
             choice.audio?.let(::selectAudio)
             choice.subtitles?.let(::selectSubtitles)
             Log.i(TAG, "tracks: audio ${choice.audio}, subtitles ${choice.subtitles}")
