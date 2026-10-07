@@ -67,8 +67,8 @@ abstract class HistoryDatabase : RoomDatabase() {
     abstract fun hidden(): HiddenTitleDao
 
     companion object {
-        fun open(context: Context): HistoryDatabase =
-            Room.databaseBuilder(context, HistoryDatabase::class.java, "history.db").build()
+        fun open(context: Context, name: String = "history.db"): HistoryDatabase =
+            Room.databaseBuilder(context, HistoryDatabase::class.java, name).build()
     }
 }
 

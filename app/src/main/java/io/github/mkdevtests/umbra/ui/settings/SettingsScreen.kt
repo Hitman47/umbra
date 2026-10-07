@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import androidx.compose.runtime.mutableIntStateOf
+import io.github.mkdevtests.umbra.profile.withPin
 import io.github.mkdevtests.umbra.NyxaraApp
 import io.github.mkdevtests.umbra.support.ProblemReport
 import io.github.mkdevtests.umbra.ui.theme.isTv
@@ -154,6 +156,9 @@ fun SettingsScreen(
     }
 
     var tab by rememberSaveable { mutableStateOf(SettingsTab.Library) }
+    // Perso is the owner's alone.
+    val app = LocalContext.current.applicationContext as NyxaraApp
+    val visibleTabs = SettingsTab.entries.filter { it != SettingsTab.Perso || app.profile.isMain }
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
         ScreenTitle("Réglages", onBack)
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -334,6 +339,7 @@ fun SettingsScreen(
                                 RequestsSection(requests)
                             }
                             SettingsTab.App -> {
+                                ProfilesSection(app)
                                 Section("Apparence") {
                                     ChipsItem("Taille des cartes", "Affiches, dossiers, profils, vidéos Perso : toutes d'un coup ; le texte suit.") {
                                         io.github.mkdevtests.umbra.ui.theme.CARD_SCALES.forEach { (value, label) ->
@@ -436,7 +442,7 @@ fun SettingsScreen(
             if (wide) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     Column(modifier = Modifier.width(220.dp).padding(start = 12.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SettingsTab.entries.forEach { entry ->
+                        visibleTabs.forEach { entry ->
                             NavigationDrawerItem(
                                 modifier = Modifier.focusRing(RoundedCornerShape(50)),
                                 label = { Text(entry.label) },
@@ -449,8 +455,8 @@ fun SettingsScreen(
                 }
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    ScrollableTabRow(selectedTabIndex = tab.ordinal, edgePadding = 16.dp, containerColor = Color.Transparent) {
-                        SettingsTab.entries.forEach { entry ->
+                    ScrollableTabRow(selectedTabIndex = visibleTabs.indexOf(tab).coerceAtLeast(0), edgePadding = 16.dp, containerColor = Color.Transparent) {
+                        visibleTabs.forEach { entry ->
                             Tab(selected = tab == entry, onClick = { tab = entry }, text = { Text(entry.label) }, modifier = Modifier.focusRing())
                         }
                     }
@@ -459,6 +465,133 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+/** Who watches: the profile in use, and (the owner) the profiles of the device. */
+@Composable
+private fun ProfilesSection(app: NyxaraApp) {
+    val profiles by app.profiles.profiles.collectAsState()
+    val ask by app.profiles.askAtStart.collectAsState()
+    val activity = LocalContext.current as android.app.Activity
+    var editing by remember { mutableStateOf<io.github.mkdevtests.umbra.profile.Profile?>(null) }
+    Section("Profils") {
+        Item(
+            "Profil en cours : ${app.profile.name}",
+            "Chacun son historique, sa Lecture en cours et son compte Trakt. Perso n'apparaît que dans le profil du propriétaire.",
+        ) {
+            if (profiles.size > 1 || ask) {
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { io.github.mkdevtests.umbra.ui.profile.ProfileSwitch.restart(activity, chosen = false) }) { Text("Changer") }
+            }
+        }
+        if (!app.profile.isMain) return@Section
+        profiles.forEach { profile ->
+            val details = listOfNotNull(
+                "propriétaire".takeIf { profile.isMain },
+                "enfant, ${profile.maxAge} ans".takeIf { profile.child },
+                "code".takeIf { profile.locked },
+                "empreinte".takeIf { profile.fingerprint },
+            ).joinToString(" · ").ifEmpty { "sans code" }
+            Item(profile.name, details) {
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { editing = profile }) { Text("Modifier") }
+            }
+        }
+        Item("Ajouter un profil", "Un adulte, ou un enfant : seulement les titres de son âge (classification TMDB), ni Perso, ni Réglages, ni recherche externe.") {
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { editing = app.profiles.newProfile("", child = false) }) { Text("Ajouter") }
+        }
+        Item("Choisir le profil au démarrage", "Même avec un seul profil, pour le protéger par un code. Avec plusieurs profils, toujours.") {
+            Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = ask, onCheckedChange = app.profiles::setAskAtStart)
+        }
+    }
+    editing?.let { profile ->
+        ProfileEditor(
+            profile,
+            isNew = profiles.none { it.id == profile.id },
+            onSave = { app.profiles.put(it); editing = null },
+            onDelete = { app.profiles.remove(activity, profile.id); editing = null },
+            onDismiss = { editing = null },
+        )
+    }
+}
+
+/** A profile's name, kind (child and age), code and fingerprint. */
+@Composable
+private fun ProfileEditor(
+    profile: io.github.mkdevtests.umbra.profile.Profile,
+    isNew: Boolean,
+    onSave: (io.github.mkdevtests.umbra.profile.Profile) -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var name by remember { mutableStateOf(profile.name) }
+    var child by remember { mutableStateOf(profile.child) }
+    var maxAge by remember { mutableIntStateOf(profile.maxAge) }
+    var pin by remember { mutableStateOf("") }
+    var removePin by remember { mutableStateOf(false) }
+    var fingerprint by remember { mutableStateOf(profile.fingerprint) }
+    var deleting by remember { mutableStateOf(false) }
+    val pinValid = pin.isEmpty() || pin.length in MIN_PIN..MAX_PIN && pin.all { it.isDigit() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isNew) "Nouveau profil" else profile.name) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                io.github.mkdevtests.umbra.ui.theme.FormField(name, { name = it }, "Nom", modifier = Modifier.fillMaxWidth())
+                if (!profile.isMain) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Profil enfant", modifier = Modifier.weight(1f))
+                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = child, onCheckedChange = { child = it })
+                    }
+                    if (child) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(6, 10, 12, 16).forEach { age ->
+                                FilterChip(modifier = Modifier.focusRing(RoundedCornerShape(50)), selected = maxAge == age, onClick = { maxAge = age }, label = { Text("$age ans") })
+                            }
+                        }
+                    }
+                }
+                io.github.mkdevtests.umbra.ui.theme.FormField(
+                    pin, { pin = it.filter(Char::isDigit).take(MAX_PIN); removePin = false },
+                    if (profile.locked) "Nouveau code (vide : inchangé)" else "Code ($MIN_PIN à $MAX_PIN chiffres, facultatif)",
+                    modifier = Modifier.fillMaxWidth(), secret = true, keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword,
+                )
+                if (profile.locked && !removePin) {
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { removePin = true; pin = ""; fingerprint = false }) { Text("Retirer le code") }
+                }
+                if ((profile.locked && !removePin || pin.isNotEmpty()) && fingerprintAvailable(context)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Empreinte digitale", modifier = Modifier.weight(1f))
+                        Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = fingerprint, onCheckedChange = { fingerprint = it })
+                    }
+                }
+                if (!isNew && !profile.isMain) {
+                    TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { deleting = true }) {
+                        Text("Supprimer ce profil", color = MaterialTheme.colorScheme.error)
+                    }
+                    if (deleting) {
+                        Text("Son historique sur cet appareil sera effacé (son compte Trakt n'est pas touché).", color = MaterialTheme.colorScheme.error)
+                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDelete) { Text("Confirmer la suppression", color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                modifier = Modifier.focusRing(RoundedCornerShape(50)),
+                enabled = name.isNotBlank() && pinValid,
+                onClick = {
+                    var saved = profile.copy(name = name.trim(), child = child && !profile.isMain, maxAge = maxAge)
+                    saved = when {
+                        removePin -> saved.withPin(null)
+                        pin.isNotEmpty() -> saved.withPin(pin)
+                        else -> saved
+                    }
+                    onSave(saved.copy(fingerprint = fingerprint && saved.locked))
+                },
+            ) { Text("Enregistrer") }
+        },
+        dismissButton = { TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onDismiss) { Text("Annuler") } },
+    )
 }
 
 /** Four cards at [scale], to see the size before leaving Réglages. */

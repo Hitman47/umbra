@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.library.forAge
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import android.app.Application
@@ -44,7 +46,13 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val nyxara = app as NyxaraApp
     private val repository = nyxara.library
 
-    val library: StateFlow<Library> = repository.library
+    /** A child's profile: only the titles rated for its age (see [LibraryRepository.ages]). */
+    private val profile = nyxara.profile
+    val library: StateFlow<Library> =
+        if (!profile.child) repository.library
+        else combine(repository.library, repository.ages) { library, ages -> library.forAge(ages, profile.maxAge) }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, Library())
     val scan: StateFlow<ScanState> = repository.scan
     /** Nyxara's history, completed by what Trakt says was watched elsewhere. */
     val history: StateFlow<Map<String, Progress>> =
@@ -65,6 +73,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     val searchFilters = MutableStateFlow(SearchFilters())
 
     init {
+        if (profile.child) {
+            viewModelScope.launch(Dispatchers.IO) { repository.library.collectLatest { repository.fillAges(it) } }
+        }
         repository.scanIfNeeded()
         nyxara.trakt.sync()
         viewModelScope.launch {

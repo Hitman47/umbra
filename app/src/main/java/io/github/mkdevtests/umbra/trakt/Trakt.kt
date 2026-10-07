@@ -109,11 +109,12 @@ fun episodeKey(showTmdbId: Int, season: Int, number: Int) = "e:$showTmdbId:$seas
  * of what Nyxara plays. Disconnecting only forgets the account on the tablet;
  * Nyxara never removes anything on Trakt (see [TraktEndpoint]).
  */
-class Trakt(private val context: Context, private val api: TraktApi) {
+class Trakt(private val context: Context, private val api: TraktApi, name: String = "trakt") {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val prefs = context.getSharedPreferences("trakt", Context.MODE_PRIVATE)
-    private val cacheFile = File(context.filesDir, "trakt.json")
+    // One account per profile: [name] is "trakt" for the owner's.
+    private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+    private val cacheFile = File(context.filesDir, "$name.json")
     private val json = Json { ignoreUnknownKeys = true }
     private val tokenLock = Mutex()
     private val syncLock = Mutex()

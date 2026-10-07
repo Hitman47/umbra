@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.derivedStateOf
 import io.github.mkdevtests.umbra.ui.theme.refocusIf
 import io.github.mkdevtests.umbra.ui.theme.menuKey
@@ -109,8 +110,13 @@ enum class HomeTab(val label: String, val icon: ImageVector, val inBar: Boolean 
 }
 
 /** The tabs of the bar (a phone) or the rail (a tablet, which has room for all); Docs once its folders are chosen. */
-private fun tabsOf(wide: Boolean, documentaries: Boolean) =
-    HomeTab.entries.filter { (wide || it.inBar) && (documentaries || it != HomeTab.Docs) }
+/** [perso]: the owner's profile only has the Perso tab. */
+private fun tabsOf(wide: Boolean, documentaries: Boolean, profile: io.github.mkdevtests.umbra.profile.Profile) =
+    HomeTab.entries.filter {
+        (wide || it.inBar) && (documentaries || it != HomeTab.Docs) && (profile.isMain || it != HomeTab.Perso) &&
+            // A child's profile: the titles for its age, not the NAS's folders.
+            (!profile.child || it != HomeTab.Folders)
+    }
 
 /** The library's screens under one navigation: a bar at the bottom of a phone, a rail on the side of a tablet. */
 @Composable
@@ -133,6 +139,7 @@ fun HomeScreen(
     val settingsStore = (androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).settings
     val settings by settingsStore.settings.collectAsState()
     val documentaries = settings.documentaryFolders.isNotEmpty()
+    val profile = (androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).profile
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val content: @Composable (Modifier) -> Unit = { modifier ->
@@ -148,7 +155,7 @@ fun HomeScreen(
             Row(modifier = Modifier.fillMaxSize()) {
                 NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     Spacer(modifier = Modifier.size(12.dp))
-                    tabsOf(wide = true, documentaries).forEach { entry ->
+                    tabsOf(wide = true, documentaries, profile).forEach { entry ->
                         NavigationRailItem(
                             modifier = Modifier.focusRing(),
                             selected = entry == tab,
@@ -159,7 +166,8 @@ fun HomeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    NavigationRailItem(
+                    // A child's profile: no settings.
+                    if (!profile.child) NavigationRailItem(
                         modifier = Modifier.focusRing(),
                         selected = false,
                         onClick = onOpenSettings,
@@ -173,7 +181,7 @@ fun HomeScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 content(Modifier.weight(1f))
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    tabsOf(wide = false, documentaries).forEach { entry ->
+                    tabsOf(wide = false, documentaries, profile).forEach { entry ->
                         NavigationBarItem(
                             modifier = Modifier.focusRing(),
                             selected = entry == tab,
@@ -272,8 +280,31 @@ private fun HomeContent(
             } else {
                 // A phone's bar keeps five tabs: Recherche and Dossiers are up here.
                 IconButton(onClick = { onTabChange(HomeTab.Search) }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Search, contentDescription = "Recherche") }
-                IconButton(onClick = { onTabChange(HomeTab.Folders) }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Folder, contentDescription = "Dossiers") }
-                IconButton(onClick = onOpenSettings, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Settings, contentDescription = "Réglages") }
+                if (!app.profile.child) IconButton(onClick = { onTabChange(HomeTab.Folders) }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Folder, contentDescription = "Dossiers") }
+                if (!app.profile.child) IconButton(onClick = onOpenSettings, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Settings, contentDescription = "Réglages") }
+            }
+            // Several profiles: the one in use, a touch to change.
+            val profiles by app.profiles.profiles.collectAsState()
+            if (profiles.size > 1) {
+                var choosing by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.padding(start = 4.dp).focusRing(CircleShape).clickable { choosing = true }.padding(6.dp)) {
+                    io.github.mkdevtests.umbra.ui.profile.ProfileAvatar(app.profile, 32.dp)
+                }
+                if (choosing) {
+                    val activity = androidx.compose.ui.platform.LocalContext.current as android.app.Activity
+                    androidx.compose.ui.window.Dialog(
+                        onDismissRequest = { choosing = false },
+                        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+                    ) {
+                        io.github.mkdevtests.umbra.ui.profile.ProfilePicker(profiles, app.profile, onCancel = { choosing = false }, onChosen = { chosen ->
+                            choosing = false
+                            if (chosen.id != app.profile.id) {
+                                app.profiles.choose(chosen.id)
+                                io.github.mkdevtests.umbra.ui.profile.ProfileSwitch.restart(activity)
+                            }
+                        })
+                    }
+                }
             }
         }
         UpdateBanner(updater)
@@ -312,7 +343,7 @@ private fun HomeContent(
                     browserViewModel, fullLibrary, art, onOpenMovie, onOpenShow,
                     onPickLocalFile = onPickLocalFile.takeIf { !wide },
                     onExcluded = libraryViewModel::onFolderExcluded,
-                    onPersonal = { (context.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).addPersonal(it); browserViewModel.refresh() },
+                    onPersonal = if (app.profile.isMain) ({ path: String -> app.addPersonal(path); browserViewModel.refresh() }) else null,
                 )
             }
             HomeTab.Search -> SearchScreen(reachable, libraryViewModel, onOpenMovie, onOpenShow, onLongPress = menu)

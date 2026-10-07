@@ -101,6 +101,8 @@ fun RemoteScreen(tmdbId: Int, isShow: Boolean, viewModel: LibraryViewModel, link
             Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when {
                     owned != null -> GlowButton("Ouvrir sa page", onClick = { if (isShow) links.onOpenShow(owned) else links.onOpenMovie(owned) })
+                    // A child's profile asks for nothing.
+                    app.profile.child -> Unit
                     settings.canSearch -> GlowButton("Rechercher", onClick = { searching = true }, icon = NyxaraIcons.Search)
                     else -> Text("Pour chercher ce titre : Réglages › Recherche externe (Prowlarr, qBittorrent).", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

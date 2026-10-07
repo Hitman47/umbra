@@ -419,7 +419,7 @@ private fun PersoLockScreen(store: io.github.mkdevtests.umbra.perso.PersoStore) 
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
     val canFingerprint = lock.fingerprint && fingerprintAvailable(context)
-    LaunchedEffect(Unit) { if (canFingerprint) askFingerprint(context, store::unlockByFingerprint) }
+    LaunchedEffect(Unit) { if (canFingerprint) askFingerprint(context, onSuccess = store::unlockByFingerprint) }
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -449,7 +449,7 @@ private fun PersoLockScreen(store: io.github.mkdevtests.umbra.perso.PersoStore) 
         )
         if (canFingerprint) {
             Spacer(Modifier.height(8.dp))
-            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { askFingerprint(context, store::unlockByFingerprint) }) { Text("Utiliser l'empreinte") }
+            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { askFingerprint(context, onSuccess = store::unlockByFingerprint) }) { Text("Utiliser l'empreinte") }
         }
     }
 }
@@ -499,10 +499,10 @@ fun fingerprintAvailable(context: android.content.Context): Boolean {
 }
 
 /** Asks for the fingerprint; [onSuccess] when recognized, nothing else (the PIN stays there). */
-fun askFingerprint(context: android.content.Context, onSuccess: () -> Unit) {
+fun askFingerprint(context: android.content.Context, title: String = "Déverrouiller Perso", onSuccess: () -> Unit) {
     val executor = context.mainExecutor
     val prompt = android.hardware.biometrics.BiometricPrompt.Builder(context)
-        .setTitle("Déverrouiller Perso")
+        .setTitle(title)
         .setNegativeButton("Code", executor) { _, _ -> }
         .build()
     runCatching {

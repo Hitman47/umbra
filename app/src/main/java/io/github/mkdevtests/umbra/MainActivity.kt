@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra
 
+import io.github.mkdevtests.umbra.ui.profile.ProfileSwitch
+import io.github.mkdevtests.umbra.ui.profile.ProfilePicker
 import kotlinx.coroutines.delay
 import io.github.mkdevtests.umbra.home.continueWatching
 import io.github.mkdevtests.umbra.tv.WatchNext
@@ -68,7 +70,22 @@ class MainActivity : ComponentActivity() {
                 val settings by (application as NyxaraApp).settings.settings.collectAsState()
                 CompositionLocalProvider(io.github.mkdevtests.umbra.ui.theme.LocalCardScale provides settings.cardScale) {
                     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                        NyxaraRoot()
+                        // Several profiles (or asked for): "Qui regarde ?" first, once per start.
+                        val app = application as NyxaraApp
+                        var chosen by rememberSaveable { mutableStateOf(!app.profiles.choiceAtStart || intent.getBooleanExtra(ProfileSwitch.EXTRA_CHOSEN, false)) }
+                        if (chosen) {
+                            NyxaraRoot()
+                        } else {
+                            val profiles by app.profiles.profiles.collectAsState()
+                            ProfilePicker(profiles, app.profile, onChosen = { profile ->
+                                if (profile.id == app.profile.id) {
+                                    chosen = true
+                                } else {
+                                    app.profiles.choose(profile.id)
+                                    ProfileSwitch.restart(this@MainActivity)
+                                }
+                            })
+                        }
                     }
                 }
             }

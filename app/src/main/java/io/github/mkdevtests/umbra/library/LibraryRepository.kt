@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.library
 
+import kotlinx.coroutines.sync.withLock
 import android.util.Log
 import io.github.mkdevtests.umbra.BuildConfig
 import io.github.mkdevtests.umbra.NyxaraApp
@@ -30,6 +31,8 @@ import java.io.File
 data class ScanState(val running: Boolean = false, val progress: String? = null, val error: String? = null)
 
 /** Holds the library in memory, persists it to the database and runs scans. */
+private const val AGE_PAUSE_MS = 120L
+
 class LibraryRepository(private val app: NyxaraApp) {
 
     private val dao by lazy { LibraryDatabase.open(app).dao() }
@@ -56,6 +59,35 @@ class LibraryRepository(private val app: NyxaraApp) {
     }
     /** Pages of absent titles opened lately (a week, 200 at most). */
     private val remoteTitles by lazy { RemoteTitles(File(app.cacheDir, "remote-titles.json")) }
+
+    private val agesFile = File(app.filesDir, "age-ratings.json")
+    private val _ages = MutableStateFlow<Map<String, Int>>(emptyMap())
+    private val agesLock = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * The titles' ages from TMDB's ratings ("m:603" → 12; -1 when TMDB has
+     * none), for a child's profile. Read once per title, kept on the device.
+     */
+    val ages: StateFlow<Map<String, Int>> = _ages.asStateFlow()
+
+    /** Asks TMDB the ratings of the titles of [library] not known yet, a few at a time. */
+    suspend fun fillAges(library: Library) = agesLock.withLock {
+        if (_ages.value.isEmpty() && agesFile.exists()) {
+            _ages.value = runCatching { kotlinx.serialization.json.Json.decodeFromString<Map<String, Int>>(agesFile.readText()) }.getOrDefault(emptyMap())
+        }
+        val wanted = library.movies.mapNotNull { it.tmdbId?.let { id -> "m:$id" to id } } + library.shows.mapNotNull { it.tmdbId?.let { id -> "t:$id" to id } }
+        val missing = wanted.filter { it.first !in _ages.value }
+        missing.forEachIndexed { index, (key, id) ->
+            val ratings = runCatching { if (key.startsWith("t:")) tmdb.showRatings(id) else tmdb.movieRatings(id) }
+                .onFailure { Log.w(TAG, "ratings of $key", it) }
+                .getOrNull() ?: return@forEachIndexed
+            _ages.value = _ages.value + (key to (ageOf(ratings) ?: -1))
+            if (index % 25 == 24 || index == missing.lastIndex) {
+                runCatching { agesFile.writeText(kotlinx.serialization.json.Json.encodeToString(_ages.value)) }
+            }
+            delay(AGE_PAUSE_MS)
+        }
+    }
 
     /** An absent title's page: kept a week, else from TMDB; null offline. */
     suspend fun remote(tmdbId: Int, isShow: Boolean): RemoteTitle? = remoteTitles.get(tmdbId, isShow)

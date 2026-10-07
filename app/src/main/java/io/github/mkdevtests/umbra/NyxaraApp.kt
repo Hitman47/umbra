@@ -75,12 +75,19 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** The user's own data (history, match corrections), kept apart from the library cache. */
     val userData by lazy { HistoryDatabase.open(this) }
 
-    val history by lazy { WatchHistory(userData.dao()) }
+    /** Who watches: their history and Trakt account; fixed for this run of the app. */
+    val profiles by lazy { io.github.mkdevtests.umbra.profile.ProfileStore(this) }
+    val profile get() = profiles.active
+
+    /** The profile's history: the owner's in [userData], another's in a file of its own. */
+    val history by lazy {
+        WatchHistory(if (profile.isMain) userData.dao() else HistoryDatabase.open(this, profile.historyDatabase).dao())
+    }
 
     val matchFixes by lazy { MatchFixes(userData.matchFixes()) }
     val hidden by lazy { HiddenTitles(userData.hidden()) }
     val trakt by lazy {
-        Trakt(this, TraktApi(BuildConfig.TRAKT_CLIENT_ID, BuildConfig.TRAKT_CLIENT_SECRET, "Nyxara/${BuildConfig.VERSION_NAME}", OkHttpClient()))
+        Trakt(this, TraktApi(BuildConfig.TRAKT_CLIENT_ID, BuildConfig.TRAKT_CLIENT_SECRET, "Nyxara/${BuildConfig.VERSION_NAME}", OkHttpClient()), profile.traktName)
     }
 
     /** Long-lived work of the app (media headers, subtitles), not tied to a screen. */

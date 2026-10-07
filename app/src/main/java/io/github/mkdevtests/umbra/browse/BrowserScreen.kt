@@ -89,7 +89,8 @@ fun BrowserScreen(
     /** A folder was just left out: its titles leave the library. */
     onExcluded: () -> Unit,
     /** A folder moved to the Perso tab. */
-    onPersonal: (String) -> Unit = {},
+    /** Null: not offered (a profile other than the owner's). */
+    onPersonal: ((String) -> Unit)? = {},
     /** A phone: playing a file of the device starts here (the top bar has no room for it). */
     onPickLocalFile: (() -> Unit)? = null,
 ) {
@@ -112,7 +113,7 @@ fun BrowserScreen(
                 Column {
                     TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null; viewModel.open(entry.path) }) { Text("Ouvrir le dossier") }
                     if (canExclude) {
-                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null; onPersonal(entry.path) }) { Text("Déplacer dans Perso") }
+                        onPersonal?.let { move -> TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null; move(entry.path) }) { Text("Déplacer dans Perso") } }
                         TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { menu = null; excluding = entry.path }) {
                             Text("Exclure de la bibliothèque", color = MaterialTheme.colorScheme.error)
                         }

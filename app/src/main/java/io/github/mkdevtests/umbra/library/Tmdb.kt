@@ -92,6 +92,15 @@ class Tmdb(private val token: String, private val http: OkHttpClient) {
     suspend fun season(showId: Int, number: Int): TmdbSeason =
         get("tv/$showId/season/$number", TmdbSeason.serializer())
 
+    /** The film's age ratings by country (France first when the age is read). */
+    suspend fun movieRatings(id: Int): List<CountryRating> =
+        get("movie/$id/release_dates", TmdbReleaseDates.serializer()).results.map { country ->
+            CountryRating(country.country, country.dates.map { it.certification }.firstOrNull { it.isNotBlank() }.orEmpty())
+        }
+
+    suspend fun showRatings(id: Int): List<CountryRating> =
+        get("tv/$id/content_ratings", TmdbContentRatings.serializer()).results.map { CountryRating(it.country, it.rating) }
+
     private suspend fun <T> get(
         path: String,
         deserializer: DeserializationStrategy<T>,
@@ -325,3 +334,21 @@ data class TmdbEpisode(
 object LocalImages {
     @Volatile var url: (String) -> String? = { null }
 }
+
+@Serializable
+private data class TmdbReleaseDates(val results: List<TmdbCountryDates> = emptyList())
+
+@Serializable
+private data class TmdbCountryDates(
+    @SerialName("iso_3166_1") val country: String,
+    @SerialName("release_dates") val dates: List<TmdbReleaseDate> = emptyList(),
+)
+
+@Serializable
+private data class TmdbReleaseDate(val certification: String = "")
+
+@Serializable
+private data class TmdbContentRatings(val results: List<TmdbContentRating> = emptyList())
+
+@Serializable
+private data class TmdbContentRating(@SerialName("iso_3166_1") val country: String, val rating: String = "")
