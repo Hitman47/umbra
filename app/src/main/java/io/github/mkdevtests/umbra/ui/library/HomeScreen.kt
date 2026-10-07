@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.runtime.derivedStateOf
 import io.github.mkdevtests.umbra.ui.theme.refocusIf
 import io.github.mkdevtests.umbra.ui.theme.menuKey
 import androidx.compose.foundation.shape.CircleShape
@@ -389,13 +390,15 @@ private enum class MovieView { Films, Sagas, Universes }
 @Composable
 private fun MovieGrid(library: Library, history: Map<String, Progress>, emptyText: String, links: TitleLinks, menu: (TitleTarget) -> Unit) {
     var view by rememberSaveable { mutableStateOf(MovieView.Films) }
-    val sagas = remember(library) { sagasOf(library) }
-    val universes = remember(library) { universesOf(library) }
+    val sagas = remember(library) { GridMemo.of("sagas", library) { sagasOf(library) } }
+    val universes = remember(library) { GridMemo.of("universes", library) { universesOf(library) } }
     val items = remember(library, history, view) {
-        when (view) {
-            MovieView.Films -> library.movies.map { movieItem(it, history) }
-            MovieView.Sagas -> sagas.map { sagaItem(it, history) }
-            MovieView.Universes -> universes.map { universeItem(it, history) }
+        GridMemo.of("movies", library, history, view) {
+            when (view) {
+                MovieView.Films -> library.movies.map { movieItem(it, history) }
+                MovieView.Sagas -> sagas.map { sagaItem(it, history) }
+                MovieView.Universes -> universes.map { universeItem(it, history) }
+            }
         }
     }
     PosterGrid(
@@ -424,6 +427,10 @@ private fun MovieGrid(library: Library, history: Map<String, Progress>, emptyTex
         },
     )
 }
+
+/** Rows a grid shows at once, about; the next [PREFETCH_ROWS] are fetched ahead. */
+private const val VISIBLE_ROWS = 3
+private const val PREFETCH_ROWS = 2
 
 /** Key prefix of a universe's poster: "universe:Batman". */
 private const val UNIVERSE = "universe:"
@@ -469,9 +476,9 @@ internal fun PosterGrid(
     var genre by rememberSaveable(noun) { mutableStateOf<String?>(null) }
     var decade by rememberSaveable(noun) { mutableStateOf<Int?>(null) }
     var lastOpened by rememberSaveable(noun) { mutableStateOf<String?>(null) }
-    val genres = remember(items) { items.flatMap { it.genres }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key to it.value } }
+    val genres = remember(items) { GridMemo.of("genres:$noun", items) { items.flatMap { it.genres }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key to it.value } } }
     val decades = remember(items) { items.mapNotNull { it.year?.let { year -> year / 10 * 10 } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.key }.map { it.key to it.value } }
-    val shown = remember(items, sort, seen, genre, decade) {
+    val shown = remember(items, sort, seen, genre, decade) { GridMemo.of("shown:$noun", items, sort, seen, genre, decade) {
         items.filter { item ->
             (seen == null || item.watched == seen) &&
                 (genre == null || genre in item.genres) &&
@@ -484,20 +491,20 @@ internal fun PosterGrid(
                 GridSort.Rating -> kept.sortedByDescending { it.rating ?: 0.0 }
             }
         }
-    }
+    } }
     val filtered = seen != null || genre != null || decade != null
     val scale = LocalCardScale.current
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     // In title order: the letters; in year order: the decades; else none.
-    val index = remember(shown, sort) {
+    val index = remember(shown, sort) { GridMemo.of("index:$noun", shown, sort) {
         when {
             shown.size < INDEX_BAR_MIN_ITEMS -> null
             sort == GridSort.Title -> LETTERS to letterPositions(shown.map { it.title })
             sort == GridSort.Year -> decadePositions(shown.map { it.year }).let { decades -> decades.keys.map { it.takeLast(2) } to decades.mapKeys { it.key.takeLast(2) } }
             else -> null
         }
-    }
+    } }
     Box(modifier = Modifier.fillMaxSize()) {
     LazyVerticalGrid(
         state = gridState,
@@ -573,6 +580,15 @@ internal fun PosterGrid(
             )
         }
     }
+    // The next rows' posters, fetched ahead while scrolling down.
+    val firstVisible by remember { derivedStateOf { gridState.firstVisibleItemIndex } }
+    val columns by remember { derivedStateOf { gridState.layoutInfo.visibleItemsInfo.groupBy { it.row }.values.maxOfOrNull { it.size } ?: 1 } }
+    val upcoming = remember(firstVisible, shown, columns) {
+        val headerItems = if (noun != null) 1 else 0
+        val after = (firstVisible - headerItems).coerceAtLeast(0) + columns * VISIBLE_ROWS
+        shown.drop(after).take(columns * PREFETCH_ROWS).mapNotNull { it.poster }
+    }
+    PrefetchPosters(upcoming)
     index?.let { (labels, positions) ->
         val header = if (noun != null) 1 else 0
         IndexBar(
@@ -675,10 +691,12 @@ private fun TraktBatteryBanner() {
 @Composable
 private fun ShowGrid(shows: List<Show>, history: Map<String, Progress>, emptyText: String, onOpenShow: (String) -> Unit, menu: (TitleTarget) -> Unit) {
     var kind by rememberSaveable { mutableStateOf<io.github.mkdevtests.umbra.library.ShowKind?>(null) }
-    val kinds = remember(shows) { shows.groupBy { it.kind() } }
-    val shown = remember(shows, kind) { if (kind == null) shows else kinds[kind].orEmpty() }
+    val kinds = remember(shows) { GridMemo.of("kinds", shows) { shows.groupBy { it.kind() } } }
+    val items = remember(shows, history, kind) {
+        GridMemo.of("shows", shows, history, kind) { showItems(if (kind == null) shows else kinds[kind].orEmpty(), history) }
+    }
     PosterGrid(
-        items = showItems(shown, history),
+        items = items,
         emptyText = emptyText,
         onClick = onOpenShow,
         noun = "série",

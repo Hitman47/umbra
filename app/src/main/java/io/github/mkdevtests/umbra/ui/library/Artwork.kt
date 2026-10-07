@@ -1,5 +1,6 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.remember
@@ -31,16 +32,46 @@ val PosterShape = RoundedCornerShape(14.dp)
 /** A grid card's usual width, in dp. */
 private const val POSTER_DP = 128
 
+/** A card's width in pixels decides TMDB's picture: sharp on a dense screen or a bigger card, light otherwise. */
+@Composable
+fun posterSize(): String {
+    val density = LocalDensity.current.density
+    val scale = io.github.mkdevtests.umbra.ui.theme.LocalCardScale.current
+    return if (POSTER_DP * scale * density > 300) "w500" else "w342"
+}
+
+/**
+ * While the remote (or a finger) moves down a grid, the posters of the next
+ * rows are fetched ahead into the disk cache, so that they show at once.
+ * [upcoming]: their TMDB paths, nearest first.
+ */
+@Composable
+fun PrefetchPosters(upcoming: List<String>) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val size = posterSize()
+    LaunchedEffect(upcoming, size) {
+        kotlinx.coroutines.delay(150) // only once the scroll pauses
+        val loader = coil3.SingletonImageLoader.get(context)
+        upcoming.forEach { path ->
+            Tmdb.image(path, size)?.let { url ->
+                loader.enqueue(
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(url)
+                        .memoryCachePolicy(coil3.request.CachePolicy.DISABLED)
+                        .build(),
+                )
+            }
+        }
+    }
+}
+
 /** 2:3 poster; shows the title on a plain card when TMDB has no artwork. */
 @Composable
 fun Poster(path: String?, title: String, modifier: Modifier = Modifier, size: String? = null) {
     val top = MaterialTheme.colorScheme.surfaceContainerHighest
     val bottom = MaterialTheme.colorScheme.surfaceContainer
     val fill = remember(top, bottom) { Brush.verticalGradient(listOf(top, bottom)) }
-    // A card's width in pixels decides TMDB's picture: sharp on a dense screen or a bigger card, light otherwise.
-    val density = LocalDensity.current.density
-    val scale = io.github.mkdevtests.umbra.ui.theme.LocalCardScale.current
-    val picture = size ?: if (POSTER_DP * scale * density > 300) "w500" else "w342"
+    val picture = size ?: posterSize()
     Box(
         modifier = modifier
             .aspectRatio(2f / 3f)
