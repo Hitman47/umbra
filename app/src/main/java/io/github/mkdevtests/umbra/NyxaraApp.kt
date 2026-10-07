@@ -165,7 +165,7 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
         catalog.syncIfDue()
         watchNetwork()
         watchForeground()
-        updater.check()
+        updater.checkIfDue()
     }
 
     /**

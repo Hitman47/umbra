@@ -70,6 +70,10 @@ fun UpdateBanner(updater: Updater) {
                 if (state is UpdateState.NeedsPermission) {
                     TextButton(onClick = { updater.openInstallSettings(context) }, modifier = Modifier.focusRing(RoundedCornerShape(50))) { Text("Autoriser") }
                 }
+                // The automatic way failing: the APK by hand, from GitHub's page.
+                if (state is UpdateState.Failed) {
+                    TextButton(onClick = { updater.openReleasesPage(context) }, modifier = Modifier.focusRing(RoundedCornerShape(50))) { Text("Ouvrir GitHub") }
+                }
                 if (state is UpdateState.Available || state is UpdateState.Failed || state is UpdateState.NeedsPermission) {
                     if (release.notes.isNotEmpty()) TextButton(onClick = { showNotes = true }, modifier = Modifier.focusRing(RoundedCornerShape(50))) { Text("Nouveautés") }
                     TextButton(onClick = { updater.install(release) }, modifier = Modifier.focusRing(RoundedCornerShape(50))) {

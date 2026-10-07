@@ -62,14 +62,36 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
     private val _lastCheck = MutableStateFlow<String?>(null)
     val lastCheck: StateFlow<String?> = _lastCheck.asStateFlow()
 
-    /** Looks for a newer release, quietly: no network, no release or a GitHub error just means no update. */
+    private val prefs = context.getSharedPreferences("updater", Context.MODE_PRIVATE)
+
+    /** At launch: once a day at most (GitHub limits the checks per home connection). */
+    fun checkIfDue() {
+        if (System.currentTimeMillis() - prefs.getLong(LAST_CHECK, 0) < AUTO_CHECK_MS) return
+        check()
+    }
+
+    /** Looks for a newer release; when GitHub can't be reached, says why. */
     fun check() {
         if (!BuildConfig.UPDATES) return
         if (_state.value is UpdateState.Downloading || _state.value is UpdateState.Installing) return
         scope.launch {
             apkFile.delete() // left over by an earlier update
             _lastCheck.value = "Recherche…"
-            runCatching { latestRelease() }
+            prefs.edit().putLong(LAST_CHECK, System.currentTimeMillis()).apply()
+            runCatching {
+                // GitHub's API first (with the notes); its quota spent or blocked: the releases page.
+                try {
+                    latestRelease()
+                } catch (api: Exception) {
+                    Log.w(TAG, "update check through the API failed", api)
+                    try {
+                        latestFromPage()
+                    } catch (page: Exception) {
+                        Log.w(TAG, "update check through the page failed", page)
+                        throw if (api.isQuota()) page else api
+                    }
+                }
+            }
                 .onSuccess { release ->
                     if (release != null && isNewer(release.version, BuildConfig.VERSION_NAME)) {
                         _state.value = UpdateState.Available(release)
@@ -78,10 +100,7 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
                         _lastCheck.value = "À jour"
                     }
                 }
-                .onFailure {
-                    Log.w(TAG, "update check failed", it)
-                    _lastCheck.value = "Impossible de joindre GitHub"
-                }
+                .onFailure { _lastCheck.value = whyUnreachable(it) }
         }
     }
 
@@ -156,6 +175,42 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
         }
     }
 
+    /**
+     * The latest release without GitHub's API (not limited like it): the
+     * releases page redirects to the latest tag, the APK has a fixed name.
+     */
+    private suspend fun latestFromPage(): Release? = withContext(Dispatchers.IO) {
+        val client = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        val request = Request.Builder().url("https://github.com/$REPOSITORY/releases/latest").build()
+        client.newCall(request).execute().use { response ->
+            if (response.code == 404) return@withContext null
+            val location = response.header("Location") ?: throw IOException("GitHub HTTP ${response.code}")
+            val tag = location.substringAfter("/releases/tag/", "").substringBefore('?').takeIf { it.isNotBlank() } ?: return@withContext null
+            Release(tag.removePrefix("v"), "", "https://github.com/$REPOSITORY/releases/download/$tag/$APK_NAME", size = 0)
+        }
+    }
+
+    private fun Throwable.isQuota() = message?.let { "HTTP 403" in it || "HTTP 429" in it } == true
+
+    /** What went wrong, in words the user can act on. */
+    private fun whyUnreachable(error: Throwable): String {
+        val chain = generateSequence(error) { it.cause }.toList()
+        return when {
+            error.isQuota() -> "GitHub limite les vérifications depuis ta connexion : réessaie dans une heure, ou ouvre la page GitHub"
+            chain.any { it is java.net.UnknownHostException } -> "Adresse de GitHub introuvable : pas d'internet, ou un filtre DNS (bloqueur de pub, DNS privé, contrôle parental) bloque github.com"
+            chain.any { it is java.security.cert.CertificateException || it is javax.net.ssl.SSLHandshakeException } ->
+                "Connexion sécurisée à GitHub refusée : vérifie la date et l'heure de l'appareil (ou un filtre qui intercepte le trafic)"
+            chain.any { it is java.net.SocketTimeoutException || it is java.net.ConnectException } -> "GitHub ne répond pas : réseau lent ou bloqué (Tailscale, VPN ?)"
+            chain.any { it is kotlinx.serialization.SerializationException } -> "Réponse de GitHub illisible"
+            else -> "Impossible de joindre GitHub (${error.message ?: error.javaClass.simpleName})"
+        }
+    }
+
+    /** The releases page, to download the APK by hand; false when no browser can open it (some TVs). */
+    fun openReleasesPage(from: Context): Boolean = runCatching {
+        from.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_PAGE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
+
     private suspend fun download(release: Release) = withContext(Dispatchers.IO) {
         _state.value = UpdateState.Downloading(release, 0f)
         http.newCall(Request.Builder().url(release.apkUrl).build()).execute().use { response ->
@@ -210,6 +265,10 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
         private const val TAG = "Updater"
         private const val INSTALL_TIMEOUT_MS = 60_000L
         const val REPOSITORY = "Hitman47/umbra"
+        const val RELEASES_PAGE = "https://github.com/$REPOSITORY/releases/latest"
+        private const val APK_NAME = "nyxara-release.apk"
+        private const val LAST_CHECK = "last_check"
+        private const val AUTO_CHECK_MS = 24 * 3600_000L
 
         /** "0.10.0" is newer than "0.9.2"; suffixes ("-debug") are ignored. */
         fun isNewer(candidate: String, installed: String): Boolean {

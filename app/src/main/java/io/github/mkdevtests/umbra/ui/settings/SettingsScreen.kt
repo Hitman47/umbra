@@ -424,6 +424,15 @@ fun SettingsScreen(
                                         Item("Version installée", "${BuildConfig.VERSION_NAME} · GitHub ${Updater.REPOSITORY}${lastCheck?.let { " · $it" } ?: ""}") {
                                             TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = updater::check) { Text("Rechercher") }
                                         }
+                                        val context = LocalContext.current
+                                        var noBrowser by remember { mutableStateOf(false) }
+                                        Item(
+                                            "Télécharger à la main",
+                                            if (noBrowser) "Aucun navigateur ici : sur un autre appareil, ouvre ${Updater.RELEASES_PAGE}, puis copie l'APK (Downloader, clé USB…)."
+                                            else "La page des versions sur GitHub, si la recherche ne passe pas : l'APK se télécharge et s'installe d'un toucher.",
+                                        ) {
+                                            TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { noBrowser = !updater.openReleasesPage(context) }) { Text("Ouvrir GitHub") }
+                                        }
                                     } else {
                                         Item("Version installée", "${BuildConfig.VERSION_NAME} · version de test, mise à jour par le PC")
                                     }
