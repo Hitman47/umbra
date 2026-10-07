@@ -31,6 +31,8 @@ class TraktSafetyTest {
                 "GET sync/watched/shows",
                 "GET sync/playback/movies",
                 "GET sync/playback/episodes",
+                "GET sync/watchlist/movies",
+                "GET sync/watchlist/shows",
                 "GET search/tmdb/{id}",
                 "GET shows/{id}/seasons/{season}/episodes/{episode}",
                 "GET shows/{id}/progress/watched",

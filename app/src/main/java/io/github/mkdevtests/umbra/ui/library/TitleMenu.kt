@@ -44,6 +44,8 @@ class TitleLinks(
     val onOpenShow: (String) -> Unit,
     val onOpenSaga: (Int) -> Unit = {},
     val onOpenUniverse: (String) -> Unit = {},
+    /** A title not in the library: its TMDB page, to search for it. */
+    val onOpenRemote: (Int, Boolean) -> Unit = { _, _ -> },
 )
 
 /**

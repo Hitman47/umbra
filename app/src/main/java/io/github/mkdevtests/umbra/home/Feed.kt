@@ -100,3 +100,51 @@ fun <T> forYou(
 }
 
 fun <T> atRandom(candidates: List<T>, seed: Long, count: Int = 15): List<T> = candidates.shuffled(Random(seed)).take(count)
+
+/** A show followed with episodes arrived since it was last watched: the row "Nouveaux épisodes". */
+data class NewEpisodes(val show: Show, val episodes: List<Episode>, val newSeason: Int?, val arrived: Long) {
+    /** In the poster's corner: "Saison 3", "S02E05", "4 nouveaux". */
+    val badge get() = when {
+        newSeason != null -> "Saison $newSeason"
+        episodes.size == 1 -> "S%02dE%02d".format(episodes[0].season, episodes[0].number)
+        else -> "${episodes.size} nouveaux"
+    }
+}
+
+/**
+ * The shows already watched (at least one episode started) that got episodes
+ * on the NAS after the last time one was played, not watched yet, arrived
+ * within [maxAgeMs]; a season none of whose episodes was watched yet is a
+ * new season. Latest arrival first.
+ */
+fun newEpisodes(library: Library, history: Map<String, Progress>, now: Long, maxAgeMs: Long = 45L * 24 * 3600_000): List<NewEpisodes> =
+    library.shows.mapNotNull { show ->
+        val all = show.regularEpisodes()
+        val seen = all.mapNotNull { episode -> history[episode.file]?.let { episode to it } }
+        if (seen.isEmpty()) return@mapNotNull null
+        val lastSeen = seen.maxOf { it.second.updatedAt }
+        val fresh = all.filter { it.modified > lastSeen && now - it.modified < maxAgeMs && history[it.file]?.watched != true }
+        if (fresh.isEmpty()) return@mapNotNull null
+        val seasonsSeen = seen.map { it.first.season }.toSet()
+        val newSeason = fresh.map { it.season }.filter { it !in seasonsSeen && it > (seasonsSeen.maxOrNull() ?: 0) }.minOrNull()
+        NewEpisodes(show, fresh, newSeason, fresh.maxOf { it.modified })
+    }.sortedByDescending { it.arrived }
+
+/** A title of the Trakt watchlist: in the library (to play) or not (its page, to search for it). */
+data class Wish(val tmdbId: Int, val isShow: Boolean, val title: String, val year: Int?, val movie: Movie? = null, val show: Show? = null) {
+    val owned get() = movie != null || show != null
+}
+
+/** The watchlist ([wishes], latest first): the titles on the NAS first, then the others. */
+fun watchlistRow(library: Library, wishes: List<io.github.mkdevtests.umbra.trakt.TraktWish>): List<Wish> {
+    val movies = library.movies.filter { it.tmdbId != null }.associateBy { it.tmdbId }
+    val shows = library.shows.filter { it.tmdbId != null }.associateBy { it.tmdbId }
+    val all = wishes.map { wish ->
+        Wish(
+            wish.tmdbId, wish.isShow, wish.title, wish.year,
+            movie = if (wish.isShow) null else movies[wish.tmdbId],
+            show = if (wish.isShow) shows[wish.tmdbId] else null,
+        )
+    }
+    return all.filter { it.owned } + all.filterNot { it.owned }
+}

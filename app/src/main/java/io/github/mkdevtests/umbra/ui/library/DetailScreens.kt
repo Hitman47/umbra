@@ -106,7 +106,7 @@ class DetailLinks(
     /** A title the library doesn't have, by its TMDB id: its page. */
     val onOpenRemote: (Int, Boolean) -> Unit = { _, _ -> },
 ) {
-    val titleLinks get() = TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse)
+    val titleLinks get() = TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse, onOpenRemote)
 }
 
 @Composable

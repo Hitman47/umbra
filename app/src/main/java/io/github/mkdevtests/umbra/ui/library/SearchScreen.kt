@@ -93,6 +93,15 @@ fun SearchScreen(
         }
     }
 
+    // Asked by the remote's search key or the voice assistant.
+    val dictateNow by io.github.mkdevtests.umbra.SearchRequests.dictate.collectAsState()
+    LaunchedEffect(dictateNow) {
+        if (dictateNow) {
+            io.github.mkdevtests.umbra.SearchRequests.dictate.value = false
+            startDictation()
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
             value = query,

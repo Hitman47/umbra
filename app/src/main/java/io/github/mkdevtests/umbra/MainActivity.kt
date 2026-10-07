@@ -1,5 +1,13 @@
 package io.github.mkdevtests.umbra
 
+import kotlinx.coroutines.delay
+import io.github.mkdevtests.umbra.home.continueWatching
+import io.github.mkdevtests.umbra.tv.WatchNext
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.MutableStateFlow
+import android.view.KeyEvent
+import android.content.Intent
+import android.app.SearchManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -53,6 +61,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) handleSearch(intent)
         enableEdgeToEdge()
         setContent {
             NyxaraTheme {
@@ -65,6 +74,49 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleSearch(intent)
+    }
+
+    /** "Cherche … sur Nyxara" (the voice assistant), or the system's search: the search tab with the words said. */
+    private fun handleSearch(intent: Intent?) {
+        // A card of the TV's "Continuer à regarder" row.
+        if (intent?.action == WatchNext.ACTION_PLAY) {
+            intent.getStringExtra(WatchNext.EXTRA_FILE)?.let { SearchRequests.play.value = it }
+            return
+        }
+        if (intent?.action != Intent.ACTION_SEARCH && intent?.action != SEARCH_ACTION) return
+        val query = intent.getStringExtra(SearchManager.QUERY)?.trim().orEmpty()
+        SearchRequests.pending.value = SearchRequest(query, voice = query.isEmpty())
+    }
+
+    /** The remote's search (or microphone) key: the search tab, listening at once. */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_SEARCH || keyCode == KeyEvent.KEYCODE_VOICE_ASSIST) {
+            SearchRequests.pending.value = SearchRequest("", voice = true)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private companion object {
+        const val SEARCH_ACTION = "com.google.android.gms.actions.SEARCH_ACTION"
+    }
+}
+
+/** A search asked from outside the search tab: words to look for, or the dictation to start. */
+data class SearchRequest(val query: String, val voice: Boolean)
+
+object SearchRequests {
+    val pending = MutableStateFlow<SearchRequest?>(null)
+
+    /** A file to play as soon as the library knows it (from the TV's home screen). */
+    val play = MutableStateFlow<String?>(null)
+
+    /** Read by the search tab once it shows: start the dictation. */
+    val dictate = MutableStateFlow(false)
 }
 
 /** Screens stacked above the home screen. */
@@ -96,6 +148,18 @@ private fun NyxaraRoot(
     var editingSource by rememberSaveable { mutableStateOf(if (browserViewModel.hasSource) null else "") }
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     val stack = remember { mutableStateListOf<Detail>() }
+    // A search from the remote's key or the voice assistant.
+    val searchRequest by SearchRequests.pending.collectAsState()
+    LaunchedEffect(searchRequest) {
+        val request = searchRequest ?: return@LaunchedEffect
+        SearchRequests.pending.value = null
+        if (editingSource != null) return@LaunchedEffect
+        libraryViewModel.searchFilters.value = SearchFilters()
+        libraryViewModel.searchQuery.value = request.query
+        tab = HomeTab.Search
+        stack.clear()
+        if (request.voice) SearchRequests.dictate.value = true
+    }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) context.startActivity(PlayerActivity.intent(context, uri.toString(), uri.lastPathSegment ?: "Vidéo"))
     }
@@ -122,6 +186,26 @@ private fun NyxaraRoot(
     val sources by browserViewModel.sourceList.collectAsState()
     // Read here so that a scan redraws the open detail screen with the new library.
     val library by libraryViewModel.library.collectAsState()
+    // The TV's "Continuer à regarder" row follows the home screen's.
+    val watchHistory by libraryViewModel.history.collectAsState()
+    LaunchedEffect(library, watchHistory) {
+        delay(3_000) // once things settle
+        WatchNext.publish(context, continueWatching(library, watchHistory))
+    }
+    // A card of that row: played once the library is read.
+    val playRequest by SearchRequests.play.collectAsState()
+    LaunchedEffect(playRequest, library) {
+        val file = playRequest ?: return@LaunchedEffect
+        val movie = library.movies.firstOrNull { it.file == file }
+        val show = library.shows.firstOrNull { show -> show.seasons.any { season -> season.episodes.any { it.file == file } } }
+        val intent = when {
+            movie != null -> libraryViewModel.playIntent(movie)
+            show != null -> libraryViewModel.playIntent(show, show.seasons.flatMap { it.episodes }.first { it.file == file })
+            else -> return@LaunchedEffect // not read yet: tried again with the library
+        }
+        SearchRequests.play.value = null
+        context.startActivity(intent)
+    }
     val moved by libraryViewModel.movedShows.collectAsState()
     // A corrected show changes key ("tmdb:2" → "tmdb:1"): its page stays open on the new one.
     fun showOf(key: String) = library.shows.firstOrNull { it.key == key } ?: moved[key]?.let { now -> library.shows.firstOrNull { it.key == now } }
@@ -156,6 +240,7 @@ private fun NyxaraRoot(
                 onOpenShow = { stack.add(Detail.ShowDetail(it)) },
                 onOpenSaga = { stack.add(Detail.Saga(it)) },
                 onOpenUniverse = { stack.add(Detail.Universe(it)) },
+                onOpenRemote = { id, isShow -> stack.add(Detail.Remote(id, isShow)) },
                 onOpenShortcut = { stack.add(Detail.Shortcut(it)) },
                 onPickLocalFile = { pickFile.launch(arrayOf("video/*")) },
                 onOpenSettings = { stack.add(Detail.Settings) },

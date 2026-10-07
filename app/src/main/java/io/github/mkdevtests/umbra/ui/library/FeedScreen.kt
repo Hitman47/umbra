@@ -1,5 +1,12 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import io.github.mkdevtests.umbra.ui.theme.isTv
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.animation.Crossfade
+import androidx.compose.runtime.collectAsState
+import io.github.mkdevtests.umbra.home.watchlistRow
+import io.github.mkdevtests.umbra.home.newEpisodes
 import io.github.mkdevtests.umbra.ui.theme.refocusIf
 import io.github.mkdevtests.umbra.ui.theme.menuKey
 import io.github.mkdevtests.umbra.ui.theme.LocalCardScale
@@ -120,6 +127,16 @@ fun FeedScreen(
     val showByKey = remember(library) { library.shows.associateBy { it.key } }
     val resume = remember(library, history) { continueWatching(library, history) }
     val fresh = remember(library) { newest(library) }
+    val arrivals = remember(library, history) { newEpisodes(library, history, System.currentTimeMillis()) }
+    val wishes by viewModel.watchlist.collectAsState()
+    val wishRow = remember(library, wishes) { watchlistRow(library, wishes) }
+    // The posters of the titles not in the library, from TMDB (kept a week on the device).
+    var remotePosters by remember { mutableStateOf<Map<Int, String?>>(emptyMap()) }
+    LaunchedEffect(wishRow) {
+        wishRow.filterNot { it.owned || it.tmdbId in remotePosters }.take(WISH_POSTERS).forEach { wish ->
+            remotePosters = remotePosters + (wish.tmdbId to viewModel.remote(wish.tmdbId, wish.isShow)?.poster)
+        }
+    }
     val taste = remember(library, history) { taste(library, history) }
     var movieMode by rememberSaveable { mutableStateOf(Selection.ForYou) }
     var movieSeed by rememberSaveable { mutableLongStateOf(Random.nextLong()) }
@@ -213,19 +230,67 @@ fun FeedScreen(
         return PosterItem(pick.key, pick.title, movie?.year ?: show?.year, pick.poster, badge = badge)
     }
 
+    // TV: the top of the screen describes the card the remote is on (after a short pause on it).
+    val tv = isTv()
+    fun spotlightOf(key: String?): Spotlight? {
+        key ?: return null
+        resume.firstOrNull { it.file == key }?.let { item ->
+            return Spotlight(
+                kicker = if (item.progress != null) "EN COURS" else "À SUIVRE",
+                title = item.movie?.title ?: item.show!!.title,
+                meta = describe(item),
+                overview = item.episode?.overview ?: item.movie?.overview ?: item.show?.overview,
+                backdrop = item.movie?.backdrop ?: item.show?.backdrop,
+                progress = item.progress?.fraction,
+            )
+        }
+        movieByFile[key]?.let { movie ->
+            return Spotlight(
+                kicker = "FILM",
+                title = movie.title,
+                meta = (listOfNotNull(movie.year?.toString(), formatRuntime(movie.runtime), formatRating(movie.rating)) + movie.genres.take(2)).joinToString("  ·  "),
+                overview = movie.overview,
+                backdrop = movie.backdrop,
+                progress = history[movie.file]?.takeIf { it.inProgress }?.fraction,
+            )
+        }
+        showByKey[key]?.let { show ->
+            val seasons = show.seasons.count { it.number > 0 }
+            return Spotlight(
+                kicker = "SÉRIE",
+                title = show.title,
+                meta = (listOfNotNull(show.year?.toString(), "$seasons saison${if (seasons > 1) "s" else ""}", formatRating(show.rating)) + show.genres.take(2)).joinToString("  ·  "),
+                overview = show.overview,
+                backdrop = show.backdrop,
+                progress = null,
+            )
+        }
+        return null
+    }
+    var spotKey by remember { mutableStateOf<String?>(null) }
+    var shownKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(spotKey) {
+        delay(SPOTLIGHT_DELAY_MS) // the remote held down: no flicker
+        if (spotKey != null && spotlightOf(spotKey) != null) shownKey = spotKey
+    }
+    val spotlight = if (tv) spotlightOf(shownKey) ?: spotlightOf(resume.firstOrNull()?.file) ?: spotlightOf(fresh.firstOrNull()?.key) else null
+    fun Modifier.spot(key: String): Modifier = if (tv) onFocusChanged { if (it.isFocused) spotKey = key } else this
+
+    Column(modifier = Modifier.fillMaxSize()) {
+    if (tv) TvSpotlight(spotlight, Modifier.fillMaxWidth().fillMaxHeight(SPOTLIGHT_HEIGHT))
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
+        modifier = Modifier.fillMaxWidth().weight(1f),
+        contentPadding = PaddingValues(top = if (tv) 8.dp else 0.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        if (featured.isNotEmpty()) item { HeroPager(featured, wide) }
+        if (featured.isNotEmpty() && !tv) item { HeroPager(featured, wide) }
         if (shortcuts.isNotEmpty()) item { Shortcuts(shortcuts, onOpenShortcut) }
         if (resume.isNotEmpty()) {
             item {
                 Shelf("Lecture en cours", onMore = { onOpenShelf("resume") }) {
                     items(resume, key = { it.file }) { item ->
                         ResumeCard(
-                            item, wide,
+                            item, wide, Modifier.spot(item.file),
                             onOpen = { item.movie?.let { onOpenMovie(it.file) } ?: onOpenShow(item.show!!.key) },
                             onPlay = { play(item) },
                             onLongPress = {
@@ -236,8 +301,49 @@ fun FeedScreen(
                 }
             }
         }
+        if (arrivals.isNotEmpty()) {
+            item {
+                Shelf("Nouveaux épisodes") {
+                    items(arrivals, key = { it.show.key }) { arrival ->
+                        val show = arrival.show
+                        PosterCard(
+                            PosterItem(show.key, show.title, show.year, show.poster, badge = arrival.badge, isShow = true),
+                            { lastOpened = "arrivals" + show.key; onOpenShow(show.key) },
+                            Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "arrivals" + show.key).spot(show.key),
+                            onLongClick = { onLongPress(TitleTarget(show.key, isShow = true)) },
+                        )
+                    }
+                }
+            }
+        }
         if (fresh.isNotEmpty()) {
-            item { Shelf("Ajouts récents", onMore = { onOpenShelf("fresh") }) { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it, "fresh") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "fresh" + it.key), onLongClick = { press(it) }) } } }
+            item { Shelf("Ajouts récents", onMore = { onOpenShelf("fresh") }) { items(fresh, key = { it.key }) { PosterCard(posterOf(it), { open(it, "fresh") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "fresh" + it.key).spot(it.key), onLongClick = { press(it) }) } } }
+        }
+        if (wishRow.isNotEmpty()) {
+            item {
+                Shelf("À voir · Trakt") {
+                    items(wishRow, key = { (if (it.isShow) "t:" else "m:") + it.tmdbId }) { wish ->
+                        val key = (if (wish.isShow) "t:" else "m:") + wish.tmdbId
+                        val badge = when {
+                            wish.movie != null -> seenOf(wish.movie, history).badge
+                            wish.show != null -> seenOf(wish.show, history).badge
+                            else -> "À chercher"
+                        }
+                        PosterCard(
+                            PosterItem(key, wish.title, wish.year, wish.movie?.poster ?: wish.show?.poster ?: remotePosters[wish.tmdbId], badge = badge, isShow = wish.isShow),
+                            {
+                                lastOpened = "wish$key"
+                                when {
+                                    wish.movie != null -> onOpenMovie(wish.movie.file)
+                                    wish.show != null -> onOpenShow(wish.show.key)
+                                    else -> links.onOpenRemote(wish.tmdbId, wish.isShow)
+                                }
+                            },
+                            Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "wish$key").spot(wish.movie?.file ?: wish.show?.key ?: key),
+                        )
+                    }
+                }
+            }
         }
         if (movies.isNotEmpty()) {
             item {
@@ -247,7 +353,7 @@ fun FeedScreen(
                     mode = movieMode,
                     onMode = { movieMode = it; movieSeed = Random.nextLong() },
                     onRefresh = { movieSeed = Random.nextLong() },
-                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it, "movies") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "movies" + it.key), onLongClick = { press(it) }) } }
+                ) { items(movies, key = { it.key }) { PosterCard(posterOf(it), { open(it, "movies") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "movies" + it.key).spot(it.key), onLongClick = { press(it) }) } }
             }
         }
         if (shows.isNotEmpty()) {
@@ -258,7 +364,7 @@ fun FeedScreen(
                     mode = showMode,
                     onMode = { showMode = it; showSeed = Random.nextLong() },
                     onRefresh = { showSeed = Random.nextLong() },
-                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it, "shows") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "shows" + it.key), onLongClick = { press(it) }) } }
+                ) { items(shows, key = { it.key }) { PosterCard(posterOf(it), { open(it, "shows") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "shows" + it.key).spot(it.key), onLongClick = { press(it) }) } }
             }
         }
         if (sagas.isNotEmpty()) {
@@ -275,9 +381,10 @@ fun FeedScreen(
         }
         genres.forEach { (genre, picks) ->
             item(key = "genre:$genre") {
-                Shelf(genre, onMore = { onOpenShelf("genre:$genre") }) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it, "genre:$genre") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "genre:$genre" + it.key), onLongClick = { press(it) }) } }
+                Shelf(genre, onMore = { onOpenShelf("genre:$genre") }) { items(picks, key = { it.key }) { PosterCard(posterOf(it), { open(it, "genre:$genre") }, Modifier.width(POSTER * LocalCardScale.current).refocusIf(lastOpened == "genre:$genre" + it.key).spot(it.key), onLongClick = { press(it) }) } }
             }
         }
+    }
     }
 }
 
@@ -286,6 +393,63 @@ enum class Selection(val label: String) { ForYou("Pour toi"), Random("Au hasard"
 private val POSTER = 132.dp
 private const val HERO_PAGES = 6
 private const val GENRE_ROWS = 4
+private const val WISH_POSTERS = 20
+private const val SPOTLIGHT_DELAY_MS = 300L
+private const val SPOTLIGHT_HEIGHT = 0.46f
+
+/** What the TV's top of screen says of the card the remote is on. */
+private data class Spotlight(
+    val kicker: String,
+    val title: String,
+    val meta: String,
+    val overview: String?,
+    val backdrop: String?,
+    val progress: Float?,
+)
+
+/** TV: the backdrop of the card the remote is on, its title, details and summary; it changes with the card. */
+@Composable
+private fun TvSpotlight(item: Spotlight?, modifier: Modifier) {
+    val background = MaterialTheme.colorScheme.background
+    Crossfade(item, modifier = modifier, label = "spotlight") { current ->
+        Box(modifier = Modifier.fillMaxSize()) {
+            current?.backdrop?.let {
+                AsyncImage(
+                    model = Tmdb.image(it, "w1280"),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().fillMaxWidth(0.72f),
+                )
+            }
+            Box(modifier = Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to background, 0.3f to background.copy(alpha = 0.8f), 0.62f to Color.Transparent)))
+            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to background)))
+            if (current != null) {
+                Column(
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 40.dp, end = 24.dp, top = 16.dp).widthIn(max = 580.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(current.kicker, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(current.title, style = MaterialTheme.typography.displaySmall, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (current.meta.isNotEmpty()) {
+                        Text(current.meta, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    current.overview?.let {
+                        Text(it, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.8f), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                    current.progress?.let {
+                        LinearProgressIndicator(
+                            progress = { it },
+                            modifier = Modifier.width(220.dp).height(4.dp).clip(RoundedCornerShape(2.dp)),
+                            trackColor = Color.White.copy(alpha = 0.2f),
+                            strokeCap = StrokeCap.Round,
+                            drawStopIndicator = {},
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 /** The banner: one large backdrop at a time, turning by itself every few seconds. */
 @Composable
@@ -374,9 +538,9 @@ private fun HeroPage(item: Featured, wide: Boolean) {
 
 /** A film or episode under way: its picture, how far it went, what's left. A touch opens its page, ▶ plays it. */
 @Composable
-private fun ResumeCard(item: Resume, wide: Boolean, onOpen: () -> Unit, onPlay: () -> Unit, onLongPress: () -> Unit) {
+private fun ResumeCard(item: Resume, wide: Boolean, modifier: Modifier, onOpen: () -> Unit, onPlay: () -> Unit, onLongPress: () -> Unit) {
     Column(
-        modifier = Modifier.width((if (wide) 300.dp else 260.dp) * LocalCardScale.current).focusRing(RoundedCornerShape(16.dp)).menuKey(onLongPress).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
+        modifier = modifier.width((if (wide) 300.dp else 260.dp) * LocalCardScale.current).focusRing(RoundedCornerShape(16.dp)).menuKey(onLongPress).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(

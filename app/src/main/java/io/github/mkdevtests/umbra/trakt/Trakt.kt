@@ -63,7 +63,20 @@ data class TraktData(
     val activities: TraktLastActivities? = null,
     /** Watched shows by TMDB id, with the episodes once downloaded. */
     val shows: Map<Int, TraktShowState> = emptyMap(),
+    /** The watchlist ("À voir"), latest added first. */
+    val watchlist: List<TraktWish> = emptyList(),
 )
+
+/** A title of the watchlist, by its TMDB id. */
+@Serializable
+data class TraktWish(val tmdbId: Int, val isShow: Boolean, val title: String, val year: Int? = null, val listedAt: Long = 0)
+
+/** The activities that change what was watched (the watchlist's date left out: it has its own download). */
+private fun TraktLastActivities.ofWatched() = copy(
+    movies = movies.copy(watchlistedAt = null), shows = shows.copy(watchlistedAt = null), episodes = episodes.copy(watchlistedAt = null),
+)
+
+private fun TraktLastActivities.watchlistStamp() = listOf(movies.watchlistedAt, shows.watchlistedAt)
 
 /** A watched show: its episodes are downloaded again only when [lastWatchedAt] or [resetAt] moves. */
 @Serializable
@@ -339,7 +352,7 @@ class Trakt(private val context: Context, private val api: TraktApi) {
         val old = _data.value
         var data = old
         // An empty show list is a cache from before the show index: download it again.
-        if (force || activities != old.activities || old.shows.isEmpty()) {
+        if (force || activities.ofWatched() != old.activities?.ofWatched() || old.shows.isEmpty()) {
             val watched = HashMap<String, Long>()
             val movies = api.watchedMovies(token)
             movies.forEach { item ->
@@ -361,8 +374,17 @@ class Trakt(private val context: Context, private val api: TraktApi) {
                     ?: return@forEach
                 playback[key] = TraktResume(item.progress, millis(item.pausedAt))
             }
-            data = TraktData(watched, playback, activities, shows)
+            data = TraktData(watched, playback, activities, shows, old.watchlist)
             Log.i(TAG, "synced: ${movies.size} films, ${shows.size} shows, ${playback.size} resume points")
+        }
+        // The watchlist, when it changed (or never read).
+        if (force || old.activities?.watchlistStamp() != activities.watchlistStamp() || (old.watchlist.isEmpty() && old.activities == null)) {
+            val wishes = api.watchlist(token).mapNotNull { item ->
+                val media = item.movie ?: item.show ?: return@mapNotNull null
+                val tmdb = media.ids.tmdb ?: return@mapNotNull null
+                TraktWish(tmdb, isShow = item.show != null, title = media.title.orEmpty(), year = media.year, listedAt = item.listedAt?.let(::millis) ?: 0)
+            }.sortedByDescending { it.listedAt }
+            data = data.copy(watchlist = wishes, activities = activities)
         }
         // Episodes come show by show, only for the shows of the library that changed.
         val wanted = libraryShows

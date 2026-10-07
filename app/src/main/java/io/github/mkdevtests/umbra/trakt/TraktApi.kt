@@ -34,6 +34,8 @@ enum class TraktEndpoint(val method: String, val path: String) {
     WatchedShows("GET", "sync/watched/shows"),
     PlaybackMovies("GET", "sync/playback/movies"),
     PlaybackEpisodes("GET", "sync/playback/episodes"),
+    WatchlistMovies("GET", "sync/watchlist/movies"),
+    WatchlistShows("GET", "sync/watchlist/shows"),
     ShowByTmdb("GET", "search/tmdb/{id}"),
     Episode("GET", "shows/{id}/seasons/{season}/episodes/{episode}"),
     ShowProgress("GET", "shows/{id}/progress/watched"),
@@ -93,6 +95,10 @@ class TraktApi(
     suspend fun playbackMovies(token: String): List<TraktPlayback> = all(TraktEndpoint.PlaybackMovies, token, TraktPlayback.serializer())
 
     suspend fun playbackEpisodes(token: String): List<TraktPlayback> = all(TraktEndpoint.PlaybackEpisodes, token, TraktPlayback.serializer())
+
+    /** The titles put aside to watch ("À voir"), read only. */
+    suspend fun watchlist(token: String): List<TraktListed> =
+        all(TraktEndpoint.WatchlistMovies, token, TraktListed.serializer()) + all(TraktEndpoint.WatchlistShows, token, TraktListed.serializer())
 
     /**
      * Every page of a list: without paging parameters Trakt may answer with
@@ -295,6 +301,15 @@ data class TraktActivity(
     @SerialName("watched_at") val watchedAt: String? = null,
     @SerialName("paused_at") val pausedAt: String? = null,
     @SerialName("hidden_at") val hiddenAt: String? = null,
+    @SerialName("watchlisted_at") val watchlistedAt: String? = null,
+)
+
+/** A title of the watchlist. */
+@Serializable
+data class TraktListed(
+    @SerialName("listed_at") val listedAt: String? = null,
+    val movie: TraktMedia? = null,
+    val show: TraktMedia? = null,
 )
 
 /** A film by its TMDB id, or an episode by its Trakt id. */

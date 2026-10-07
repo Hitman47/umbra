@@ -123,6 +123,7 @@ fun HomeScreen(
     onOpenShow: (String) -> Unit,
     onOpenSaga: (Int) -> Unit,
     onOpenUniverse: (String) -> Unit,
+    onOpenRemote: (Int, Boolean) -> Unit = { _, _ -> },
     onOpenShortcut: (String) -> Unit,
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -136,7 +137,7 @@ fun HomeScreen(
         val content: @Composable (Modifier) -> Unit = { modifier ->
             HomeContent(
                 libraryViewModel, browserViewModel, updater, tab, wide,
-                TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse), onOpenShortcut, onPickLocalFile, onOpenSettings, modifier,
+                TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse, onOpenRemote), onOpenShortcut, onPickLocalFile, onOpenSettings, modifier,
                 documentaryFolders = settings.documentaryFolders,
                 onTabChange = onTabChange,
                 onOpenShelf = onOpenShelf,

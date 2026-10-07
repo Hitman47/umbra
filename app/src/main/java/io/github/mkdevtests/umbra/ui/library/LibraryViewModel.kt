@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
@@ -50,6 +52,10 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.Eagerly, nyxara.history.progress.value)
     val hidden: StateFlow<Set<String>> = nyxara.hidden.keys
+
+    /** The Trakt watchlist ("À voir"), latest added first. */
+    val watchlist: StateFlow<List<io.github.mkdevtests.umbra.trakt.TraktWish>> =
+        nyxara.trakt.data.map { it.watchlist }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, nyxara.trakt.data.value.watchlist)
 
     /** folder.jpg and the like, found next to the videos by the last scan. */
     val localArt = repository.localArt
