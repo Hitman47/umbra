@@ -176,7 +176,7 @@ class LocalStreamServer(
 
         val stat = stats.getOrPut(target.key) { StreamStats() }
         val opening = System.nanoTime()
-        val (file, opened) = try {
+        val (handle, opened) = try {
             target.pool.acquire()
         } catch (first: Exception) {
             // Handles kept from before (connection lost meanwhile): once more, from scratch.
@@ -191,11 +191,20 @@ class LocalStreamServer(
             }
         }
         if (opened) stat.opened(System.nanoTime() - opening) else stat.reused()
+        var file = handle
         val size = try {
             file.size
-        } catch (e: Exception) {
+        } catch (first: Exception) {
+            // A handle kept from before, its connection closed by the NAS meanwhile: a fresh one.
             target.pool.discard(file)
-            return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
+            try {
+                file = target.pool.acquire().first
+                file.size
+            } catch (e: Exception) {
+                runCatching { target.pool.discard(file) }
+                Log.w(TAG, "size of ${target.key}", e)
+                return text(Response.Status.INTERNAL_ERROR, e.toUserMessage())
+            }
         }
         stat.size = size
 
@@ -435,7 +444,17 @@ private class ReadAheadStream(
                 val result: Any = try {
                     // Opening another handle may fail too: the player then gets the error, not a wait.
                     val handle = file ?: pool.acquire().first.also { file = it }
-                    read(handle, index)
+                    try {
+                        read(handle, index)
+                    } catch (e: Exception) {
+                        // The NAS closed the connection under a handle kept open (asleep, restarted,
+                        // Wi-Fi gone a moment): a fresh handle, on a new connection, once.
+                        if (stopped || e.isRefusedByNas()) throw e
+                        Log.w("ReadAheadStream", "read failed, reopening", e)
+                        file = null
+                        pool.discard(handle)
+                        read(pool.acquire().first.also { file = it }, index)
+                    }
                 } catch (e: Throwable) {
                     failed = true
                     e

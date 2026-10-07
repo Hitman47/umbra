@@ -142,7 +142,16 @@ class SmbNas(override val source: NasSource) : NasClient {
                 invalidate(name)
             }
         }
-        return block(connect(name))
+        return try {
+            block(connect(name))
+        } catch (e: Exception) {
+            // A connection closed by the NAS as it opened (waking up, too many at once): once more, a moment later.
+            if (e.isRefusedByNas() || generateSequence<Throwable>(e) { it.cause }.none { it is TransportException || it is java.io.EOFException }) throw e
+            Log.w(TAG, "connection to $name closed by the NAS, retrying", e)
+            invalidate(name)
+            Thread.sleep(RETRY_DELAY_MS)
+            block(connect(name))
+        }
     }
 
     @Synchronized
@@ -217,6 +226,7 @@ class SmbNas(override val source: NasSource) : NasClient {
 
     private companion object {
         const val ADDRESS_TTL = 60_000L
+        const val RETRY_DELAY_MS = 1_500L
         const val TAG = "SmbNas"
     }
 }
@@ -235,6 +245,9 @@ fun Throwable.toUserMessage(): String {
         generateSequence(this) { it.cause }.any { it is UnknownHostException } -> "Adresse du NAS inconnue."
         generateSequence(this) { it.cause }.any { it is ConnectException || it is SocketTimeoutException } ->
             "NAS injoignable : vérifie l'adresse et le réseau (Wi-Fi ou Tailscale)."
+        // The NAS closed the connection: asleep, restarting, or too many connections at once.
+        generateSequence(this) { it.cause }.any { it is java.io.EOFException || it is TransportException } ->
+            "Connexion fermée par le NAS (veille, redémarrage, trop de connexions, ou NAS limité au vieux SMB1). Réessaie dans un instant."
         else -> message ?: javaClass.simpleName
     }
 }
