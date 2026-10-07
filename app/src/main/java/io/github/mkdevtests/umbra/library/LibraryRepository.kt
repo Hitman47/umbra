@@ -89,6 +89,9 @@ class LibraryRepository(private val app: NyxaraApp) {
         }
     }
 
+    /** The Spectacles and Concerts folders, read as films with their artist. */
+    private fun sectionRoots() = app.settings.settings.value.let { it.spectacleFolders + it.concertFolders }
+
     /** An absent title's page: kept a week, else from TMDB; null offline. */
     suspend fun remote(tmdbId: Int, isShow: Boolean): RemoteTitle? = remoteTitles.get(tmdbId, isShow)
         ?: runCatching { (if (isShow) tmdb.show(tmdbId).toRemote() else tmdb.movie(tmdbId).toRemote()).also(remoteTitles::put) }
@@ -240,7 +243,7 @@ class LibraryRepository(private val app: NyxaraApp) {
                 val fixes = app.matchFixes.load()
                 val again = synchronized(rematch) { rematch.toSet() }
                 val numberings = NumberingCache(File(app.filesDir, "tvdb-numbering.json"))
-                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings) { _scan.value = ScanState(running = true, progress = it) }
+                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings, sectionRoots = sectionRoots()) { _scan.value = ScanState(running = true, progress = it) }
                 val before = _library.value
                 val result = scanner.rematch(before, groups, tmdbId).copy(scannedAt = System.currentTimeMillis())
                 _library.value = result
@@ -340,7 +343,7 @@ class LibraryRepository(private val app: NyxaraApp) {
                 val again = synchronized(rematch) { rematch.toSet() }
                 val numberings = NumberingCache(File(app.filesDir, "tvdb-numbering.json"))
                 var shownAt = 0L
-                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings, gentle) { progress ->
+                val scanner = LibraryScanner(nas, tmdb, fixes, again, tvdb, numberings, gentle, sectionRoots()) { progress ->
                     // Twice a second at most: each message redraws the home screen.
                     val now = System.currentTimeMillis()
                     if (now - shownAt >= PROGRESS_EVERY_MS) {

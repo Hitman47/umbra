@@ -297,9 +297,16 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     fun setRole(sourceId: String, share: String, sub: String, role: io.github.mkdevtests.umbra.nas.FolderRole, siblings: List<String>) {
         val source = nas?.sources?.firstOrNull { it.id == sourceId } ?: return
         val others = nas?.sources.orEmpty().filter { it.id != sourceId }
-        val change = io.github.mkdevtests.umbra.nas.withRole(source, others, share, sub, role, settings.settings.value.documentaryFolders, siblings) ?: return
-        if (change.documentaries != settings.settings.value.documentaryFolders) settings.update { it.copy(documentaryFolders = change.documentaries) }
-        if (change.source == source) return
+        val change = io.github.mkdevtests.umbra.nas.withRole(source, others, share, sub, role, settings.settings.value.sections, siblings) ?: return
+        val before = settings.settings.value.sections
+        if (change.sections != before) {
+            settings.update { it.copy(documentaryFolders = change.sections.documentaries, spectacleFolders = change.sections.spectacles, concertFolders = change.sections.concerts) }
+        }
+        if (change.source == source) {
+            // Spectacles and concerts are read as films, their artist helping TMDB: analysed again.
+            if (change.sections.spectacles != before.spectacles || change.sections.concerts != before.concerts) library.onSourcesChanged()
+            return
+        }
         saveSource(change.source, NasClient.of(change.source))
         when (role) {
             io.github.mkdevtests.umbra.nas.FolderRole.Off, io.github.mkdevtests.umbra.nas.FolderRole.Personal -> library.onFolderExcluded()

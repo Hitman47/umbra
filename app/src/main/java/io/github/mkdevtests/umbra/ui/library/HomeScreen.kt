@@ -1,5 +1,7 @@
 package io.github.mkdevtests.umbra.ui.library
 
+import io.github.mkdevtests.umbra.library.byArtist
+import io.github.mkdevtests.umbra.library.splitSections
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.derivedStateOf
 import io.github.mkdevtests.umbra.ui.theme.refocusIf
@@ -103,6 +105,8 @@ enum class HomeTab(val label: String, val icon: ImageVector, val inBar: Boolean 
     Movies("Films", NyxaraIcons.Movie),
     Shows("Séries", NyxaraIcons.Tv),
     Docs("Docs", NyxaraIcons.Explore),
+    Spectacles("Spectacles", NyxaraIcons.Mic),
+    Concerts("Concerts", NyxaraIcons.Music),
     // Reached from the icons at the top on a phone: the bar keeps five tabs.
     Search("Recherche", NyxaraIcons.Search, inBar = false),
     Folders("Dossiers", NyxaraIcons.Folder, inBar = false),
@@ -111,9 +115,13 @@ enum class HomeTab(val label: String, val icon: ImageVector, val inBar: Boolean 
 
 /** The tabs of the bar (a phone) or the rail (a tablet, which has room for all); Docs once its folders are chosen. */
 /** [perso]: the owner's profile only has the Perso tab. */
-private fun tabsOf(wide: Boolean, documentaries: Boolean, profile: io.github.mkdevtests.umbra.profile.Profile) =
+private fun tabsOf(wide: Boolean, sections: io.github.mkdevtests.umbra.nas.Sections, profile: io.github.mkdevtests.umbra.profile.Profile) =
     HomeTab.entries.filter {
-        (wide || it.inBar) && (documentaries || it != HomeTab.Docs) && (profile.isMain || it != HomeTab.Perso) &&
+        (wide || it.inBar) && (profile.isMain || it != HomeTab.Perso) &&
+            // A section's tab once it has folders.
+            (sections.documentaries.isNotEmpty() || it != HomeTab.Docs) &&
+            (sections.spectacles.isNotEmpty() || it != HomeTab.Spectacles) &&
+            (sections.concerts.isNotEmpty() || it != HomeTab.Concerts) &&
             // A child's profile: the titles for its age, not the NAS's folders.
             (!profile.child || it != HomeTab.Folders)
     }
@@ -138,7 +146,7 @@ fun HomeScreen(
 ) {
     val settingsStore = (androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).settings
     val settings by settingsStore.settings.collectAsState()
-    val documentaries = settings.documentaryFolders.isNotEmpty()
+    val sections = settings.sections
     val profile = (androidx.compose.ui.platform.LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp).profile
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
@@ -146,7 +154,7 @@ fun HomeScreen(
             HomeContent(
                 libraryViewModel, browserViewModel, updater, tab, wide,
                 TitleLinks(onOpenMovie, onOpenShow, onOpenSaga, onOpenUniverse, onOpenRemote), onOpenShortcut, onPickLocalFile, onOpenSettings, modifier,
-                documentaryFolders = settings.documentaryFolders,
+                sections = sections,
                 onTabChange = onTabChange,
                 onOpenShelf = onOpenShelf,
             )
@@ -155,7 +163,7 @@ fun HomeScreen(
             Row(modifier = Modifier.fillMaxSize()) {
                 NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     Spacer(modifier = Modifier.size(12.dp))
-                    tabsOf(wide = true, documentaries, profile).forEach { entry ->
+                    tabsOf(wide = true, sections, profile).forEach { entry ->
                         NavigationRailItem(
                             modifier = Modifier.focusRing(),
                             selected = entry == tab,
@@ -181,7 +189,7 @@ fun HomeScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 content(Modifier.weight(1f))
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    tabsOf(wide = false, documentaries, profile).forEach { entry ->
+                    tabsOf(wide = false, sections, profile).forEach { entry ->
                         NavigationBarItem(
                             modifier = Modifier.focusRing(),
                             selected = entry == tab,
@@ -209,7 +217,7 @@ private fun HomeContent(
     onPickLocalFile: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier,
-    documentaryFolders: List<String>,
+    sections: io.github.mkdevtests.umbra.nas.Sections,
     onTabChange: (HomeTab) -> Unit,
     onOpenShelf: (String) -> Unit,
 ) {
@@ -250,7 +258,10 @@ private fun HomeContent(
     // Hidden titles stay out of every list; the search finds them with its "Masqués" filter.
     val library = remember(reachable, hidden) { reachable.without(hidden) }
     // Documentaries leave Films and Séries for their own tab.
-    val (documentaries, titles) = remember(library, documentaryFolders) { library.splitDocumentaries(documentaryFolders) }
+    // Documentaries, spectacles and concerts leave Films and Séries for their own tabs.
+    val split = remember(library, sections) { library.splitSections(sections) }
+    val documentaries = split.documentaries
+    val titles = split.rest
     val scan by libraryViewModel.scan.collectAsState()
     val history by libraryViewModel.history.collectAsState()
     val scanning = if (scan.running) "Analyse de la bibliothèque…" else null
@@ -336,6 +347,8 @@ private fun HomeContent(
             HomeTab.Movies -> MovieGrid(titles, history, scanning ?: "Aucun film trouvé.", links, menu)
             HomeTab.Shows -> ShowGrid(titles.shows, history, scanning ?: "Aucune série trouvée.", onOpenShow, menu)
             HomeTab.Docs -> DocumentaryGrid(documentaries, history, links, menu)
+            HomeTab.Spectacles -> SectionGrid(split.spectacles, sections.spectacles, "spectacle", "Aucun spectacle dans les dossiers choisis (Réglages › Dossiers suivis).", history, links, menu)
+            HomeTab.Concerts -> SectionGrid(split.concerts, sections.concerts, "concert", "Aucun concert dans les dossiers choisis (Réglages › Dossiers suivis).", history, links, menu)
             HomeTab.Folders -> {
                 val art by libraryViewModel.localArt.collectAsState()
                 val context = androidx.compose.ui.platform.LocalContext.current
@@ -741,6 +754,76 @@ private fun ShowGrid(shows: List<Show>, history: Map<String, Progress>, emptyTex
             }
         },
     )
+}
+
+/** Key prefix of an artist's card in Spectacles and Concerts: "artist:Florence Foresti". */
+private const val ARTIST = "artist:"
+
+/**
+ * The Spectacles or Concerts tab: an artist with several titles is one card
+ * (a folder per artist, or files named "Artiste - Titre"), opened in place;
+ * the other titles on their own.
+ */
+@Composable
+private fun SectionGrid(
+    section: Library,
+    roots: List<String>,
+    noun: String,
+    emptyText: String,
+    history: Map<String, Progress>,
+    links: TitleLinks,
+    menu: (TitleTarget) -> Unit,
+) {
+    var artist by rememberSaveable(noun) { mutableStateOf<String?>(null) }
+    androidx.activity.compose.BackHandler(enabled = artist != null) { artist = null }
+    val groups = remember(section, roots) { GridMemo.of("artists:$noun", section, roots) { byArtist(section.movies, { it.file }, roots) } }
+    val items = remember(groups, history, artist) {
+        val chosen = artist
+        if (chosen != null) {
+            groups[chosen].orEmpty().map { movieItem(it, history) }
+        } else {
+            val cards = groups.flatMap { (name, movies) ->
+                if (name == null || movies.size < 2) {
+                    movies.map { movieItem(it, history) }
+                } else {
+                    val seen = movies.count { history[it.file]?.watched == true }
+                    listOf(
+                        PosterItem(
+                            ARTIST + name, name, movies.mapNotNull { it.year }.maxOrNull(), movies.firstNotNullOfOrNull { it.poster },
+                            subtitle = "${movies.size} ${noun}s",
+                            badge = if (seen == movies.size) "✓ Vu" else if (seen > 0) "$seen/${movies.size}" else null,
+                            added = movies.maxOf { it.modified },
+                            genres = movies.flatMap { it.genres }.distinct(),
+                            watched = seen == movies.size,
+                        ),
+                    )
+                }
+            }
+            // Shows in these folders (rare) stay reachable.
+            cards + showItems(section.shows, history)
+        }
+    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        artist?.let { name ->
+            Row(modifier = Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { artist = null }, modifier = Modifier.focusRing(CircleShape)) { Icon(NyxaraIcons.Back, contentDescription = "Tous les ${noun}s") }
+                Text(name, style = MaterialTheme.typography.titleLarge)
+            }
+        }
+        PosterGrid(
+            items = items,
+            emptyText = emptyText,
+            onClick = { key ->
+                when {
+                    key.startsWith(ARTIST) -> artist = key.removePrefix(ARTIST)
+                    items.firstOrNull { it.key == key }?.isShow == true -> links.onOpenShow(key)
+                    else -> links.onOpenMovie(key)
+                }
+            },
+            noun = noun,
+            onLongClick = { item -> if (!item.key.startsWith(ARTIST)) menu(TitleTarget(item.key, item.isShow)) },
+        )
+    }
 }
 
 /** The Docs tab: the films and shows of the documentary folders, apart from the rest. */

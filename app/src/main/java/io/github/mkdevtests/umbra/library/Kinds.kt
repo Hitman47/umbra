@@ -30,3 +30,13 @@ fun Library.splitDocumentaries(folders: List<String>): Pair<Library, Library> {
     val (docShows, shows) = shows.partition { it.isDocumentary(folders) }
     return copy(movies = docMovies, shows = docShows) to copy(movies = movies, shows = shows)
 }
+
+/** The library split by [sections]: each section's titles, and the rest (Films and Séries). */
+data class SectionSplit(val documentaries: Library, val spectacles: Library, val concerts: Library, val rest: Library)
+
+fun Library.splitSections(sections: io.github.mkdevtests.umbra.nas.Sections): SectionSplit {
+    val (documentaries, others) = splitDocumentaries(sections.documentaries)
+    val (spectacles, withoutSpectacles) = others.splitDocumentaries(sections.spectacles)
+    val (concerts, rest) = withoutSpectacles.splitDocumentaries(sections.concerts)
+    return SectionSplit(documentaries, spectacles, concerts, rest)
+}

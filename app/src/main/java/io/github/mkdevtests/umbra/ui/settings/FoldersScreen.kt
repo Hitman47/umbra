@@ -42,7 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mkdevtests.umbra.browse.BrowserViewModel
 import io.github.mkdevtests.umbra.nas.FolderRole
-import io.github.mkdevtests.umbra.nas.looksLikeDocumentaries
+import io.github.mkdevtests.umbra.nas.sectionOfName
 import io.github.mkdevtests.umbra.nas.roleOf
 import io.github.mkdevtests.umbra.nas.within
 import io.github.mkdevtests.umbra.nas.NasSource
@@ -74,7 +74,7 @@ private fun keyOf(share: String, sub: String) = if (sub.isEmpty()) share else "$
 fun FoldersScreen(source: NasSource, viewModel: BrowserViewModel, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as io.github.mkdevtests.umbra.NyxaraApp
     val settings by app.settings.settings.collectAsState()
-    val documentaries = settings.documentaryFolders
+    val sections = settings.sections
     val sources by viewModel.sourceList.collectAsState()
     val current = sources.firstOrNull { it.id == source.id } ?: source
     val scope = rememberCoroutineScope()
@@ -125,11 +125,11 @@ fun FoldersScreen(source: NasSource, viewModel: BrowserViewModel, onBack: () -> 
 
     val rows = buildList {
         fun visit(share: String, sub: String, name: String, depth: Int) {
-            val role = roleOf(current, share, sub, documentaries)
+            val role = roleOf(current, share, sub, sections)
             val followed = current.shares.any { it.equals(share, ignoreCase = true) }
-            val canOpen = role == FolderRole.Library || role == FolderRole.Documentaries || !followed
+            val canOpen = role == FolderRole.Library || role in io.github.mkdevtests.umbra.nas.Sections.SECTION_ROLES || !followed
             val path = pathOf(share, sub)
-            val inDocs = path != null && documentaries.any { path.within(it) && !path.equals(it, ignoreCase = true) }
+            val inDocs = path != null && sections.all.any { path.within(it) && !path.equals(it, ignoreCase = true) }
             add(FolderRow(share, sub, name, depth, role, canOpen, inDocs))
             if (canOpen && keyOf(share, sub) in expanded) {
                 children[keyOf(share, sub)]?.forEach { visit(share, if (sub.isEmpty()) it else "$sub\\$it", it, depth + 1) }
@@ -143,20 +143,21 @@ fun FoldersScreen(source: NasSource, viewModel: BrowserViewModel, onBack: () -> 
         listOf(share to "") + children[keyOf(share, "")].orEmpty().map { share to it }
     }.firstOrNull { (share, sub) ->
         val name = if (sub.isEmpty()) share else sub
-        looksLikeDocumentaries(name) && keyOf(share, sub) !in dismissed &&
-            roleOf(current, share, sub, documentaries).let { it != FolderRole.Documentaries && it != FolderRole.Personal }
+        sectionOfName(name) != null && keyOf(share, sub) !in dismissed &&
+            roleOf(current, share, sub, sections).let { it != sectionOfName(name) && it != FolderRole.Personal }
     }
 
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
         ScreenTitle("Dossiers suivis · ${current.label}", onBack)
         Text(
-            "Chaque dossier a un rôle : Bibliothèque (Films et Séries), Documentaires (onglet Docs), Perso (onglet Perso) ou Non suivi. " +
+            "Chaque dossier a un rôle : Bibliothèque (Films et Séries), Documentaires, Spectacles ou Concerts (un onglet chacun), Perso (onglet Perso) ou Non suivi. " +
                 "Ses sous-dossiers le suivent. Touche un dossier pour voir ce qu'il contient, même dans un partage non suivi.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
         spotted?.let { (share, sub) ->
+            val spottedRole = sectionOfName(if (sub.isEmpty()) share else sub) ?: FolderRole.Documentaries
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(14.dp))
@@ -164,12 +165,12 @@ fun FoldersScreen(source: NasSource, viewModel: BrowserViewModel, onBack: () -> 
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "« ${if (sub.isEmpty()) share else "$share › $sub"} » ressemble à des documentaires : le classer en Documentaires ?",
+                    "« ${if (sub.isEmpty()) share else "$share › $sub"} » ressemble à des ${spottedRole.label.lowercase()} : le classer en ${spottedRole.label} ?",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { dismissed = dismissed + keyOf(share, sub) }) { Text("Ignorer") }
-                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { setRole(share, sub, FolderRole.Documentaries) }) { Text("Classer") }
+                TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = { setRole(share, sub, spottedRole) }) { Text("Classer") }
             }
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -240,7 +241,7 @@ private fun RolePicker(row: FolderRow, onPick: (FolderRole) -> Unit) {
                     text = {
                         Column {
                             Text(role.label)
-                            if (!allowed) Text("Dans un dossier de documentaires", style = MaterialTheme.typography.bodySmall)
+                            if (!allowed) Text("Dans un dossier Documentaires, Spectacles ou Concerts", style = MaterialTheme.typography.bodySmall)
                         }
                     },
                     onClick = {

@@ -52,6 +52,9 @@ data class Settings(
     val onlineSubtitleLanguages: List<String> = listOf("fr", "en"),
     /** Folders of documentaries (app paths): their titles leave Films and Séries for Documentaires. */
     val documentaryFolders: List<String> = emptyList(),
+    /** Folders of the Spectacles and Concerts tabs (app paths). */
+    val spectacleFolders: List<String> = emptyList(),
+    val concertFolders: List<String> = emptyList(),
     /** The titles of a NAS that doesn't answer leave the lists (downloaded ones stay). */
     val hideUnavailable: Boolean = false,
     /** Every card's size against the usual one (0.8 to 1.3). */
@@ -64,7 +67,10 @@ data class Settings(
     val strongFocus: Boolean = true,
     /** TV: HDR drawn by mpv's full renderer, never sent straight to the screen (if the direct way misbehaves). */
     val fullRender: Boolean = false,
-)
+) {
+    /** The folders apart from Films and Séries, each with its tab. */
+    val sections get() = io.github.mkdevtests.umbra.nas.Sections(documentaryFolders, spectacleFolders, concertFolders)
+}
 
 
 /** User preferences, kept in SharedPreferences and observed by the screens. */
@@ -100,6 +106,8 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_ANIME_UPSCALE, updated.animeUpscale)
             putBoolean(KEY_SCAN_AWAY, updated.scanAway)
             putString(KEY_DOCUMENTARIES, updated.documentaryFolders.joinToString("\n"))
+            putString(KEY_SPECTACLES, updated.spectacleFolders.joinToString("\n"))
+            putString(KEY_CONCERTS, updated.concertFolders.joinToString("\n"))
             putBoolean(KEY_HIDE_UNAVAILABLE, updated.hideUnavailable)
             putFloat(KEY_CARD_SCALE, updated.cardScale)
             putBoolean(KEY_PASSTHROUGH, updated.audioPassthrough)
@@ -138,6 +146,8 @@ class SettingsStore(context: Context) {
             animeUpscale = prefs.getBoolean(KEY_ANIME_UPSCALE, defaults.animeUpscale),
             scanAway = prefs.getBoolean(KEY_SCAN_AWAY, defaults.scanAway),
             documentaryFolders = prefs.getString(KEY_DOCUMENTARIES, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
+            spectacleFolders = prefs.getString(KEY_SPECTACLES, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
+            concertFolders = prefs.getString(KEY_CONCERTS, null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
             hideUnavailable = prefs.getBoolean(KEY_HIDE_UNAVAILABLE, defaults.hideUnavailable),
             cardScale = prefs.getFloat(KEY_CARD_SCALE, defaults.cardScale).coerceIn(0.8f, 1.3f),
             audioPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, defaults.audioPassthrough),
@@ -164,6 +174,8 @@ class SettingsStore(context: Context) {
         private const val KEY_ANIME_UPSCALE = "anime_upscale"
         private const val KEY_SCAN_AWAY = "scan_away"
         private const val KEY_DOCUMENTARIES = "documentary_folders"
+        private const val KEY_SPECTACLES = "spectacle_folders"
+        private const val KEY_CONCERTS = "concert_folders"
         private const val KEY_HIDE_UNAVAILABLE = "hide_unavailable"
         const val KEY_CARD_SCALE = "card_scale"
         const val KEY_PASSTHROUGH = "audio_passthrough"

@@ -77,6 +77,8 @@ class LibraryScanner(
     private val numberings: NumberingCache? = null,
     /** In the background (the launch's scan): fewer things at once, the screens stay smooth. */
     gentle: Boolean = false,
+    /** The Spectacles and Concerts folders: their videos are films, looked up with their artist. */
+    private val sectionRoots: List<String> = emptyList(),
     private val onProgress: (String) -> Unit,
 ) {
     /** Parallel TMDB calls: their latency overlaps without hitting the rate limit. */
@@ -295,6 +297,8 @@ class LibraryScanner(
 
     /** The episode a video is, or null for a film. */
     private fun episodeOf(video: VideoFile): EpisodeFile? {
+        // A spectacle in two parts is not a show.
+        if (sectionRoots.any { video.entry.path.within(it) }) return null
         val folderSeason = video.folders.lastOrNull()?.let(::parseSeasonFolder)
         if (folderSeason != null) seasonFolderEpisode(video, folderSeason)?.let { return it }
         val name = parseEpisodeName(video.entry.name, inSeasonFolder = folderSeason != null) ?: return null
@@ -344,7 +348,7 @@ class LibraryScanner(
         val names = files.associateWith(::movieName)
         // One lookup per title, even when the same film is there twice.
         val groups = files.groupBy { file ->
-            names.getValue(file).let { it.imdbId ?: it.tmdbId?.let { id -> "tmdb:$id" } ?: "${normalizeTitle(it.title)}|${it.year}" }
+            names.getValue(file).let { it.imdbId ?: it.tmdbId?.let { id -> "tmdb:$id" } ?: "${artist(file.entry.path).orEmpty()}|${normalizeTitle(it.title)}|${it.year}" }
         }.values.toList()
         val movies = forEachParallel(groups, "Films") { group ->
             val name = names.getValue(group.first())
@@ -356,7 +360,7 @@ class LibraryScanner(
                 ?: lookup("film ${group.first().entry.name}") {
                     val id = name.tmdbId
                         ?: name.imdbId?.let { tmdb.movieForImdb(it) }
-                        ?: tmdb.findMovie(searchQueries(name), name.year)
+                        ?: tmdb.findMovie(artistQueries(artist(group.first().entry.path), name) + searchQueries(name), name.year)
                     id?.let { tmdb.movie(it).toMovie(name) }
                 }
                 ?: Movie(file = "", fileSize = 0, title = name.title, year = name.year)
@@ -364,7 +368,7 @@ class LibraryScanner(
         }.flatten()
         // Several copies of a film (1080p and 4K, or in two genre folders): keep the biggest.
         return movies
-            .groupBy { it.tmdbId?.toString() ?: "${normalizeTitle(it.title)}|${it.year}" }
+            .groupBy { it.tmdbId?.toString() ?: "${artist(it.file).orEmpty()}|${normalizeTitle(it.title)}|${it.year}" }
             .map { (_, copies) ->
                 val kept = copies.maxBy { it.fileSize }
                 kept.copy(
@@ -661,6 +665,13 @@ class LibraryScanner(
         if (unnumbered.count { it.isLetter() } >= 2) add(unnumbered)
         if (" - " in name.title) addAll(name.title.split(" - ").map { it.trim() }.filter { part -> part.count { it.isLetter() } >= 2 })
     }
+
+    /** The artist of a spectacle or a concert (see [artistOf]); null elsewhere. */
+    private fun artist(path: String): String? = if (sectionRoots.isEmpty()) null else artistOf(path, sectionRoots)
+
+    /** "Artiste Titre" first: TMDB names many spectacles and concerts after both. */
+    private fun artistQueries(artist: String?, name: ParsedName): List<String> =
+        if (artist == null || normalizeTitle(name.title).contains(normalizeTitle(artist))) emptyList() else listOf("$artist ${name.title}")
 
     private fun list(path: String) = nas.list(path)
 

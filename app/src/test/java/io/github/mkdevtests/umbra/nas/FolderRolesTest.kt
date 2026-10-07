@@ -58,3 +58,26 @@ class FolderRolesTest {
         assertEquals(setOf("Z2\\Akira.mkv"), library.unavailableKeys(unavailable))
     }
 }
+
+class SectionRolesTest {
+    @Test
+    fun theNamesOfSections() {
+        org.junit.Assert.assertEquals(FolderRole.Spectacles, sectionOfName("Spectacles"))
+        org.junit.Assert.assertEquals(FolderRole.Spectacles, sectionOfName("Stand-up"))
+        org.junit.Assert.assertEquals(FolderRole.Spectacles, sectionOfName("One Man Show"))
+        org.junit.Assert.assertEquals(FolderRole.Concerts, sectionOfName("Concerts"))
+        org.junit.Assert.assertEquals(FolderRole.Documentaries, sectionOfName("Documentaires"))
+        org.junit.Assert.assertEquals(null, sectionOfName("Films"))
+    }
+
+    @Test
+    fun aSpectaclesFolderTakesItsRole() {
+        val nas = NasSource("nas", listOf("Videos"), id = "a")
+        val change = withRole(nas, emptyList(), "Videos", "Spectacles", FolderRole.Spectacles, Sections())!!
+        org.junit.Assert.assertEquals(listOf("Videos\\Spectacles"), change.sections.spectacles)
+        org.junit.Assert.assertEquals(FolderRole.Spectacles, roleOf(change.source, "Videos", "Spectacles\\Artiste", change.sections))
+        // Back to the library: out of the section.
+        val back = withRole(change.source, emptyList(), "Videos", "Spectacles", FolderRole.Library, change.sections)!!
+        org.junit.Assert.assertEquals(emptyList<String>(), back.sections.spectacles)
+    }
+}
