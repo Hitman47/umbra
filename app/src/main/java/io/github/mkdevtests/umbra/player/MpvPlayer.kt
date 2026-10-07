@@ -509,6 +509,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         runCatching {
             val target = when {
                 !isHdr() -> vo
+                settings.fullRender -> VO
                 readTracks().any { it.type == "sub" && it.selected && it.codec?.lowercase() in IMAGE_SUBTITLES } -> VO
                 else -> DIRECT
             }

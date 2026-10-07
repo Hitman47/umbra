@@ -1,5 +1,8 @@
 package io.github.mkdevtests.umbra.ui.settings
 
+import io.github.mkdevtests.umbra.NyxaraApp
+import io.github.mkdevtests.umbra.support.ProblemReport
+import io.github.mkdevtests.umbra.ui.theme.isTv
 import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.mkdevtests.umbra.ui.theme.focusRing
 import io.github.mkdevtests.umbra.settings.hostOf
@@ -304,6 +307,11 @@ fun SettingsScreen(
                                     ) {
                                         Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.audioPassthrough, onCheckedChange = { on -> store.update { it.copy(audioPassthrough = on) } })
                                     }
+                                    if (isTv()) {
+                                        Item("Rendu complet pour le HDR (TV)", "Si l'image HDR ou Dolby Vision s'affiche mal : Nyxara la dessine lui-même au lieu de l'envoyer telle quelle à la TV. Plus lourd.") {
+                                            Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.fullRender, onCheckedChange = { on -> store.update { it.copy(fullRender = on) } })
+                                        }
+                                    }
                                     Item("Mode nuit", "Dialogues plus forts, explosions plus douces, à chaque lecture. Aussi dans le lecteur : Audio et sous-titres.") {
                                         Switch(modifier = Modifier.focusRing(RoundedCornerShape(50)), checked = settings.nightAudio, onCheckedChange = { on -> store.update { it.copy(nightAudio = on) } })
                                     }
@@ -379,6 +387,29 @@ fun SettingsScreen(
                                     }
                                     Item("Mesures de lecture", "Ouverture, sauts, coupures et débit de chaque lecture, à copier pour comparer.") {
                                         TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = onOpenStats) { Text("Voir ›") }
+                                    }
+                                    val context = LocalContext.current
+                                    var report by remember { mutableStateOf<String?>(null) }
+                                    Item("Signaler un problème", report ?: "Un rapport à m'envoyer : appareil, état des NAS, dernières lectures et journal de Nyxara. Sans mot de passe ni clé.") {
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = {
+                                            scope.launch {
+                                                val text = ProblemReport.build(context.applicationContext as NyxaraApp)
+                                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Rapport Nyxara", text))
+                                                report = "Rapport copié (${text.lines().size} lignes) : colle-le dans un message."
+                                            }
+                                        }) { Text("Copier") }
+                                        TextButton(modifier = Modifier.focusRing(RoundedCornerShape(50)), onClick = {
+                                            scope.launch {
+                                                val text = ProblemReport.build(context.applicationContext as NyxaraApp)
+                                                val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                                                    .setType("text/plain")
+                                                    .putExtra(android.content.Intent.EXTRA_SUBJECT, "Rapport Nyxara")
+                                                    .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                                runCatching { context.startActivity(android.content.Intent.createChooser(send, "Envoyer le rapport")) }
+                                                    .onFailure { report = "Aucune appli pour l'envoyer ici : utilise Copier." }
+                                            }
+                                        }) { Text("Envoyer") }
                                     }
                                 }
 

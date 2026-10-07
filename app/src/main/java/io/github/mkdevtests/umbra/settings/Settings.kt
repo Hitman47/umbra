@@ -62,6 +62,8 @@ data class Settings(
     val uiScale: Float = 0f,
     /** On a TV: a thicker, brighter frame around what the remote is on. */
     val strongFocus: Boolean = true,
+    /** TV: HDR drawn by mpv's full renderer, never sent straight to the screen (if the direct way misbehaves). */
+    val fullRender: Boolean = false,
 )
 
 
@@ -103,6 +105,7 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_PASSTHROUGH, updated.audioPassthrough)
             putFloat(KEY_UI_SCALE, updated.uiScale)
             putBoolean(KEY_STRONG_FOCUS, updated.strongFocus)
+            putBoolean(KEY_FULL_RENDER, updated.fullRender)
         }
     }
 
@@ -140,6 +143,7 @@ class SettingsStore(context: Context) {
             audioPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, defaults.audioPassthrough),
             uiScale = prefs.getFloat(KEY_UI_SCALE, defaults.uiScale),
             strongFocus = prefs.getBoolean(KEY_STRONG_FOCUS, defaults.strongFocus),
+            fullRender = prefs.getBoolean(KEY_FULL_RENDER, defaults.fullRender),
         )
     }
 
@@ -165,6 +169,7 @@ class SettingsStore(context: Context) {
         const val KEY_PASSTHROUGH = "audio_passthrough"
         const val KEY_UI_SCALE = "ui_scale"
         const val KEY_STRONG_FOCUS = "strong_focus"
+        const val KEY_FULL_RENDER = "full_render"
         private const val NONE = "none"
     }
 }

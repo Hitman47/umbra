@@ -136,7 +136,7 @@ class BackupManager(private val app: NyxaraApp) {
 
         /** Settings that depend on the screen or the sound output, left as they are on the receiving device. */
         val DEVICE_KEYS = setOf(
-            SettingsStore.KEY_CARD_SCALE, SettingsStore.KEY_UI_SCALE, SettingsStore.KEY_STRONG_FOCUS, SettingsStore.KEY_PASSTHROUGH,
+            SettingsStore.KEY_CARD_SCALE, SettingsStore.KEY_UI_SCALE, SettingsStore.KEY_STRONG_FOCUS, SettingsStore.KEY_PASSTHROUGH, SettingsStore.KEY_FULL_RENDER,
         )
     }
 }
