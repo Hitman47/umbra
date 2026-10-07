@@ -55,7 +55,12 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
     /** The sources, for the screens that list them. */
     val sourceList: StateFlow<List<NasSource>> = _sourceList.asStateFlow()
 
-    val streamServer by lazy { LocalStreamServer.bound({ nas }, imageSecret()) }
+    val streamServer by lazy {
+        LocalStreamServer.bound({ nas }, imageSecret()).also {
+            it.lowMemory = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
+                getSystemService(android.app.ActivityManager::class.java)?.isLowRamDevice == true
+        }
+    }
 
     /** Part of the NAS images' URLs, the same at each launch so that their cache survives; never shared. */
     private fun imageSecret(): String {
@@ -146,6 +151,7 @@ class NyxaraApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        io.github.mkdevtests.umbra.support.ProblemReport.keepCrashes(this)
         nas = sources.load().takeIf { it.isNotEmpty() }?.let { NasRouter(it.map(NasClient::of)) }
         _sourceList.value = nas?.sources.orEmpty()
         LocalImages.url = { path -> streamServer.imageUrl(path) }

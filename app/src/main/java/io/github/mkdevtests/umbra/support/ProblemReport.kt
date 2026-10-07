@@ -32,6 +32,10 @@ object ProblemReport {
             app.nasMonitor.states.value.forEach { appendLine("- ${it.label} : ${if (it.online) "en ligne" else "injoignable"} depuis ${time.format(Date(it.since))}") }
             app.nasMonitor.history.value.takeLast(10).forEach { appendLine("  ${time.format(Date(it.at))} ${it.reason.label} : ${it.results.joinToString(", ")}") }
             appendLine()
+            appendLine("Derniers arrêts de Nyxara :")
+            append(exits(app, time))
+            crashFile(app).takeIf { it.exists() }?.let { appendLine("Dernière erreur :"); appendLine(it.readText().take(6_000)) }
+            appendLine()
             appendLine("Dernières lectures :")
             app.measures.measures.value.takeLast(10).forEach { appendLine("- ${it.line()}") }
             appendLine()
@@ -39,6 +43,58 @@ object ProblemReport {
             append(redacted(recentLog()))
         }
     }
+
+    private fun crashFile(app: android.content.Context) = java.io.File(app.filesDir, "last-crash.txt")
+
+    /** A crash of the app's own code: written down (with what was happening) before Android closes it, for the next report. */
+    fun keepCrashes(app: android.content.Context) {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val at = SimpleDateFormat("dd/MM HH:mm:ss", Locale.FRANCE).format(Date())
+                crashFile(app).writeText("$at, fil ${thread.name} :\n${redacted(error.stackTraceToString())}")
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
+    /**
+     * Why Android ended Nyxara the last times (Android 11 and later): a crash of
+     * the player's native code, the app frozen too long (ANR), memory taken
+     * back… with the start of the trace of a freeze.
+     */
+    private fun exits(app: android.content.Context, time: SimpleDateFormat): String = buildString {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            appendLine("(Android 10 : non disponible)")
+            return@buildString
+        }
+        val manager = app.getSystemService(android.app.ActivityManager::class.java) ?: return@buildString
+        val exits = runCatching { manager.getHistoricalProcessExitReasons(app.packageName, 0, 6) }.getOrDefault(emptyList())
+        if (exits.isEmpty()) appendLine("aucun")
+        exits.forEach { exit ->
+            appendLine("- ${time.format(Date(exit.timestamp))} : ${reason(exit.reason)}${exit.description?.let { " ($it)" } ?: ""} · mémoire ${exit.pss / 1024} Mo")
+            // An ANR's trace is text (a native crash's is binary: its description says enough).
+            if (exit.reason == android.app.ApplicationExitInfo.REASON_ANR) {
+                runCatching {
+                    exit.traceInputStream?.bufferedReader()?.use { reader -> reader.lineSequence().take(TRACE_LINES).forEach { appendLine("    $it") } }
+                }
+            }
+        }
+    }
+
+    private fun reason(code: Int): String = when (code) {
+        android.app.ApplicationExitInfo.REASON_ANR -> "bloqué (ANR)"
+        android.app.ApplicationExitInfo.REASON_CRASH -> "plantage (Java)"
+        android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "plantage (lecteur natif)"
+        android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "mémoire insuffisante"
+        android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "ressources excessives"
+        android.app.ApplicationExitInfo.REASON_EXIT_SELF -> "fermé par l'appli"
+        android.app.ApplicationExitInfo.REASON_USER_REQUESTED -> "arrêt demandé"
+        android.app.ApplicationExitInfo.REASON_SIGNALED -> "tué par le système"
+        else -> "autre ($code)"
+    }
+
+    private const val TRACE_LINES = 80
 
     /** This process's last log lines (an app reads its own without any permission). */
     private fun recentLog(): String = runCatching {

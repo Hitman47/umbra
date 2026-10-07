@@ -217,8 +217,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     /** Plays [url] from [start] seconds with extra subtitle files: now, or as soon as a Surface is available. */
     fun play(url: String, subtitles: List<String> = emptyList(), start: Double = 0.0, online: List<OnlineTrack> = emptyList(), remote: Boolean = false) {
         // Through Tailscale: a deeper cache, and a few seconds stored before the picture starts, against the network's ups and downs.
-        mpv.setPropertyString("demuxer-max-bytes", if (remote) "256MiB" else "64MiB")
-        mpv.setPropertyString("demuxer-max-back-bytes", if (remote) "64MiB" else "32MiB")
+        // A TV has little memory for the app: a smaller cache there (the NAS answers fast at home).
+        mpv.setPropertyString("demuxer-max-bytes", if (remote) (if (tv) "128MiB" else "256MiB") else if (tv) "32MiB" else "64MiB")
+        mpv.setPropertyString("demuxer-max-back-bytes", if (remote) (if (tv) "32MiB" else "64MiB") else if (tv) "16MiB" else "32MiB")
         mpv.setPropertyString("cache-pause-initial", if (remote) "yes" else "no")
         mpv.setPropertyString("cache-pause-wait", if (remote) "3" else "1")
         externalSubtitles = subtitles
@@ -258,19 +259,65 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         }
     }
 
-    fun togglePause() = mpv.command(arrayOf("cycle", "pause"))
+    /**
+     * The commands from the screen run on their own thread, one after the
+     * other: mpv answers a command once its core is free, and while it waits
+     * on the network (a seek through the NAS) the screen would freeze, until
+     * Android closes the player.
+     */
+    private val commands = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "mpv-commands") }
+    @Volatile private var released = false
 
-    fun pause() = mpv.setPropertyBoolean("pause", true)
-
-    /** To the keyframe nearest [seconds]: no decoding from the keyframe up to the exact time, which costs seconds in software decoding. */
-    fun seekTo(seconds: Double) {
-        markSeek()
-        mpv.command(arrayOf("seek", seconds.toString(), "absolute+keyframes"))
+    private fun async(block: () -> Unit) {
+        if (released) return
+        runCatching { commands.execute { if (!released) runCatching(block).onFailure { Log.w(TAG, "mpv command", it) } } }
     }
 
-    fun seekBy(seconds: Int) {
+    fun togglePause() = async { mpv.command(arrayOf("cycle", "pause")) }
+
+    fun pause() = async { mpv.setPropertyBoolean("pause", true) }
+
+    // Seeks: one at a time, the next once the picture moves again; meanwhile only the last asked waits.
+    private val seekLock = Any()
+    private var seeking = false
+    private var pendingSeek: Double? = null
+
+    /** Where the seeks asked for lead, until the picture is there; null when none is under way. */
+    @Volatile private var seekTarget: Double? = null
+    private val seekTimeout = Runnable { seekDone() }
+
+    /** To the keyframe nearest [seconds]: no decoding from the keyframe up to the exact time, which costs seconds in software decoding. */
+    fun seekTo(seconds: Double) = requestSeek(seconds.coerceAtLeast(0.0))
+
+    /** [seconds] from where the seeks under way lead (presses in a row add up), else from the position. */
+    fun seekBy(seconds: Int) = requestSeek(((seekTarget ?: _position.value) + seconds).coerceIn(0.0, _duration.value.takeIf { it > 0 } ?: Double.MAX_VALUE))
+
+    private fun requestSeek(target: Double) {
+        synchronized(seekLock) {
+            seekTarget = target
+            pendingSeek = target
+            if (!seeking) startSeek()
+        }
+    }
+
+    private fun startSeek() {
+        val target = pendingSeek ?: return
+        pendingSeek = null
+        seeking = true
         markSeek()
-        mpv.command(arrayOf("seek", seconds.toString(), "relative"))
+        async { mpv.command(arrayOf("seek", target.toString(), "absolute+keyframes")) }
+        // A seek mpv never finishes (file ended, error) must not block the next ones.
+        main.removeCallbacks(seekTimeout)
+        main.postDelayed(seekTimeout, SEEK_TIMEOUT_MS)
+    }
+
+    /** The picture moves again: the next seek asked meanwhile, if any. */
+    private fun seekDone() {
+        synchronized(seekLock) {
+            main.removeCallbacks(seekTimeout)
+            seeking = false
+            if (pendingSeek != null) startSeek() else seekTarget = null
+        }
     }
 
     /** A seek made while another one is under way is timed from the first. */
@@ -307,7 +354,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
     fun selectSubtitles(id: Int) {
         mpv.setPropertyString("sid", if (id == NO_SUBTITLES) "no" else id.toString())
         // Picture subtitles need mpv's renderer; text ones can be shown over the TV's own picture.
-        if (tv) main.post { adaptRender() }
+        if (tv) async { adaptRender() }
     }
 
     /** Subtitles later (positive) or earlier, in seconds; kept for the next files. */
@@ -405,8 +452,14 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
     fun release() {
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(seekTimeout)
         mpv.removeObserver(this)
-        mpv.destroy()
+        // After the commands still queued, off the screen's thread; nothing runs on mpv after it.
+        commands.execute {
+            released = true
+            mpv.destroy()
+        }
+        commands.shutdown()
     }
 
     // --- SurfaceHolder.Callback ---
@@ -549,6 +602,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
         when (eventId) {
             // Playback starts, or starts again after a seek: the picture moves.
             PLAYBACK_RESTART -> {
+                seekDone()
                 val now = SystemClock.elapsedRealtime()
                 if (openMs == null) {
                     openMs = now - loadAt
@@ -573,7 +627,7 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
             }
             START_FILE -> started = true
             // The picture's format is known: on a TV, the renderer it needs.
-            VIDEO_RECONFIG -> if (tv) main.post { adaptRender() }
+            VIDEO_RECONFIG -> if (tv) async { adaptRender() }
             MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
                 Log.i(TAG, "end of file")
                 // Ended before its first picture: it couldn't be played.
@@ -720,6 +774,9 @@ class MpvPlayer(context: Context, private val settings: Settings) : MPVLib.Event
 
         /** MPV_EVENT_PLAYBACK_RESTART in mpv's client.h. */
         const val PLAYBACK_RESTART = 21
+
+        /** A seek not finished after this: the next one goes anyway. */
+        const val SEEK_TIMEOUT_MS = 4_000L
 
         const val MIN_STALL_MS = 300L
 

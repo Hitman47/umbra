@@ -148,7 +148,14 @@ class LocalStreamServer(
     internal var forcedPlan: ReadPlan? = null
 
     /** Through Tailscale: bigger blocks, more of them at once. */
-    private fun plan(key: String): ReadPlan = forcedPlan ?: if (nas()?.hostOf(key.substringAfter("nfs:"))?.let(::isTailnet) == true) ReadPlan.REMOTE else ReadPlan.LOCAL
+    private fun plan(key: String): ReadPlan = forcedPlan ?: when {
+        nas()?.hostOf(key.substringAfter("nfs:"))?.let(::isTailnet) == true -> ReadPlan.REMOTE
+        lowMemory -> ReadPlan.SMALL
+        else -> ReadPlan.LOCAL
+    }
+
+    /** A TV, or a device with little memory for the app: less read ahead (see [ReadPlan.SMALL]). */
+    var lowMemory = false
 
     /** Closes the handles kept open, when the player goes away. */
     fun closeIdle() {
@@ -206,11 +213,11 @@ class LocalStreamServer(
         // The start read ahead (next episode): served from memory, the rest from the NAS.
         val head = heads[target.key]?.takeIf { start < it.size }
         val body = if (head == null) {
-            ReadAheadStream(file, target.pool, start, length, stat, plan(target.key))
+            current(target.key, ReadAheadStream(file, target.pool, start, length, stat, plan(target.key)))
         } else {
             val part = minOf(length, head.size - start).toInt()
             val rest = length - part
-            val tail = if (rest > 0) ReadAheadStream(file, target.pool, start + part, rest, stat, plan(target.key)) else ByteArray(0).inputStream().also { target.pool.release(file) }
+            val tail = if (rest > 0) current(target.key, ReadAheadStream(file, target.pool, start + part, rest, stat, plan(target.key))) else ByteArray(0).inputStream().also { target.pool.release(file) }
             java.io.SequenceInputStream(java.io.ByteArrayInputStream(head, start.toInt(), part), tail)
         }
         return newFixedLengthResponse(
@@ -226,6 +233,18 @@ class LocalStreamServer(
 
     private fun text(status: Response.Status, message: String) =
         newFixedLengthResponse(status, MIME_PLAINTEXT, message)
+
+    /**
+     * The stream of each file now being sent. The player asks for a new range
+     * at each seek and lets the previous one go: stopped at once here, its
+     * read-ahead freed, instead of piling up (seeks in a row) until memory runs out.
+     */
+    private val streaming = java.util.concurrent.ConcurrentHashMap<String, InputStream>()
+
+    private fun current(key: String, stream: InputStream): InputStream {
+        streaming.put(key, stream)?.close()
+        return stream
+    }
 
     companion object {
         private const val TAG = "LocalStreamServer"
@@ -351,6 +370,9 @@ data class ReadPlan(val block: Int, val parallel: Int) {
          */
         val LOCAL = ReadPlan(block = 2 shl 20, parallel = 4)
         val REMOTE = ReadPlan(block = 2 shl 20, parallel = 4)
+
+        /** A TV at home: 6 MiB ahead at most instead of 16 (its memory is short, the NAS near). */
+        val SMALL = ReadPlan(block = 1 shl 20, parallel = 3)
     }
 }
 
